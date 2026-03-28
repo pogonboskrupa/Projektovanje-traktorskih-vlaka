@@ -542,7 +542,7 @@ select:focus { outline:none; border-color:#3b82f6; }
     <button class="tbtn tbtn-gray" onclick="centerMap()">🎯 Centar</button>
     <!-- MENI DROPDOWN -->
     <div style="position:relative;display:inline-block;">
-      <button class="tbtn tbtn-gray" onclick="toggleMenuDropdown(event)" id="menu-btn">☰ Meni ▾</button>
+      <button class="tbtn tbtn-gray" ontouchstart="toggleMenuDropdown(event)" onclick="toggleMenuDropdown(event)" id="menu-btn">☰ Meni ▾</button>
       <div id="menu-dropdown" style="
         display:none;position:fixed;top:0;right:0;
         background:#16213e;border:1px solid #0f3460;border-radius:8px;
@@ -1414,14 +1414,16 @@ document.addEventListener('keydown', e => {
 
 // === MENI DROPDOWN ===
 function toggleMenuDropdown(e) {
-  if (e) e.stopPropagation();
+  if (e) { e.stopPropagation(); e.preventDefault(); }
   const dd = document.getElementById('menu-dropdown');
   if (dd.style.display === 'none') {
     const btn = document.getElementById('menu-btn');
     const r = btn.getBoundingClientRect();
     dd.style.top = (r.bottom + 4) + 'px';
     dd.style.right = (window.innerWidth - r.right) + 'px';
+    dd.style.pointerEvents = 'none';
     dd.style.display = 'block';
+    setTimeout(() => { dd.style.pointerEvents = ''; }, 400);
   } else {
     dd.style.display = 'none';
   }
