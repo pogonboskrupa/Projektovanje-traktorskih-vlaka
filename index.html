@@ -1051,8 +1051,7 @@ async function sbInitData() {
     sbLoadProj(),
     sbLoadVlake(),
     sbLoadLog(),
-    sbLoadTextLabelsDB(),
-    autoLoadGranice()
+    sbLoadTextLabelsDB()
   ]);
   sbLoadKolege();
   await sbLoadKolegeVlake();
@@ -2818,13 +2817,13 @@ function showToast(msg) {
 }
 
 // === AUTO-UČITAJ GRANICE.KML IZ SUPABASE STORAGE ===
-async function autoLoadGranice() {
+const GRANICE_URL = 'https://djguplhaayjvwmdlxevx.supabase.co/storage/v1/object/public/Granice%20odjela/GRANICE.KML';
+
+(async function autoLoadGranice() {
   try {
-    const { data, error } = await sb.storage
-      .from('Granice odjela')
-      .download('GRANICE.KML');
-    if (error) throw error;
-    const txt = await data.text();
+    const r = await fetch(GRANICE_URL);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const txt = await r.text();
     const col = '#22c55e';
     const doc = new DOMParser().parseFromString(txt, 'text/xml');
     const grp = pkml(doc, col);
@@ -2833,9 +2832,9 @@ async function autoLoadGranice() {
     rndKml();
     try { const b = grp.getBounds(); if (b.isValid()) map.fitBounds(b, { padding: [30, 30] }); } catch(x) {}
   } catch(e) {
-    console.warn('GRANICE.KML nije učitan iz Supabase Storage:', e.message);
+    console.warn('GRANICE.KML nije učitan:', e.message);
   }
-}
+})();
 </script>
 </body>
 </html>
