@@ -1403,8 +1403,15 @@ function toggleMenuDropdown(e) {
   if (dd.style.display === 'none') {
     const btn = document.getElementById('menu-btn');
     const r = btn.getBoundingClientRect();
+    const ddW = 220;
+    let left = r.left;
+    // Ne izlazi desno
+    if (left + ddW > window.innerWidth - 6) left = window.innerWidth - ddW - 6;
+    // Ne izlazi lijevo
+    if (left < 6) left = 6;
     dd.style.top = (r.bottom + 4) + 'px';
-    dd.style.right = (window.innerWidth - r.right) + 'px';
+    dd.style.left = left + 'px';
+    dd.style.right = 'auto';
     dd.style.pointerEvents = 'none';
     dd.style.display = 'block';
     setTimeout(() => { dd.style.pointerEvents = ''; }, 400);
