@@ -1101,6 +1101,7 @@ async function sbLoadVlake() {
     vlake.push(v);
   });
   rndList();
+  vlake.forEach((v, i) => updateVlakaLabel(i));
   const allPts = vlake.flatMap(v => v.pts.map(p => [p.la, p.lo]));
   if (allPts.length > 0) {
     try { map.fitBounds(L.latLngBounds(allPts), { padding: [30, 30] }); } catch(e) {}
@@ -1450,7 +1451,7 @@ function _stopAddLine(fromUser) {
   document.getElementById('banner').classList.remove('show');
   drawUndoStack = [];
   if (fromUser) {
-    if (actI !== null) sbFlushVlaka(actI);
+    if (actI !== null) { updateVlakaLabel(actI); sbFlushVlaka(actI); }
     if (bufLayers.length > 0) drawBuffers();
     setActiveTool('select');
   }
@@ -1484,7 +1485,7 @@ function _stopEdit(fromUser) {
   document.getElementById('merge-sec').style.display = 'none';
   if (snapRingMk) { map.removeLayer(snapRingMk); snapRingMk = null; }
   if (fromUser) {
-    if (actI !== null) sbFlushVlaka(actI);
+    if (actI !== null) { updateVlakaLabel(actI); sbFlushVlaka(actI); }
     if (bufLayers.length > 0) drawBuffers();
     rndList(); updOvl();
   }
@@ -1509,6 +1510,7 @@ function mtUndo() {
   const prev = drawUndoStack.pop();
   vlake[actI].pts = prev;
   syncPoly(actI);
+  updateVlakaLabel(actI);
   updOvl(); rndList();
   showToast('↩ Poništena zadnja tačka');
   // reset preview
@@ -1596,6 +1598,7 @@ function stopRec() {
   const b = document.getElementById('brec');
   b.textContent = '⏺ POČNI GPS SNIMANJE'; b.classList.remove('rec');
   document.getElementById('banner').classList.remove('show');
+  if (actI !== null) updateVlakaLabel(actI);
   if (bufLayers.length > 0) drawBuffers(); // refresh buffers after recording
 }
 
@@ -1725,6 +1728,7 @@ function addPt(i, la, lo, al) {
   v.pts.push({la, lo, al});
   v.poly.addLatLng([la, lo]);
   scheduleVlakaSave(i);
+  if (v.pts.length === 2) updateVlakaLabel(i);
   updBan(); updOvl(); rndList();
   // Only redraw buffers when not actively drawing (expensive per-point)
   if (bufLayers.length > 0 && activeTool !== 'addline' && activeTool !== 'addpoint' && !recOn) {
@@ -1798,6 +1802,7 @@ function dlV(i) {
   if (!confirm(`Obrisati vlaku ${vlake[i].nm}?`)) return;
   map.removeLayer(vlake[i].poly);
   vlake[i].wpts.forEach(m=>map.removeLayer(m));
+  if (vlake[i].labelMk) map.removeLayer(vlake[i].labelMk);
   sbDeleteVlaka(vlake[i].sbId);
   clearTimeout(_vlakaSaveTimers[i]);
   vlake.splice(i,1);
@@ -1809,6 +1814,23 @@ function dlV(i) {
   }
   stopRec();
   rndList(); updOvl();
+}
+
+// === VLAKA LABELE ===
+function updateVlakaLabel(i) {
+  const v = vlake[i];
+  if (!v) return;
+  if (v.labelMk) { map.removeLayer(v.labelMk); v.labelMk = null; }
+  if (!v.pts || v.pts.length < 2) return;
+  const p0 = v.pts[0], p1 = v.pts[1];
+  const bearing = Math.atan2(p1.lo - p0.lo, p1.la - p0.la) * 180 / Math.PI;
+  const icon = L.divIcon({
+    className: '',
+    iconSize: [0, 0],
+    iconAnchor: [3, 10],
+    html: `<div style="display:flex;align-items:center;gap:2px;background:rgba(15,23,42,0.82);border-left:3px solid ${v.color};color:#fff;font-size:11px;font-weight:bold;padding:2px 5px 2px 3px;border-radius:0 4px 4px 0;white-space:nowrap;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,0.65);font-family:Arial,sans-serif;">${v.nm}<span style="transform:rotate(${Math.round(bearing)}deg);display:inline-block;font-size:12px;line-height:1;margin-left:2px;">↑</span></div>`
+  });
+  v.labelMk = L.marker([p0.la, p0.lo], { icon, interactive: false, zIndexOffset: 500 }).addTo(map);
 }
 
 // === KML ===
@@ -1939,6 +1961,7 @@ function buildEditHandles(vi) {
     });
     mk.on('dragend', function(){
       scheduleVlakaSave(vi);
+      updateVlakaLabel(vi);
       rndList(); // full rebuild once drag is done
       if(bufLayers.length>0) drawBuffers();
     });
@@ -1996,6 +2019,7 @@ function deleteNode(vi, pi) {
   if (v.pts.length <= 2) { showToast('⚠ Vlaka mora imati najmanje 2 tačke!'); return; }
   v.pts.splice(pi, 1);
   syncPoly(vi);
+  updateVlakaLabel(vi);
   scheduleVlakaSave(vi);
   buildEditHandles(vi);
   updOvl(); rndList();
@@ -2124,10 +2148,12 @@ function doMerge(a,b){
   // Keep vlaka a, remove b
   va.pts=merged;
   syncPoly(a.vi);
+  updateVlakaLabel(a.vi);
   sbFlushVlaka(a.vi);
   // Remove vlaka b from map and array
   map.removeLayer(vb.poly);
   vb.wpts.forEach(m=>map.removeLayer(m));
+  if (vb.labelMk) map.removeLayer(vb.labelMk);
   sbDeleteVlaka(vb.sbId);
   vlake.splice(b.vi,1);
   // Fix actI: after splice, a.vi may have shifted if b.vi < a.vi
