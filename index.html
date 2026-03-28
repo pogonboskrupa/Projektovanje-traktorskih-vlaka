@@ -3,7 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Vlake">
+<meta name="theme-color" content="#16213e">
 <title>Traktorske Vlake</title>
+<link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
@@ -3212,6 +3218,62 @@ async function startOfflineDownload() {
     ? `Prekinuto. Preuzeto ${done} tile-ova.`
     : `✅ Gotovo! ${done - failed} tile-ova u cache-u.`;
   showCacheInfo();
+}
+
+// === PWA SERVICE WORKER ===
+(function registerSW() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('./sw.js').then(reg => {
+    // Provjeri odmah i periodično svakih 60 min
+    reg.update();
+    setInterval(() => reg.update(), 60 * 60 * 1000);
+
+    // Novi SW čeka → prikaži toast s dugmetom za reload
+    reg.addEventListener('updatefound', () => {
+      const newSW = reg.installing;
+      newSW.addEventListener('statechange', () => {
+        if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+          showUpdateToast();
+        }
+      });
+    });
+  }).catch(e => console.warn('SW registracija nije uspjela:', e));
+
+  // Kad SW preuzme kontrolu → reload da bude čista nova verzija
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) { refreshing = true; window.location.reload(); }
+  });
+})();
+
+function showUpdateToast() {
+  let t = document.getElementById('update-toast');
+  if (t) return;
+  t = document.createElement('div');
+  t.id = 'update-toast';
+  t.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+    background:#1e3a5f;border:1px solid #38bdf8;border-radius:12px;
+    padding:10px 16px;font-size:13px;color:#e2e8f0;z-index:99999;
+    display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,0.5);
+    white-space:nowrap;`;
+  t.innerHTML = `🔄 Nova verzija dostupna
+    <button onclick="applyUpdate()" style="background:#38bdf8;color:#0f172a;border:none;
+      border-radius:6px;padding:5px 12px;font-size:12px;font-weight:bold;cursor:pointer;">
+      Ažuriraj
+    </button>
+    <button onclick="this.parentElement.remove()" style="background:none;border:none;
+      color:#64748b;font-size:16px;cursor:pointer;padding:0 2px;">✕</button>`;
+  document.body.appendChild(t);
+}
+
+function applyUpdate() {
+  navigator.serviceWorker.ready.then(reg => {
+    if (reg.waiting) {
+      reg.waiting.postMessage('skipWaiting');
+    } else {
+      window.location.reload();
+    }
+  });
 }
 
 function showToast(msg) {
