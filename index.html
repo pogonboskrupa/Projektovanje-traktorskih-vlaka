@@ -792,6 +792,16 @@ select:focus { outline:none; border-color:#3b82f6; }
   <div class="print-mbox">
     <h3>🖨 Štampanje Karte</h3>
 
+    <div style="margin-bottom:12px;">
+      <div class="lbl" style="margin-bottom:6px;">📍 Odsjek / Odjel</div>
+      <select id="print-odjel" onchange="onPrintOdjelChange()"
+        style="width:100%;padding:8px 10px;background:#0f172a;border:1px solid #374151;
+               border-radius:5px;color:#eee;font-size:13px;">
+        <option value="">— Sve vlake (trenutni prikaz) —</option>
+      </select>
+      <div id="print-odjel-info" style="font-size:11px;color:#64748b;margin-top:4px;"></div>
+    </div>
+
     <div style="margin-bottom:10px;">
       <div class="lbl" style="margin-bottom:6px;">Format papira</div>
       <div style="display:flex;gap:6px;">
@@ -2787,7 +2797,35 @@ const PAPER = {
 };
 
 function showPrintModal() {
+  // Popuni dropdown odjela
+  const sel = document.getElementById('print-odjel');
+  sel.innerHTML = '<option value="">— Sve vlake (trenutni prikaz) —</option>';
+  graniceOdjeli.forEach((o, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = o.name;
+    sel.appendChild(opt);
+  });
   document.getElementById('print-modal').classList.add('show');
+  updatePrintInfo();
+}
+
+function onPrintOdjelChange() {
+  const sel = document.getElementById('print-odjel');
+  const info = document.getElementById('print-odjel-info');
+  const idx = sel.value;
+  if (idx === '') {
+    info.textContent = '';
+    return;
+  }
+  const o = graniceOdjeli[+idx];
+  if (!o) return;
+  // Izračunaj površinu bounds-a u ha
+  const sw = o.bounds.getSouthWest(), ne = o.bounds.getNorthEast();
+  const wM = Math.abs(ne.lng - sw.lng) * 111320 * Math.cos(((ne.lat+sw.lat)/2) * Math.PI/180);
+  const hM = Math.abs(ne.lat - sw.lat) * 111320;
+  const ha = Math.round(wM * hM / 10000);
+  info.textContent = `Dimenzije odjela: ≈ ${Math.round(wM)} m × ${Math.round(hM)} m · ${ha} ha`;
   updatePrintInfo();
 }
 function closePrintModal() {
@@ -2832,11 +2870,14 @@ function updatePrintInfo() {
   const realH_km = (realH_m / 1000).toFixed(2);
   const areaHa = ((realW_m * realH_m) / 10000).toFixed(0);
 
+  const odjelIdx = document.getElementById('print-odjel')?.value;
+  const odjelNm = (odjelIdx !== '' && odjelIdx !== undefined && graniceOdjeli[+odjelIdx])
+    ? `<br>Odjel: <b>${graniceOdjeli[+odjelIdx].name}</b>` : '';
   document.getElementById('print-info').innerHTML =
     `Razmjera: <b>1 : ${printScale.toLocaleString('bs')}</b><br>` +
     `Format: <b>${p.label}</b> (${p.w} × ${p.h} mm)<br>` +
     `Područje na karti: <b>${realW_km} km × ${realH_km} km</b><br>` +
-    `Površina prikaza: <b>≈ ${areaHa} ha</b>`;
+    `Površina prikaza: <b>≈ ${areaHa} ha</b>${odjelNm}`;
   document.getElementById('pi-dims').textContent = `${p.w} × ${p.h} mm`;
   document.getElementById('pi-area').textContent = `≈ ${areaHa} ha`;
 }
@@ -2844,8 +2885,15 @@ function updatePrintInfo() {
 function doPrint() {
   const p = PAPER[paperFmt];
 
-  // Fit to bounds if requested
-  if (document.getElementById('print-fit-bounds').checked && vlake.length > 0) {
+  // Odabrani odjel ili fallback na vlake / trenutni prikaz
+  const odjelIdx = document.getElementById('print-odjel').value;
+  if (odjelIdx !== '') {
+    // Centar na odabrani odjel
+    const o = graniceOdjeli[+odjelIdx];
+    if (o && o.bounds.isValid()) {
+      map.setView(o.bounds.getCenter(), map.getZoom(), { animate: false });
+    }
+  } else if (document.getElementById('print-fit-bounds').checked && vlake.length > 0) {
     const allPts = vlake.flatMap(v => v.pts.map(pt => [pt.la, pt.lo]));
     if (allPts.length > 0) {
       map.fitBounds(L.latLngBounds(allPts), { padding: [20, 20], animate: false });
@@ -2926,6 +2974,9 @@ function showToast(msg) {
 // === AUTO-UČITAJ GRANICE.KML IZ SUPABASE STORAGE ===
 const GRANICE_URL = 'https://djguplhaayjvwmdlxevx.supabase.co/storage/v1/object/sign/Granice%20odjela/GRANICE.kml?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV82ODQ4OWU1ZS01ODllLTQwZDQtYTZmZC1kZWRmYjQzYjdiZjkiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJHcmFuaWNlIG9kamVsYS9HUkFOSUNFLmttbCIsImlhdCI6MTc3NDcwMDk0OSwiZXhwIjoxODA2MjM2OTQ5fQ.wg7UvYKBB7UWYVXvQvlQn_PkU-GfqB305s9E8pZCR-w';
 
+// Pohrani individualne odjele za print dropdown
+let graniceOdjeli = []; // [{ name, bounds }]
+
 (async function autoLoadGranice() {
   try {
     const r = await fetch(GRANICE_URL);
@@ -2937,6 +2988,24 @@ const GRANICE_URL = 'https://djguplhaayjvwmdlxevx.supabase.co/storage/v1/object/
     grp.addTo(map);
     kmlLs.push({ name: 'GRANICE.KML', grp, col, vis: true });
     rndKml();
+
+    // Izvuci svaki Placemark kao poseban odjel s bounds-om
+    graniceOdjeli = [];
+    doc.querySelectorAll('Placemark').forEach(pm => {
+      const name = pm.querySelector('name')?.textContent?.trim() || '';
+      if (!name) return;
+      // Skupi sve koordinate tog Placemarks-a
+      const allPts = [];
+      pm.querySelectorAll('coordinates').forEach(c => {
+        pcs(c.textContent).forEach(pt => allPts.push(pt));
+      });
+      if (allPts.length > 0) {
+        graniceOdjeli.push({ name, bounds: L.latLngBounds(allPts) });
+      }
+    });
+    // Sortiraj po imenu
+    graniceOdjeli.sort((a, b) => a.name.localeCompare(b.name, 'bs'));
+
     try { const b = grp.getBounds(); if (b.isValid()) map.fitBounds(b, { padding: [30, 30] }); } catch(x) {}
   } catch(e) {
     console.warn('GRANICE.KML nije učitan:', e.message);
