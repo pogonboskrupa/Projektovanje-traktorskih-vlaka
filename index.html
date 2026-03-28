@@ -605,15 +605,13 @@ select:focus { outline:none; border-color:#3b82f6; }
         </div>
         <span class="lbl">Boja trase</span>
         <div class="colors" id="clrs"></div>
-        <div id="lager-row" style="margin-bottom:8px;">
-          <span class="lbl">Lager</span>
-          <select id="ilager" style="width:100%;padding:7px 10px;background:#0f172a;border:1px solid #374151;border-radius:5px;color:#eee;font-size:13px;">
-            <option value="">— bez lagera —</option>
-            <option value="L1">L1</option><option value="L2">L2</option>
-            <option value="L3">L3</option><option value="L4">L4</option>
-            <option value="L5">L5</option><option value="L6">L6</option>
-            <option value="L7">L7</option><option value="L8">L8</option>
-          </select>
+        <div style="margin-bottom:8px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:#94a3b8;">
+            <input type="checkbox" id="ilager-chk" onchange="updLagerPreview()"
+              style="width:15px;height:15px;accent-color:#f59e0b;">
+            <span>Izlaz na put <span id="ilager-preview" style="color:#f59e0b;font-weight:bold;"></span></span>
+          </label>
+          <input type="hidden" id="ilager" value="">
         </div>
         <button class="btn g" onclick="addV()">➕ DODAJ VLAKU</button>
         <button class="btn o" id="brec" onclick="togRec()">⏺ POČNI GPS SNIMANJE</button>
@@ -1798,10 +1796,35 @@ function addV() {
   poly.bindTooltip(nm,{sticky:true,opacity:0.9});
   vlake.push({nm,br,kr,color,lager,pts:[],poly,wpts:[],sbId:null,labelMk:null,lagerMk:null});
   sbFlushVlaka(vlake.length-1);
+  // Reset lager checkbox
+  document.getElementById('ilager-chk').checked = false;
+  document.getElementById('ilager').value = '';
+  document.getElementById('ilager-preview').textContent = '';
   cIdx=(cIdx+1)%PAL.length; selC=PAL[cIdx];
   document.querySelectorAll('.cdot').forEach((d,j)=>d.classList.toggle('sel',j===cIdx));
   rndList();
   selI(vlake.length-1);
+}
+
+function nextLagerNum() {
+  const used = vlake.map(v => v.lager).filter(Boolean);
+  let n = 1;
+  while (used.includes('L' + n)) n++;
+  return 'L' + n;
+}
+
+function updLagerPreview() {
+  const chk = document.getElementById('ilager-chk');
+  const prev = document.getElementById('ilager-preview');
+  const inp = document.getElementById('ilager');
+  if (chk.checked) {
+    const lbl = nextLagerNum();
+    prev.textContent = '→ ' + lbl;
+    inp.value = lbl;
+  } else {
+    prev.textContent = '';
+    inp.value = '';
+  }
 }
 
 function flipVlakaDir() {
