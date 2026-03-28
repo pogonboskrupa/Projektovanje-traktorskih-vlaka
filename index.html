@@ -1807,19 +1807,23 @@ function addV() {
 }
 
 async function nextLagerNum() {
-  // Lokalni lageri (trenutni korisnik)
   const used = new Set(vlake.map(v => v.lager).filter(Boolean));
-  // Lageri svih kolega u istoj šumariji (Supabase)
-  if (sbProfile?.sumarija) {
-    const { data } = await sb.from('vlake')
-      .select('lager')
-      .eq('sumarija', sbProfile.sumarija)
-      .not('lager', 'is', null);
-    if (data) data.forEach(r => { if (r.lager) used.add(r.lager); });
+  let offline = false;
+  if (sbProfile?.sumarija && navigator.onLine) {
+    try {
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000));
+      const query = sb.from('vlake').select('lager').eq('sumarija', sbProfile.sumarija).not('lager', 'is', null);
+      const { data } = await Promise.race([query, timeout]);
+      if (data) data.forEach(r => { if (r.lager) used.add(r.lager); });
+    } catch {
+      offline = true;
+    }
+  } else if (!navigator.onLine) {
+    offline = true;
   }
   let n = 1;
   while (used.has('L' + n)) n++;
-  return 'L' + n;
+  return { lbl: 'L' + n, offline };
 }
 
 async function updLagerPreview() {
@@ -1828,8 +1832,8 @@ async function updLagerPreview() {
   const inp = document.getElementById('ilager');
   if (chk.checked) {
     prev.textContent = '→ ...';
-    const lbl = await nextLagerNum();
-    prev.textContent = '→ ' + lbl;
+    const { lbl, offline } = await nextLagerNum();
+    prev.innerHTML = `→ <b>${lbl}</b>${offline ? ' <span style="color:#f87171;font-size:10px;">(offline)</span>' : ''}`;
     inp.value = lbl;
   } else {
     prev.textContent = '';
