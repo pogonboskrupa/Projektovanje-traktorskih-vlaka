@@ -605,6 +605,16 @@ select:focus { outline:none; border-color:#3b82f6; }
         </div>
         <span class="lbl">Boja trase</span>
         <div class="colors" id="clrs"></div>
+        <div id="lager-row" style="margin-bottom:8px;">
+          <span class="lbl">Lager (samo glavna vlaka)</span>
+          <select id="ilager" style="width:100%;padding:7px 10px;background:#0f172a;border:1px solid #374151;border-radius:5px;color:#eee;font-size:13px;">
+            <option value="">— bez lagera —</option>
+            <option value="L1">L1</option><option value="L2">L2</option>
+            <option value="L3">L3</option><option value="L4">L4</option>
+            <option value="L5">L5</option><option value="L6">L6</option>
+            <option value="L7">L7</option><option value="L8">L8</option>
+          </select>
+        </div>
         <button class="btn g" onclick="addV()">➕ DODAJ VLAKU</button>
         <button class="btn o" id="brec" onclick="togRec()">⏺ POČNI GPS SNIMANJE</button>
         <div style="font-size:11px;color:#475569;text-align:center;margin-top:4px;line-height:1.5;">
@@ -743,10 +753,11 @@ select:focus { outline:none; border-color:#3b82f6; }
     <div id="map">
       <div id="banner">
         <div class="rdot"></div>
-        <div>
+        <div style="flex:1;min-width:0;">
           <div id="bn">T1</div>
           <div id="bl2">0 m · 0 tač.</div>
         </div>
+        <button id="btn-flip-dir" style="display:none;background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:bold;cursor:pointer;white-space:nowrap;" onclick="flipVlakaDir()">↔ Smjer</button>
         <button class="btn r" style="width:auto;padding:5px 12px;margin:0;font-size:12px;" onclick="stopActiveTool()">■ STOP</button>
       </div>
 
@@ -1034,6 +1045,7 @@ async function doLogout() {
     map.removeLayer(v.poly);
     v.wpts.forEach(m => map.removeLayer(m));
     if (v.labelMk) map.removeLayer(v.labelMk);
+    if (v.lagerMk) map.removeLayer(v.lagerMk);
   });
   vlake = []; actI = null;
 
@@ -1154,7 +1166,7 @@ async function sbLoadVlake() {
     const color = row.boja || '#4ade80';
     const poly  = L.polyline([], { color, weight: 4, opacity: 0.9 }).addTo(map);
     poly.bindTooltip(row.nm, { sticky: true, opacity: 0.9 });
-    const v = { nm: row.nm, br: row.br, kr: row.kr, color, pts: row.pts || [], poly, wpts: [], sbId: row.id, labelMk: null };
+    const v = { nm: row.nm, br: row.br, kr: row.kr, color, lager: row.lager || '', pts: row.pts || [], poly, wpts: [], sbId: row.id, labelMk: null, lagerMk: null };
     v.pts.forEach(p => poly.addLatLng([p.la, p.lo]));
     vlake.push(v);
   });
@@ -1178,6 +1190,7 @@ async function sbFlushVlaka(i) {
     korisnik_id: sbUser.id,
     sumarija:    sbProfile.sumarija || '',
     nm: v.nm, br: v.br, kr: v.kr, boja: v.color,
+    lager: v.lager || null,
     pts: v.pts,
     updated_at: new Date().toISOString()
   }, { onConflict: 'korisnik_id,sumarija,nm' }).select('id').single();
@@ -1780,14 +1793,26 @@ function addV() {
   const {nm,br,kr} = updPrev();
   if (vlake.find(v=>v.nm===nm)) { alert(`Vlaka "${nm}" već postoji!`); return; }
   const color = selC;
+  const lager = kr === 0 ? (document.getElementById('ilager').value || '') : '';
   const poly  = L.polyline([],{color,weight:4,opacity:0.9}).addTo(map);
   poly.bindTooltip(nm,{sticky:true,opacity:0.9});
-  vlake.push({nm,br,kr,color,pts:[],poly,wpts:[],sbId:null,labelMk:null});
+  vlake.push({nm,br,kr,color,lager,pts:[],poly,wpts:[],sbId:null,labelMk:null,lagerMk:null});
   sbFlushVlaka(vlake.length-1);
   cIdx=(cIdx+1)%PAL.length; selC=PAL[cIdx];
   document.querySelectorAll('.cdot').forEach((d,j)=>d.classList.toggle('sel',j===cIdx));
-  rndList(); // build list first so selI finds the rows
-  selI(vlake.length-1); // then highlight new vlaka
+  rndList();
+  selI(vlake.length-1);
+}
+
+function flipVlakaDir() {
+  if (actI === null) return;
+  const v = vlake[actI];
+  if (!v || v.pts.length < 2) { showToast('Nema dovoljno tačaka za okret'); return; }
+  v.pts.reverse();
+  v.poly.setLatLngs(v.pts.map(p => [p.la, p.lo]));
+  updateVlakaLabel(actI);
+  scheduleVlakaSave(actI);
+  showToast('↔ Smjer promijenjen — pts[0] sad je drugi kraj');
 }
 
 function selI(i) {
@@ -1810,12 +1835,13 @@ function togRec() {
   if (!recOn) {
     if (actI === null) { alert('Prvo dodaj vlaku!'); return; }
     recOn = true;
-    _gpsBuf = []; // reset smoothing buffer
+    _gpsBuf = [];
     const b = document.getElementById('brec');
     b.textContent = '⏹ ZAUSTAVI SNIMANJE'; b.classList.add('rec');
     document.getElementById('banner').classList.add('show');
     document.getElementById('bn').textContent = '⏺ ' + vlake[actI].nm;
     document.getElementById('bl2').textContent = 'GPS snimanje u toku...';
+    document.getElementById('btn-flip-dir').style.display = 'inline-block';
     if (!gpsOn) toggleGPS();
   } else {
     stopRec();
@@ -1827,8 +1853,9 @@ function stopRec() {
   const b = document.getElementById('brec');
   b.textContent = '⏺ POČNI GPS SNIMANJE'; b.classList.remove('rec');
   document.getElementById('banner').classList.remove('show');
+  document.getElementById('btn-flip-dir').style.display = 'none';
   if (actI !== null) updateVlakaLabel(actI);
-  if (bufLayers.length > 0) drawBuffers(); // refresh buffers after recording
+  if (bufLayers.length > 0) drawBuffers();
 }
 
 // === DRAW PREVIEW (used by addline tool) ===
@@ -2032,6 +2059,7 @@ function dlV(i) {
   map.removeLayer(vlake[i].poly);
   vlake[i].wpts.forEach(m=>map.removeLayer(m));
   if (vlake[i].labelMk) map.removeLayer(vlake[i].labelMk);
+  if (vlake[i].lagerMk) map.removeLayer(vlake[i].lagerMk);
   sbDeleteVlaka(vlake[i].sbId);
   clearTimeout(_vlakaSaveTimers[i]);
   vlake.splice(i,1);
@@ -2054,17 +2082,29 @@ function dlV(i) {
 function updateVlakaLabel(i) {
   const v = vlake[i];
   if (!v) return;
-  if (v.labelMk) { map.removeLayer(v.labelMk); v.labelMk = null; }
+  // Ukloni stare markere
+  if (v.labelMk)  { map.removeLayer(v.labelMk);  v.labelMk  = null; }
+  if (v.lagerMk)  { map.removeLayer(v.lagerMk);  v.lagerMk  = null; }
   if (!v.pts || v.pts.length < 2) return;
+
+  // Smjer strelice: pts[1]→pts[0] = prema putu (odakle dolaze trupci)
   const p0 = v.pts[0], p1 = v.pts[1];
-  const bearing = Math.atan2(p1.lo - p0.lo, p1.la - p0.la) * 180 / Math.PI;
-  const icon = L.divIcon({
-    className: '',
-    iconSize: [0, 0],
-    iconAnchor: [3, 10],
+  const bearing = Math.atan2(p0.lo - p1.lo, p0.la - p1.la) * 180 / Math.PI;
+  const dirIcon = L.divIcon({
+    className: '', iconSize: [0,0], iconAnchor: [3,10],
     html: `<div style="display:flex;align-items:center;gap:2px;background:rgba(15,23,42,0.82);border-left:3px solid ${v.color};color:#fff;font-size:11px;font-weight:bold;padding:2px 5px 2px 3px;border-radius:0 4px 4px 0;white-space:nowrap;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,0.65);font-family:Arial,sans-serif;">${v.nm}<span style="transform:rotate(${Math.round(bearing)}deg);display:inline-block;font-size:12px;line-height:1;margin-left:2px;">↑</span></div>`
   });
-  v.labelMk = L.marker([p0.la, p0.lo], { icon, interactive: false, zIndexOffset: 500 }).addTo(map);
+  v.labelMk = L.marker([p0.la, p0.lo], { icon: dirIcon, interactive: false, zIndexOffset: 500 }).addTo(map);
+
+  // Lager marker — samo na glavnoj vlaci (kr=0) s postavljenim lagerom
+  if (v.kr === 0 && v.lager) {
+    const pLast = v.pts[v.pts.length - 1];
+    const lagerIcon = L.divIcon({
+      className: '', iconSize: [0,0], iconAnchor: [14,14],
+      html: `<div style="background:#f59e0b;color:#000;font-size:12px;font-weight:bold;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.6);pointer-events:none;font-family:Arial,sans-serif;">${v.lager}</div>`
+    });
+    v.lagerMk = L.marker([pLast.la, pLast.lo], { icon: lagerIcon, interactive: false, zIndexOffset: 600 }).addTo(map);
+  }
 }
 
 // === KML ===
@@ -2388,6 +2428,7 @@ function doMerge(a,b){
   map.removeLayer(vb.poly);
   vb.wpts.forEach(m=>map.removeLayer(m));
   if (vb.labelMk) map.removeLayer(vb.labelMk);
+  if (vb.lagerMk) map.removeLayer(vb.lagerMk);
   sbDeleteVlaka(vb.sbId);
   clearTimeout(_vlakaSaveTimers[b.vi]);
   vlake.splice(b.vi,1);
