@@ -970,8 +970,12 @@ async function doRegister() {
   const { data, error } = await sb.auth.signUp({ email: loginEmail, password: pin.padEnd(6, '0') });
   if (error) { showAuthErr('Greška: ' + error.message, true); return; }
 
+  // Dohvati koliko korisnika je već u ovoj šumariji da dodijelimo distinktivnu boju
+  const { data: existingK } = await sb.from('korisnici').select('id').eq('sumarija', sumarija);
+  const korisnikBoja = KORISNIK_PAL[(existingK?.length || 0) % KORISNIK_PAL.length];
+
   const { error: insertErr } = await sb.from('korisnici').insert({
-    id: data.user.id, ime, prezime, sumarija, login_email: loginEmail
+    id: data.user.id, ime, prezime, sumarija, login_email: loginEmail, boja: korisnikBoja
   });
   if (insertErr) { showAuthErr('Greška pri kreiranju profila: ' + insertErr.message, true); return; }
 
@@ -1150,19 +1154,28 @@ async function sbDeleteVlaka(sbId) {
 async function sbLoadKolegeVlake() {
   if (!sbProfile?.sumarija || !sbUser) return;
   const { data } = await sb.from('vlake')
-    .select('nm, boja, pts')
+    .select('nm, korisnik_id, pts')
     .eq('sumarija', sbProfile.sumarija)
     .neq('korisnik_id', sbUser.id);
   kolegeVlake.forEach(p => map.removeLayer(p));
   kolegeVlake = [];
   if (!data) return;
+
+  // Grupišemo po korisniku da dodijelimo boje po redoslijedu ako nema u kolegeMap
+  const seenIds = [];
   data.forEach(row => {
     if (!row.pts || row.pts.length < 2) return;
+    const kid = row.korisnik_id;
+    let info = kolegeMap[kid];
+    if (!info) {
+      if (!seenIds.includes(kid)) seenIds.push(kid);
+      info = { ime: 'Kolega', color: KORISNIK_PAL[seenIds.indexOf(kid) % KORISNIK_PAL.length] };
+    }
     const poly = L.polyline(
       row.pts.map(p => [p.la, p.lo]),
-      { color: row.boja || '#60a5fa', weight: 2.5, opacity: 0.5, dashArray: '8,5', interactive: false }
+      { color: info.color, weight: 3, opacity: 0.7, dashArray: '10,6', interactive: false }
     ).addTo(map);
-    poly.bindTooltip(row.nm + ' (kolega)', { sticky: true, opacity: 0.75 });
+    poly.bindTooltip(`${info.ime}: ${row.nm}`, { sticky: true, opacity: 0.85 });
     kolegeVlake.push(poly);
   });
 }
@@ -1211,14 +1224,33 @@ async function sbClearLog() {
 }
 
 // ─── KOLEGE (iz korisnici tabele) ────────────────────────────────────────────
+let kolegeMap = {}; // korisnik_id -> { ime, color }
+
 async function sbLoadKolege() {
   if (!sbProfile?.sumarija || !sbUser) return;
   const { data } = await sb.from('korisnici')
-    .select('ime, prezime, boja')
+    .select('id, ime, prezime, boja')
     .eq('sumarija', sbProfile.sumarija)
     .neq('id', sbUser.id);
   if (!data) return;
-  kolege = data.map(k => ({ ime: k.ime + ' ' + k.prezime, color: k.boja || '#f97316' }));
+
+  kolegeMap = {};
+  const toUpdate = [];
+  data.forEach((k, i) => {
+    let color = k.boja;
+    if (!color) {
+      color = KORISNIK_PAL[i % KORISNIK_PAL.length];
+      toUpdate.push({ id: k.id, boja: color });
+    }
+    kolegeMap[k.id] = { ime: k.ime + ' ' + k.prezime, color };
+  });
+
+  // Auto-assign boja u bazi ako nije postavljena
+  toUpdate.forEach(({ id, boja }) => {
+    sb.from('korisnici').update({ boja }).eq('id', id).then(() => {});
+  });
+
+  kolege = Object.values(kolegeMap);
   rndKolege();
 }
 
@@ -1286,8 +1318,11 @@ function updMGI(lat, lon) {
 }
 
 // === COLORS ===
-const PAL = ['#4ade80','#60a5fa','#f87171','#fbbf24','#a78bfa','#34d399','#fb923c','#38bdf8','#f472b6','#e879f9'];
-let selC = PAL[0], cIdx = 0;
+// Zelene boje (#22c55e, #4ade80, #34d399) isključene — ista boja kao poligon GRANICE
+const PAL = ['#60a5fa','#f87171','#fbbf24','#a78bfa','#fb923c','#38bdf8','#f472b6','#e879f9','#94a3b8','#f59e0b'];
+// Paleta za identitet korisnika (kolege) — distinktivne, ne zelene
+const KORISNIK_PAL = ['#f97316','#818cf8','#22d3ee','#fb7185','#facc15','#c084fc','#2dd4bf','#f43f5e','#60a5fa','#fbbf24'];
+let selC = PAL[0], cIdx = 0; // PAL[0] = #60a5fa (plava)
 
 (function buildC() {
   const el = document.getElementById('clrs');
@@ -2421,20 +2456,27 @@ function delKolega(i) {
 }
 function rndKolege() {
   const el = document.getElementById('kolege-list');
-  const myIme = getIme();
-  const all = [{ ime:myIme, color:'#4ade80', isMe:true }, ...kolege.map(k=>({...k,isMe:false}))];
-  el.innerHTML = all.map((k,i) => {
-    let lastM=0;
-    dnevniLog.forEach(day=>{ const e=day.entries.find(e=>e.projektant===k.ime); if(e&&e.meters>lastM) lastM=e.meters; });
-    if (k.isMe) lastM=Math.round(calcL(vlake.flatMap(v=>v.pts)));
-    const del = k.isMe ? '' : `<button class="mb" onclick="delKolega(${i-1})">✕</button>`;
-    return `<div class="col-vrow">
+  const myIme = sbProfile ? (sbProfile.ime + ' ' + sbProfile.prezime) : getIme();
+  // Moja boja identiteta — dohvati iz sbProfile.boja ili fallback
+  const myColor = sbProfile?.boja || '#4ade80';
+  const myM = Math.round(calcL(vlake.flatMap(v => v.pts)));
+
+  const rows = [`<div class="col-vrow">
+    <div class="col-vdot" style="background:${myColor}"></div>
+    <div style="flex:1;"><b style="color:#fbbf24">${myIme}</b><span style="font-size:10px;color:#64748b;"> (ti)</span></div>
+    <div style="font-size:11px;color:#4ade80;font-family:monospace;">${myM>0?fmtL(myM):'—'}</div>
+  </div>`];
+
+  Object.entries(kolegeMap).forEach(([, k]) => {
+    rows.push(`<div class="col-vrow">
       <div class="col-vdot" style="background:${k.color}"></div>
-      <div style="flex:1;"><b style="color:${k.isMe?'#fbbf24':'#e2e8f0'}">${k.ime}</b>${k.isMe?'<span style="font-size:10px;color:#64748b;"> (ti)</span>':''}</div>
-      <div style="font-size:11px;color:#4ade80;font-family:monospace;">${lastM>0?fmtL(lastM):'—'}</div>
-      ${del}
-    </div>`;
-  }).join('');
+      <div style="flex:1;"><b style="color:#e2e8f0">${k.ime}</b></div>
+      <div style="font-size:11px;color:#94a3b8;font-family:monospace;">na karti</div>
+    </div>`);
+  });
+
+  if (rows.length === 1) rows.push(`<div style="font-size:11px;color:#475569;padding:6px 0;">Nema kolega u ovom odjelu</div>`);
+  el.innerHTML = rows.join('');
 }
 
 // === DNEVNIK ===
