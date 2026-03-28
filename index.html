@@ -606,7 +606,7 @@ select:focus { outline:none; border-color:#3b82f6; }
         <span class="lbl">Boja trase</span>
         <div class="colors" id="clrs"></div>
         <div id="lager-row" style="margin-bottom:8px;">
-          <span class="lbl">Lager (samo glavna vlaka)</span>
+          <span class="lbl">Lager</span>
           <select id="ilager" style="width:100%;padding:7px 10px;background:#0f172a;border:1px solid #374151;border-radius:5px;color:#eee;font-size:13px;">
             <option value="">— bez lagera —</option>
             <option value="L1">L1</option><option value="L2">L2</option>
@@ -1793,7 +1793,7 @@ function addV() {
   const {nm,br,kr} = updPrev();
   if (vlake.find(v=>v.nm===nm)) { alert(`Vlaka "${nm}" već postoji!`); return; }
   const color = selC;
-  const lager = kr === 0 ? (document.getElementById('ilager').value || '') : '';
+  const lager = document.getElementById('ilager').value || '';
   const poly  = L.polyline([],{color,weight:4,opacity:0.9}).addTo(map);
   poly.bindTooltip(nm,{sticky:true,opacity:0.9});
   vlake.push({nm,br,kr,color,lager,pts:[],poly,wpts:[],sbId:null,labelMk:null,lagerMk:null});
@@ -2096,8 +2096,8 @@ function updateVlakaLabel(i) {
   });
   v.labelMk = L.marker([p0.la, p0.lo], { icon: dirIcon, interactive: false, zIndexOffset: 500 }).addTo(map);
 
-  // Lager marker — samo na glavnoj vlaci (kr=0) s postavljenim lagerom
-  if (v.kr === 0 && v.lager) {
+  // Lager marker — na bilo kojoj vlaci koja izlazi na put (ima postavljeni lager)
+  if (v.lager) {
     const pLast = v.pts[v.pts.length - 1];
     const lagerIcon = L.divIcon({
       className: '', iconSize: [0,0], iconAnchor: [14,14],
