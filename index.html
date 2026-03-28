@@ -543,22 +543,6 @@ select:focus { outline:none; border-color:#3b82f6; }
     <!-- MENI DROPDOWN -->
     <div style="position:relative;display:inline-block;">
       <button class="tbtn tbtn-gray" ontouchstart="toggleMenuDropdown(event)" onclick="toggleMenuDropdown(event)" id="menu-btn">☰ Meni ▾</button>
-      <div id="menu-dropdown" style="
-        display:none;position:fixed;top:0;right:0;
-        background:#16213e;border:1px solid #0f3460;border-radius:8px;
-        min-width:220px;z-index:99000;box-shadow:0 8px 24px rgba(0,0,0,0.6);
-        overflow:hidden;touch-action:manipulation;">
-        <div class="mdrop-item" onclick="closeMenuDropdown();showExport()">⬆ KML Export</div>
-        <div class="mdrop-item" onclick="closeMenuDropdown();showPrintModal()">🖨 Print / Štampanje</div>
-        <div class="mdrop-sep"></div>
-        <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('vlake')">📐 Panel vlaka</div>
-        <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('projekat')">📁 Projekat</div>
-        <div class="mdrop-sep"></div>
-        <div class="mdrop-item" id="btn-text-tool" onclick="closeMenuDropdown();toggleTextTool()">🏷 Tekst na karti</div>
-        <div class="mdrop-sep"></div>
-        <div class="mdrop-item" id="menu-user-label" style="color:#64748b;font-size:11px;pointer-events:none;padding:6px 14px;">—</div>
-        <div class="mdrop-item" style="color:#f87171;" onclick="closeMenuDropdown();doLogout()">⎋ Odjava</div>
-      </div>
     </div>
     <button id="mbtn" class="tbtn tbtn-gray" style="display:none;" onclick="togglePanel()">☰ Panel</button>
   </div>
@@ -2910,5 +2894,23 @@ const GRANICE_URL = 'https://djguplhaayjvwmdlxevx.supabase.co/storage/v1/object/
   }
 })();
 </script>
+
+<!-- MENI DROPDOWN — direktno u body da izbjegne sve stacking context probleme -->
+<div id="menu-dropdown" style="
+  display:none;position:fixed;top:0;right:0;
+  background:#16213e;border:1px solid #0f3460;border-radius:8px;
+  min-width:220px;z-index:99000;box-shadow:0 8px 24px rgba(0,0,0,0.6);
+  touch-action:manipulation;">
+  <div class="mdrop-item" onclick="closeMenuDropdown();showExport()">⬆ KML Export</div>
+  <div class="mdrop-item" onclick="closeMenuDropdown();showPrintModal()">🖨 Print / Štampanje</div>
+  <div class="mdrop-sep"></div>
+  <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('vlake')">📐 Panel vlaka</div>
+  <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('projekat')">📁 Projekat</div>
+  <div class="mdrop-sep"></div>
+  <div class="mdrop-item" id="btn-text-tool" onclick="closeMenuDropdown();toggleTextTool()">🏷 Tekst na karti</div>
+  <div class="mdrop-sep"></div>
+  <div class="mdrop-item" id="menu-user-label" style="color:#64748b;font-size:11px;pointer-events:none;padding:6px 14px;">—</div>
+  <div class="mdrop-item" style="color:#f87171;" onclick="closeMenuDropdown();doLogout()">⎋ Odjava</div>
+</div>
 </body>
 </html>
