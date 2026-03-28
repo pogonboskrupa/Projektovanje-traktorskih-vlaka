@@ -683,10 +683,6 @@ select:focus { outline:none; border-color:#3b82f6; }
       <!-- KOLEGE -->
       <div class="sec">
         <div class="sec-t">👥 Projektanti na Odjelu</div>
-        <div style="display:flex;gap:6px;margin-bottom:8px;">
-          <input class="pinput" id="p-kolega-ime" style="margin:0;flex:1;">
-          <button class="btn b" style="width:auto;padding:8px 14px;margin:0;font-size:16px;line-height:1;" onclick="addKolega()">+</button>
-        </div>
         <div id="kolege-list"></div>
       </div>
 
@@ -909,7 +905,8 @@ async function sbLoadProfile() {
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('wrapper').style.display = 'flex';
-  loadProj();
+  loadProj();      // lokalni podaci odmah
+  sbInitData();    // Supabase async override
 }
 
 // --- Auth form helpers ---
@@ -1041,6 +1038,218 @@ async function adminDeleteUser(userId, name) {
 }
 
 // =====================================================================
+// === SUPABASE DATA ===
+// =====================================================================
+
+let _vlakaSaveTimers = {};
+let kolegeVlake = []; // read-only colleague vlake polylines on map
+
+async function sbInitData() {
+  if (!sbProfile) return;
+  await Promise.all([
+    sbLoadProj(),
+    sbLoadVlake(),
+    sbLoadLog(),
+    sbLoadTextLabelsDB()
+  ]);
+  sbLoadKolege();
+  await sbLoadKolegeVlake();
+  sbStartRealtime();
+}
+
+// ─── PROJEKAT ────────────────────────────────────────────────────────────────
+async function sbLoadProj() {
+  const { data } = await sb.from('projekti')
+    .select('*').eq('korisnik_id', sbUser.id).maybeSingle();
+  if (data) {
+    document.getElementById('p-odjel').value    = data.odjel    || '';
+    if (data.povrsina) document.getElementById('p-povrsina').value = data.povrsina;
+    if (data.datum)    document.getElementById('p-datum').value    = data.datum;
+  }
+  rndKolege(); rndLog(); updProjStats();
+}
+
+async function sbSaveProj() {
+  if (!sbUser || !sbProfile) return;
+  sb.from('projekti').upsert({
+    korisnik_id: sbUser.id,
+    sumarija:    sbProfile.sumarija || '',
+    odjel:       document.getElementById('p-odjel').value,
+    povrsina:    parseFloat(document.getElementById('p-povrsina').value) || 0,
+    datum:       document.getElementById('p-datum').value || todayStr(),
+    updated_at:  new Date().toISOString()
+  }, { onConflict: 'korisnik_id,sumarija' })
+  .then(({error}) => { if (error) console.error('Greška projekat:', error); });
+}
+
+// ─── VLAKE ───────────────────────────────────────────────────────────────────
+async function sbLoadVlake() {
+  if (!sbUser || !sbProfile) return;
+  const { data } = await sb.from('vlake')
+    .select('*')
+    .eq('korisnik_id', sbUser.id)
+    .eq('sumarija', sbProfile.sumarija || '');
+  if (!data || data.length === 0) return;
+  data.forEach(row => {
+    if (vlake.find(v => v.nm === row.nm)) return;
+    const color = row.boja || '#4ade80';
+    const poly  = L.polyline([], { color, weight: 4, opacity: 0.9 }).addTo(map);
+    poly.bindTooltip(row.nm, { sticky: true, opacity: 0.9 });
+    const v = { nm: row.nm, br: row.br, kr: row.kr, color, pts: row.pts || [], poly, wpts: [], sbId: row.id };
+    v.pts.forEach(p => poly.addLatLng([p.la, p.lo]));
+    vlake.push(v);
+  });
+  rndList();
+  const allPts = vlake.flatMap(v => v.pts.map(p => [p.la, p.lo]));
+  if (allPts.length > 0) {
+    try { map.fitBounds(L.latLngBounds(allPts), { padding: [30, 30] }); } catch(e) {}
+  }
+}
+
+function scheduleVlakaSave(i) {
+  clearTimeout(_vlakaSaveTimers[i]);
+  _vlakaSaveTimers[i] = setTimeout(() => sbFlushVlaka(i), 2500);
+}
+
+async function sbFlushVlaka(i) {
+  const v = vlake[i];
+  if (!v || !sbUser || !sbProfile) return;
+  const { data, error } = await sb.from('vlake').upsert({
+    korisnik_id: sbUser.id,
+    sumarija:    sbProfile.sumarija || '',
+    nm: v.nm, br: v.br, kr: v.kr, boja: v.color,
+    pts: v.pts,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'korisnik_id,sumarija,nm' }).select('id').single();
+  if (!error && data) v.sbId = data.id;
+  if (error) console.error('Greška vlaka:', error);
+}
+
+async function sbDeleteVlaka(sbId) {
+  if (!sbId || !sbUser) return;
+  await sb.from('vlake').delete().eq('id', sbId);
+}
+
+// ─── KOLEGE VLAKE (read-only prikaz na mapi) ─────────────────────────────────
+async function sbLoadKolegeVlake() {
+  if (!sbProfile?.sumarija || !sbUser) return;
+  const { data } = await sb.from('vlake')
+    .select('nm, boja, pts')
+    .eq('sumarija', sbProfile.sumarija)
+    .neq('korisnik_id', sbUser.id);
+  kolegeVlake.forEach(p => map.removeLayer(p));
+  kolegeVlake = [];
+  if (!data) return;
+  data.forEach(row => {
+    if (!row.pts || row.pts.length < 2) return;
+    const poly = L.polyline(
+      row.pts.map(p => [p.la, p.lo]),
+      { color: row.boja || '#60a5fa', weight: 2.5, opacity: 0.5, dashArray: '8,5', interactive: false }
+    ).addTo(map);
+    poly.bindTooltip(row.nm + ' (kolega)', { sticky: true, opacity: 0.75 });
+    kolegeVlake.push(poly);
+  });
+}
+
+// ─── DNEVNI LOG ──────────────────────────────────────────────────────────────
+async function sbLoadLog() {
+  if (!sbProfile?.sumarija) return;
+  const { data } = await sb.from('dnevni_log')
+    .select('*')
+    .eq('sumarija', sbProfile.sumarija)
+    .order('datum', { ascending: false });
+  if (!data || data.length === 0) return;
+  const grouped = {};
+  data.forEach(row => {
+    if (!grouped[row.datum]) grouped[row.datum] = { date: row.datum, entries: [] };
+    grouped[row.datum].entries.push({
+      projektant: row.projektant,
+      meters:     row.meters,
+      vlake:      row.vlake_snapshot || [],
+      vlakeNm:    (row.vlake_snapshot || []).map(v => v.nm)
+    });
+  });
+  dnevniLog = Object.values(grouped).sort((a, b) => b.date.localeCompare(a.date));
+  rndLog(); updProjStats();
+}
+
+async function sbSaveLogEntry(date, ime, totalM, vSnap) {
+  if (!sbUser || !sbProfile) return;
+  const { error } = await sb.from('dnevni_log').upsert({
+    korisnik_id:    sbUser.id,
+    sumarija:       sbProfile.sumarija || '',
+    datum:          date,
+    projektant:     ime,
+    meters:         totalM,
+    vlake_snapshot: vSnap
+  }, { onConflict: 'korisnik_id,datum' });
+  if (error) console.error('Greška log:', error);
+}
+
+async function sbClearLog() {
+  if (!sbUser || !sbProfile) return;
+  await sb.from('dnevni_log')
+    .delete()
+    .eq('korisnik_id', sbUser.id)
+    .eq('sumarija', sbProfile.sumarija || '');
+}
+
+// ─── KOLEGE (iz korisnici tabele) ────────────────────────────────────────────
+async function sbLoadKolege() {
+  if (!sbProfile?.sumarija || !sbUser) return;
+  const { data } = await sb.from('korisnici')
+    .select('ime, prezime, boja')
+    .eq('sumarija', sbProfile.sumarija)
+    .neq('id', sbUser.id);
+  if (!data) return;
+  kolege = data.map(k => ({ ime: k.ime + ' ' + k.prezime, color: k.boja || '#f97316' }));
+  rndKolege();
+}
+
+// ─── TEXT LABELS ─────────────────────────────────────────────────────────────
+async function sbLoadTextLabelsDB() {
+  if (!sbUser) return;
+  const { data } = await sb.from('text_labels').select('*').eq('korisnik_id', sbUser.id);
+  if (!data) return;
+  data.forEach(row => {
+    const lbl = { id: row.label_id, lat: row.lat, lng: row.lng, text: row.tekst, size: row.velicina, color: row.boja };
+    lbl.marker = createTextMarker(lbl);
+    textLabels.push(lbl);
+  });
+}
+
+async function sbSaveTextLabels() {
+  if (!sbUser || !sbProfile) return;
+  await sb.from('text_labels').delete().eq('korisnik_id', sbUser.id);
+  if (textLabels.length === 0) return;
+  sb.from('text_labels').insert(
+    textLabels.map(l => ({
+      korisnik_id: sbUser.id,
+      sumarija:    sbProfile.sumarija || '',
+      label_id:    l.id,
+      lat: l.lat, lng: l.lng,
+      tekst: l.text, velicina: l.size, boja: l.color
+    }))
+  ).then(({error}) => { if (error) console.error('Greška text labels:', error); });
+}
+
+// ─── REALTIME ────────────────────────────────────────────────────────────────
+function sbStartRealtime() {
+  if (!sbProfile?.sumarija) return;
+  sb.channel('vlake-realtime')
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'vlake',
+      filter: `sumarija=eq.${sbProfile.sumarija}`
+    }, payload => {
+      const changedBy = payload.new?.korisnik_id || payload.old?.korisnik_id;
+      if (changedBy && changedBy !== sbUser?.id) {
+        sbLoadKolegeVlake();
+      }
+    })
+    .subscribe();
+}
+
+// =====================================================================
 // === MGI ZONE 6 BOSNIA ===
 // MGI (Militar-Geographisches Institut) / Balkans zone 6 — EPSG:31276
 proj4.defs('MGI-ZONE6', '+proj=tmerc +lat_0=0 +lon_0=18 +k=0.9999 +x_0=6500000 +y_0=0 +ellps=bessel +towgs84=682,-203,480,0,0,0,0 +units=m +no_defs');
@@ -1095,7 +1304,7 @@ let textLabels = [];
 let editingLabelId = null;
 
 // === MAP ===
-const map = L.map('map',{zoomControl:true,attributionControl:false}).setView([44.55,16.85],13);
+const map = L.map('map',{zoomControl:false,attributionControl:false}).setView([44.55,16.85],13);
 const TL = {
   '🛰 Satelit': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20}),
   '🗺 Karta':   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}),
@@ -1240,6 +1449,7 @@ function _stopAddLine(fromUser) {
   document.getElementById('banner').classList.remove('show');
   drawUndoStack = [];
   if (fromUser) {
+    if (actI !== null) sbFlushVlaka(actI);
     if (bufLayers.length > 0) drawBuffers();
     setActiveTool('select');
   }
@@ -1273,6 +1483,7 @@ function _stopEdit(fromUser) {
   document.getElementById('merge-sec').style.display = 'none';
   if (snapRingMk) { map.removeLayer(snapRingMk); snapRingMk = null; }
   if (fromUser) {
+    if (actI !== null) sbFlushVlaka(actI);
     if (bufLayers.length > 0) drawBuffers();
     rndList(); updOvl();
   }
@@ -1339,7 +1550,8 @@ function addV() {
   const color = selC;
   const poly  = L.polyline([],{color,weight:4,opacity:0.9}).addTo(map);
   poly.bindTooltip(nm,{sticky:true,opacity:0.9});
-  vlake.push({nm,br,kr,color,pts:[],poly,wpts:[]});
+  vlake.push({nm,br,kr,color,pts:[],poly,wpts:[],sbId:null});
+  sbFlushVlaka(vlake.length-1);
   cIdx=(cIdx+1)%PAL.length; selC=PAL[cIdx];
   document.querySelectorAll('.cdot').forEach((d,j)=>d.classList.toggle('sel',j===cIdx));
   rndList(); // build list first so selI finds the rows
@@ -1511,6 +1723,7 @@ function addPt(i, la, lo, al) {
   }
   v.pts.push({la, lo, al});
   v.poly.addLatLng([la, lo]);
+  scheduleVlakaSave(i);
   updBan(); updOvl(); rndList();
   // Only redraw buffers when not actively drawing (expensive per-point)
   if (bufLayers.length > 0 && activeTool !== 'addline' && activeTool !== 'addpoint' && !recOn) {
@@ -1584,6 +1797,8 @@ function dlV(i) {
   if (!confirm(`Obrisati vlaku ${vlake[i].nm}?`)) return;
   map.removeLayer(vlake[i].poly);
   vlake[i].wpts.forEach(m=>map.removeLayer(m));
+  sbDeleteVlaka(vlake[i].sbId);
+  clearTimeout(_vlakaSaveTimers[i]);
   vlake.splice(i,1);
   if (actI===i) {
     actI = vlake.length > 0 ? Math.min(i, vlake.length-1) : null;
@@ -1722,6 +1937,7 @@ function buildEditHandles(vi) {
       updOvl(); // light update only
     });
     mk.on('dragend', function(){
+      scheduleVlakaSave(vi);
       rndList(); // full rebuild once drag is done
       if(bufLayers.length>0) drawBuffers();
     });
@@ -1765,6 +1981,7 @@ function rebuildMidHandles(vi) {
       // insert new point at midpoint
       v.pts.splice(segIdx+1,0,{la:mla,lo:mlo,al:0});
       syncPoly(vi);
+      scheduleVlakaSave(vi);
       buildEditHandles(vi);
       updOvl(); rndList();
       showToast('➕ Nova tačka dodana na segment');
@@ -1778,6 +1995,7 @@ function deleteNode(vi, pi) {
   if (v.pts.length <= 2) { showToast('⚠ Vlaka mora imati najmanje 2 tačke!'); return; }
   v.pts.splice(pi, 1);
   syncPoly(vi);
+  scheduleVlakaSave(vi);
   buildEditHandles(vi);
   updOvl(); rndList();
   if (bufLayers.length > 0) drawBuffers();
@@ -1905,9 +2123,11 @@ function doMerge(a,b){
   // Keep vlaka a, remove b
   va.pts=merged;
   syncPoly(a.vi);
+  sbFlushVlaka(a.vi);
   // Remove vlaka b from map and array
   map.removeLayer(vb.poly);
   vb.wpts.forEach(m=>map.removeLayer(m));
+  sbDeleteVlaka(vb.sbId);
   vlake.splice(b.vi,1);
   // Fix actI: after splice, a.vi may have shifted if b.vi < a.vi
   const finalIdx = b.vi < a.vi ? a.vi - 1 : a.vi;
@@ -2052,6 +2272,7 @@ function saveProj() {
     datum:    document.getElementById('p-datum').value,
     ime:      document.getElementById('p-ime').value,
   }));
+  sbSaveProj();
 }
 
 function getIme()   { return document.getElementById('p-ime').value.trim() || 'Nepoznat'; }
@@ -2164,6 +2385,7 @@ function logDan() {
   if (entry) { entry.meters=totalM; entry.vlake=vSnap; entry.vlakeNm=vSnap.map(v=>v.nm); }
   else        { day.entries.push({projektant:ime,meters:totalM,vlake:vSnap,vlakeNm:vSnap.map(v=>v.nm)}); }
   localStorage.setItem('tvlake_log', JSON.stringify(dnevniLog));
+  sbSaveLogEntry(date, ime, totalM, vSnap);
   rndLog(); updProjStats();
   const b=document.getElementById('proj-panel').querySelector('[onclick="logDan()"]');
   if(b){const t=b.textContent;b.textContent='✅ Zabilježeno!';setTimeout(()=>b.textContent=t,1800);}
@@ -2171,6 +2393,7 @@ function logDan() {
 function clearLog() {
   if (!confirm('Obrisati cijeli dnevnik radova?')) return;
   dnevniLog=[]; localStorage.removeItem('tvlake_log');
+  sbClearLog();
   rndLog(); updProjStats();
 }
 
@@ -2422,6 +2645,7 @@ function deleteTextLabel(id) {
 function saveTextLabels() {
   const data = textLabels.map(l => ({id:l.id,lat:l.lat,lng:l.lng,text:l.text,size:l.size,color:l.color}));
   localStorage.setItem('tvlake_textlabels', JSON.stringify(data));
+  sbSaveTextLabels();
 }
 
 function loadTextLabels() {
@@ -2439,7 +2663,7 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-loadTextLabels();
+// loadTextLabels() — zamijenjeno sa sbLoadTextLabelsDB() u sbInitData()
 
 // =====================================================================
 // === PRINT / ŠTAMPANJE ===
