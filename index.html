@@ -8,7 +8,35 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
+
+/* === AUTH SCREEN === */
+#auth-screen {
+  display:flex; position:fixed; inset:0; z-index:99999;
+  background:#0f172a; align-items:center; justify-content:center;
+}
+.auth-box {
+  background:#16213e; border:1px solid #0f3460; border-radius:14px;
+  padding:30px 28px; width:340px; max-width:95vw;
+}
+.auth-logo { text-align:center; margin-bottom:22px; }
+.auth-logo-icon { font-size:36px; }
+.auth-logo-title { font-size:21px; font-weight:bold; color:#4ade80; margin-top:6px; }
+.auth-subtitle { font-size:13px; color:#64748b; text-align:center; margin-bottom:18px; }
+.auth-err {
+  color:#f87171; font-size:12px; text-align:center;
+  margin-top:10px; display:none; background:rgba(220,38,38,0.1);
+  border:1px solid rgba(220,38,38,0.3); border-radius:6px; padding:7px 10px;
+}
+.auth-divider { text-align:center; color:#374151; font-size:12px; margin:12px 0; }
+.auth-user-row {
+  display:flex; align-items:center; gap:8px;
+  padding:8px 0; border-bottom:1px solid #1e293b;
+}
+.auth-user-info { flex:1; }
+.auth-user-name { font-size:13px; font-weight:bold; color:#e2e8f0; }
+.auth-user-meta { font-size:11px; color:#64748b; margin-top:1px; }
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; font-family: Arial, sans-serif; background:#1a1a2e; color:#eee; overflow:hidden; }
 
@@ -450,7 +478,53 @@ select:focus { outline:none; border-color:#3b82f6; }
 </style>
 </head>
 <body>
-<div id="wrapper">
+
+<!-- ===== AUTH SCREEN ===== -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">🌲</div>
+      <div class="auth-logo-title">Traktorske Vlake</div>
+    </div>
+
+    <!-- LOGIN FORMA -->
+    <div id="auth-login-form">
+      <div class="auth-subtitle">Prijava</div>
+      <span class="lbl">Ime</span>
+      <input class="pinput" id="auth-ime" placeholder="Vaše ime" autocomplete="given-name">
+      <span class="lbl">Prezime</span>
+      <input class="pinput" id="auth-prezime" placeholder="Vaše prezime" autocomplete="family-name">
+      <span class="lbl">PIN</span>
+      <input class="pinput" id="auth-pin" type="password" inputmode="numeric" placeholder="PIN (4–8 cifara)" maxlength="8"
+             onkeydown="if(event.key==='Enter')doLogin()">
+      <button class="btn g" style="margin-top:14px;" onclick="doLogin()">→ PRIJAVA</button>
+      <div class="auth-divider">ili</div>
+      <button class="btn gr" onclick="authShowReg()">Registracija novog korisnika</button>
+      <div class="auth-err" id="auth-err"></div>
+    </div>
+
+    <!-- REGISTRACIJA FORMA -->
+    <div id="auth-reg-form" style="display:none;">
+      <div class="auth-subtitle">Registracija</div>
+      <span class="lbl">Ime *</span>
+      <input class="pinput" id="reg-ime" placeholder="Vaše ime">
+      <span class="lbl">Prezime *</span>
+      <input class="pinput" id="reg-prezime" placeholder="Vaše prezime">
+      <span class="lbl">Šumarija / Gazdinstvo *</span>
+      <input class="pinput" id="reg-sumarija" placeholder="Naziv šumarije">
+      <span class="lbl">PIN * (4–8 cifara)</span>
+      <input class="pinput" id="reg-pin" type="password" inputmode="numeric" placeholder="Odaberite PIN" maxlength="8">
+      <span class="lbl">Potvrda PIN-a *</span>
+      <input class="pinput" id="reg-pin2" type="password" inputmode="numeric" placeholder="Ponovite PIN" maxlength="8"
+             onkeydown="if(event.key==='Enter')doRegister()">
+      <button class="btn g" style="margin-top:14px;" onclick="doRegister()">✓ REGISTRUJ SE</button>
+      <button class="btn gr" style="margin-top:6px;" onclick="authShowLogin()">← Nazad na prijavu</button>
+      <div class="auth-err" id="reg-err"></div>
+    </div>
+  </div>
+</div>
+
+<div id="wrapper" style="display:none;">
 
   <div id="topbar">
     <div class="app-title">🌲 Vlake</div>
@@ -471,6 +545,9 @@ select:focus { outline:none; border-color:#3b82f6; }
         <div class="mdrop-sep"></div>
         <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('vlake')">📐 Panel vlaka</div>
         <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('projekat')">📁 Projekat</div>
+        <div class="mdrop-sep"></div>
+        <div class="mdrop-item" id="menu-user-label" style="color:#64748b;font-size:11px;pointer-events:none;padding:6px 14px;">—</div>
+        <div class="mdrop-item" style="color:#f87171;" onclick="closeMenuDropdown();doLogout()">⎋ Odjava</div>
       </div>
     </div>
     <button id="mbtn" class="tbtn tbtn-gray" style="display:none;" onclick="togglePanel()">☰ Panel</button>
@@ -621,6 +698,14 @@ select:focus { outline:none; border-color:#3b82f6; }
           <button class="btn gr" style="margin:0;width:auto;padding:8px 12px;font-size:13px;" onclick="clearLog()" title="Obriši log">🗑</button>
         </div>
         <div id="dnevni-log"></div>
+      </div>
+
+      <!-- ADMIN PANEL -->
+      <div class="sec" id="admin-sec" style="display:none;">
+        <div class="sec-t">🔑 Admin — Korisnici</div>
+        <div id="admin-user-list" style="font-size:12px;color:#64748b;text-align:center;padding:8px 0;">
+          Učitavam...
+        </div>
       </div>
 
       <!-- KML DIJELJENJE -->
@@ -781,6 +866,181 @@ select:focus { outline:none; border-color:#3b82f6; }
 </div>
 
 <script>
+// =====================================================================
+// === SUPABASE AUTH ===
+// =====================================================================
+const SUPA_URL = 'https://djguplhaayjvwmdlxevx.supabase.co';
+const SUPA_KEY = 'sb_publishable_eccquEW5tzOJUmAu_TK0uw_jKOjTLrs';
+const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+let sbUser = null;
+let sbProfile = null;
+
+async function initAuth() {
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      sbUser = session.user;
+      await sbLoadProfile();
+      showApp();
+    }
+    // else: auth screen already visible (it's shown by default)
+  } catch(e) {
+    console.error('Auth init error:', e);
+  }
+}
+
+async function sbLoadProfile() {
+  const { data } = await sb.from('korisnici').select('*').eq('id', sbUser.id).single();
+  sbProfile = data;
+  if (data) {
+    document.getElementById('p-ime').value = data.ime + ' ' + data.prezime;
+    if (data.sumarija) document.getElementById('p-sumarija').value = data.sumarija;
+    // Show user label in dropdown
+    const lbl = document.getElementById('menu-user-label');
+    if (lbl) lbl.textContent = '👤 ' + data.ime + ' ' + data.prezime;
+    if (data.is_admin) {
+      document.getElementById('admin-sec').style.display = 'block';
+      adminLoadUsers();
+    }
+  }
+}
+
+function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('wrapper').style.display = 'flex';
+  loadProj();
+}
+
+// --- Auth form helpers ---
+function authShowLogin() {
+  document.getElementById('auth-login-form').style.display = 'block';
+  document.getElementById('auth-reg-form').style.display = 'none';
+  document.getElementById('auth-err').style.display = 'none';
+}
+
+function authShowReg() {
+  document.getElementById('auth-login-form').style.display = 'none';
+  document.getElementById('auth-reg-form').style.display = 'block';
+  document.getElementById('reg-err').style.display = 'none';
+}
+
+function showAuthErr(msg, isReg) {
+  const el = document.getElementById(isReg ? 'reg-err' : 'auth-err');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// --- Login ---
+async function doLogin() {
+  const ime     = document.getElementById('auth-ime').value.trim();
+  const prezime = document.getElementById('auth-prezime').value.trim();
+  const pin     = document.getElementById('auth-pin').value.trim();
+
+  document.getElementById('auth-err').style.display = 'none';
+  if (!ime || !prezime || !pin) { showAuthErr('Popunite sva polja'); return; }
+
+  // Look up internal email by name
+  const { data: email, error: lookupErr } = await sb.rpc('get_login_email', { p_ime: ime, p_prezime: prezime });
+  if (lookupErr || !email) { showAuthErr('Korisnik nije pronađen. Provjerite ime i prezime.'); return; }
+
+  const { error } = await sb.auth.signInWithPassword({ email, password: pin.padEnd(6, '0') });
+  if (error) { showAuthErr('Pogrešan PIN.'); return; }
+
+  sbUser = (await sb.auth.getUser()).data.user;
+  await sbLoadProfile();
+  showApp();
+}
+
+// --- Register ---
+async function doRegister() {
+  const ime      = document.getElementById('reg-ime').value.trim();
+  const prezime  = document.getElementById('reg-prezime').value.trim();
+  const sumarija = document.getElementById('reg-sumarija').value.trim();
+  const pin      = document.getElementById('reg-pin').value.trim();
+  const pin2     = document.getElementById('reg-pin2').value.trim();
+
+  document.getElementById('reg-err').style.display = 'none';
+  if (!ime || !prezime || !sumarija || !pin) { showAuthErr('Popunite sva obavezna polja', true); return; }
+  if (!/^\d+$/.test(pin))  { showAuthErr('PIN smije sadržavati samo cifre', true); return; }
+  if (pin.length < 4)      { showAuthErr('PIN mora imati najmanje 4 cifre', true); return; }
+  if (pin !== pin2)        { showAuthErr('PIN-ovi se ne poklapaju', true); return; }
+
+  // Check if name already taken
+  const { data: existing } = await sb.from('korisnici')
+    .select('id').eq('ime', ime).eq('prezime', prezime).maybeSingle();
+  if (existing) { showAuthErr(`Korisnik "${ime} ${prezime}" već postoji`, true); return; }
+
+  // Generate unique internal email (never shown to user)
+  const slug = `${ime.toLowerCase().replace(/[^a-z]/g,'')}.${prezime.toLowerCase().replace(/[^a-z]/g,'')}`;
+  const loginEmail = `${slug}.${Date.now()}@tvlake.ba`;
+
+  const { data, error } = await sb.auth.signUp({ email: loginEmail, password: pin.padEnd(6, '0') });
+  if (error) { showAuthErr('Greška: ' + error.message, true); return; }
+
+  const { error: insertErr } = await sb.from('korisnici').insert({
+    id: data.user.id, ime, prezime, sumarija, login_email: loginEmail
+  });
+  if (insertErr) { showAuthErr('Greška pri kreiranju profila: ' + insertErr.message, true); return; }
+
+  sbUser = data.user;
+  await sbLoadProfile();
+  showApp();
+}
+
+// --- Logout ---
+async function doLogout() {
+  await sb.auth.signOut();
+  sbUser = null; sbProfile = null;
+  document.getElementById('wrapper').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('admin-sec').style.display = 'none';
+  authShowLogin();
+  document.getElementById('auth-ime').value = '';
+  document.getElementById('auth-prezime').value = '';
+  document.getElementById('auth-pin').value = '';
+}
+
+// --- Admin: load user list ---
+async function adminLoadUsers() {
+  const { data } = await sb.from('korisnici').select('*').order('created_at', { ascending: false });
+  const el = document.getElementById('admin-user-list');
+  if (!data || data.length === 0) {
+    el.innerHTML = '<p style="color:#64748b;font-size:12px;text-align:center;padding:6px 0;">Nema registrovanih korisnika</p>';
+    return;
+  }
+  el.innerHTML = data.map(u => `
+    <div class="auth-user-row">
+      <div class="auth-user-info">
+        <div class="auth-user-name">
+          ${u.ime} ${u.prezime}
+          ${u.is_admin ? '<span style="color:#fbbf24;font-size:10px;"> ★ ADMIN</span>' : ''}
+        </div>
+        <div class="auth-user-meta">
+          ${u.sumarija || '—'} &nbsp;·&nbsp;
+          ${u.created_at ? new Date(u.created_at).toLocaleDateString('bs-BA') : ''}
+        </div>
+      </div>
+      ${!u.is_admin ? `
+        <button onclick="adminDeleteUser('${u.id}','${u.ime} ${u.prezime}')"
+          style="background:#dc2626;color:#fff;border:none;border-radius:5px;
+                 padding:5px 11px;font-size:12px;cursor:pointer;flex-shrink:0;">
+          Obriši
+        </button>` : ''}
+    </div>
+  `).join('');
+}
+
+// --- Admin: delete user ---
+async function adminDeleteUser(userId, name) {
+  if (!confirm(`Obrisati korisnika "${name}"?\n\nOva radnja je trajna.`)) return;
+  const { error } = await sb.rpc('admin_delete_user', { target_id: userId });
+  if (error) { alert('Greška pri brisanju: ' + error.message); return; }
+  showToast(`Korisnik "${name}" obrisan`);
+  adminLoadUsers();
+}
+
+// =====================================================================
 // === MGI ZONE 6 BOSNIA ===
 // MGI (Militar-Geographisches Institut) / Balkans zone 6 — EPSG:31276
 proj4.defs('MGI-ZONE6', '+proj=tmerc +lat_0=0 +lon_0=18 +k=0.9999 +x_0=6500000 +y_0=0 +ellps=bessel +towgs84=682,-203,480,0,0,0,0 +units=m +no_defs');
@@ -2010,7 +2270,7 @@ function switchTab(tab) {
   }
 }
 
-loadProj();
+initAuth();
 
 // =====================================================================
 // === TEKST LABELE NA MAPI ===
