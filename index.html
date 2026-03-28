@@ -49,6 +49,7 @@ html, body { height:100%; font-family: Arial, sans-serif; background:#1a1a2e; co
   padding:8px 12px;
   display:flex; align-items:center; gap:8px;
   flex-shrink:0; flex-wrap:wrap;
+  position:relative; z-index:100;
 }
 .app-title { font-size:18px; font-weight:bold; color:#4ade80; white-space:nowrap; }
 #gps-info { font-size:11px; color:#94a3b8; font-family:monospace; flex:1; min-width:100px; }
@@ -530,6 +531,7 @@ select:focus { outline:none; border-color:#3b82f6; }
     <div class="app-title">🌲 Vlake</div>
     <div id="gps-info">GPS: isključen</div>
     <button class="tbtn tbtn-blue" onclick="toggleGPS()">📡 GPS</button>
+    <button class="tbtn tbtn-gray" onclick="centerMap()">🎯 Centar</button>
     <!-- MENI DROPDOWN -->
     <div style="position:relative;display:inline-block;">
       <button class="tbtn tbtn-gray" onclick="toggleMenuDropdown()" id="menu-btn">☰ Meni ▾</button>
