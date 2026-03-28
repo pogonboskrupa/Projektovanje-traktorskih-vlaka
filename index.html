@@ -687,7 +687,8 @@ select:focus { outline:none; border-color:#3b82f6; }
       <div class="sec">
         <div class="sec-t">📁 Podaci o projektu</div>
         <span class="lbl">Odjel</span>
-        <input class="pinput" id="p-odjel" oninput="saveProj()">
+        <input class="pinput" id="p-odjel" oninput="saveProj()" onchange="onOdjelChange()" list="odjeli-list" autocomplete="off" placeholder="npr. RISOVAC KRUPA 45">
+        <datalist id="odjeli-list"></datalist>
         <span class="lbl">G.J.</span>
         <input class="pinput" id="p-sumarija" oninput="saveProj()">
         <div style="display:flex;gap:8px;">
@@ -1122,6 +1123,7 @@ async function sbInitData() {
     sbLoadTextLabelsDB()
   ]);
   sbLoadKolege();
+  sbLoadOdjeli();
   await sbLoadKolegeVlake();
   sbStartRealtime();
 }
@@ -1134,6 +1136,8 @@ async function sbLoadProj() {
     document.getElementById('p-odjel').value    = data.odjel    || '';
     if (data.povrsina) document.getElementById('p-povrsina').value = data.povrsina;
     if (data.datum)    document.getElementById('p-datum').value    = data.datum;
+    // Registruj odjel u dijeljeni popis
+    if (data.odjel) sbSaveOdjel(data.odjel);
   }
   rndKolege(); rndLog(); updProjStats();
 }
@@ -1187,6 +1191,7 @@ async function sbFlushVlaka(i) {
   const { data, error } = await sb.from('vlake').upsert({
     korisnik_id: sbUser.id,
     sumarija:    sbProfile.sumarija || '',
+    odjel:       getOdjel() || '',
     nm: v.nm, br: v.br, kr: v.kr, boja: v.color,
     lager: v.lager || null,
     pts: v.pts,
@@ -1204,12 +1209,16 @@ async function sbDeleteVlaka(sbId) {
 // ─── KOLEGE VLAKE (read-only prikaz na mapi) ─────────────────────────────────
 async function sbLoadKolegeVlake() {
   if (!sbProfile?.sumarija || !sbUser) return;
-  const { data } = await sb.from('vlake')
-    .select('nm, korisnik_id, pts')
-    .eq('sumarija', sbProfile.sumarija)
-    .neq('korisnik_id', sbUser.id);
+  const odjel = getOdjel();
   kolegeVlake.forEach(p => map.removeLayer(p));
   kolegeVlake = [];
+  if (!odjel) return; // ne prikazuj ništa dok odjel nije odabran
+  let q = sb.from('vlake')
+    .select('nm, korisnik_id, pts, boja')
+    .eq('sumarija', sbProfile.sumarija)
+    .eq('odjel', odjel)
+    .neq('korisnik_id', sbUser.id);
+  const { data } = await q;
   if (!data) return;
 
   // Grupišemo po korisniku da dodijelimo boje po redoslijedu ako nema u kolegeMap
@@ -1305,6 +1314,42 @@ async function sbLoadKolege() {
   rndKolege();
 }
 
+// ─── ODJELI (dijeljeni popis po šumariji) ─────────────────────────────────────
+let _odjelSaveTimer = null;
+function debouncedSaveOdjel() {
+  clearTimeout(_odjelSaveTimer);
+  _odjelSaveTimer = setTimeout(() => {
+    const naziv = getOdjel();
+    if (naziv) sbSaveOdjel(naziv);
+  }, 1500);
+}
+
+async function sbSaveOdjel(naziv) {
+  if (!sbUser || !sbProfile?.sumarija || !naziv) return;
+  await sb.from('odjeli').upsert({
+    sumarija: sbProfile.sumarija,
+    naziv,
+    korisnik_id: sbUser.id
+  }, { onConflict: 'sumarija,naziv' });
+}
+
+async function sbLoadOdjeli() {
+  if (!sbProfile?.sumarija) return;
+  const { data } = await sb.from('odjeli')
+    .select('naziv')
+    .eq('sumarija', sbProfile.sumarija)
+    .order('naziv');
+  if (!data) return;
+  const dl = document.getElementById('odjeli-list');
+  if (!dl) return;
+  dl.innerHTML = '';
+  data.forEach(row => {
+    const opt = document.createElement('option');
+    opt.value = row.naziv;
+    dl.appendChild(opt);
+  });
+}
+
 // ─── TEXT LABELS ─────────────────────────────────────────────────────────────
 async function sbLoadTextLabelsDB() {
   if (!sbUser) return;
@@ -1344,6 +1389,15 @@ function sbStartRealtime() {
       if (changedBy && changedBy !== sbUser?.id) {
         sbLoadKolegeVlake();
       }
+    })
+    .subscribe();
+
+  sb.channel('odjeli-realtime')
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'odjeli',
+      filter: `sumarija=eq.${sbProfile.sumarija}`
+    }, () => {
+      sbLoadOdjeli();
     })
     .subscribe();
 }
@@ -2613,6 +2667,12 @@ function saveProj() {
     ime:      document.getElementById('p-ime').value,
   }));
   sbSaveProj();
+  debouncedSaveOdjel();
+}
+
+function onOdjelChange() {
+  // Reload colleague vlake filtered to new odjel
+  sbLoadKolegeVlake();
 }
 
 function getIme()   { return document.getElementById('p-ime').value.trim() || 'Nepoznat'; }
