@@ -2806,6 +2806,35 @@ function showPrintModal() {
     opt.textContent = o.name;
     sel.appendChild(opt);
   });
+
+  // Auto-odabir na osnovu naziva odjela iz projekta
+  const projOdjel = getOdjel().trim().toLowerCase();
+  if (projOdjel && graniceOdjeli.length > 0) {
+    // Tražimo po nekoliko strategija: exact → contains → words overlap
+    let bestIdx = -1;
+    let bestScore = 0;
+    graniceOdjeli.forEach((o, i) => {
+      const kml = o.name.toLowerCase();
+      let score = 0;
+      if (kml === projOdjel) {
+        score = 100;
+      } else if (kml.includes(projOdjel) || projOdjel.includes(kml)) {
+        score = 50;
+      } else {
+        // Overlap po riječima (npr. "46" i "RISOVAC" u oba stringa)
+        const pw = projOdjel.split(/\s+/);
+        const kw = kml.split(/\s+/);
+        const common = pw.filter(w => w.length > 1 && kw.some(k => k.includes(w) || w.includes(k)));
+        score = common.length * 10;
+      }
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    });
+    if (bestIdx >= 0 && bestScore >= 10) {
+      sel.value = bestIdx;
+      onPrintOdjelChange();
+    }
+  }
+
   document.getElementById('print-modal').classList.add('show');
   updatePrintInfo();
 }
