@@ -350,18 +350,20 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 /* === OVERLAY MINIMIZACIJA === */
 #ovl {
-  position:fixed; bottom:14px; right:10px;
+  position:fixed; bottom:0; right:0;
   background:rgba(15,23,42,0.93); border:1px solid #1e3a5f;
-  border-radius:8px;
+  border-radius:8px 0 0 0;
   font-family:monospace; font-size:12px; z-index:600;
   min-width:175px;
-  transition:all 0.2s;
   pointer-events:auto;
+  touch-action:none;
+  cursor:grab;
 }
+#ovl.dragging { cursor:grabbing; border-radius:8px; opacity:0.92; }
 #ovl-header {
   display:flex;align-items:center;justify-content:space-between;
-  padding:6px 10px;cursor:pointer;user-select:none;
-  border-radius:8px 8px 0 0;
+  padding:6px 10px;user-select:none;
+  border-radius:inherit;
   pointer-events:auto;
 }
 #ovl-header:hover { background:rgba(59,130,246,0.1); }
@@ -1543,13 +1545,85 @@ function closeMenuDropdown() {
   document.getElementById('menu-dropdown').style.display = 'none';
 }
 
-// === OVERLAY MINIMIZACIJA ===
+// === OVERLAY MINIMIZACIJA + DRAG ===
 function toggleOvl() {
   const ovl = document.getElementById('ovl');
   const btn = document.getElementById('ovl-toggle');
   ovl.classList.toggle('minimized');
   btn.textContent = ovl.classList.contains('minimized') ? '▲' : '▼';
 }
+
+(function initOvlDrag() {
+  const ovl = document.getElementById('ovl');
+  let dragging = false, startX, startY, origLeft, origTop, moved = false;
+
+  function getPos() {
+    // Pretvori bottom/right u top/left za lakše pomjeranje
+    const r = ovl.getBoundingClientRect();
+    return { left: r.left, top: r.top };
+  }
+
+  function startDrag(cx, cy) {
+    const pos = getPos();
+    ovl.style.right  = 'auto';
+    ovl.style.bottom = 'auto';
+    ovl.style.left   = pos.left + 'px';
+    ovl.style.top    = pos.top  + 'px';
+    ovl.style.borderRadius = '8px';
+    startX = cx; startY = cy;
+    origLeft = pos.left; origTop = pos.top;
+    dragging = true; moved = false;
+    ovl.classList.add('dragging');
+  }
+
+  function moveDrag(cx, cy) {
+    if (!dragging) return;
+    const dx = cx - startX, dy = cy - startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+    const newLeft = Math.max(0, Math.min(window.innerWidth  - ovl.offsetWidth,  origLeft + dx));
+    const newTop  = Math.max(0, Math.min(window.innerHeight - ovl.offsetHeight, origTop  + dy));
+    ovl.style.left = newLeft + 'px';
+    ovl.style.top  = newTop  + 'px';
+  }
+
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    ovl.classList.remove('dragging');
+  }
+
+  // Mouse
+  ovl.addEventListener('mousedown', e => {
+    if (e.target.tagName === 'BUTTON') return;
+    e.preventDefault();
+    startDrag(e.clientX, e.clientY);
+  });
+  document.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
+  document.addEventListener('mouseup', endDrag);
+
+  // Touch
+  ovl.addEventListener('touchstart', e => {
+    if (e.target.tagName === 'BUTTON') return;
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (!dragging) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener('touchend', e => {
+    // Ako nije pomjeren → toggle minimizacija
+    if (!moved && dragging) toggleOvl();
+    endDrag();
+  });
+
+  // Klik na header (ne drag) → toggle
+  ovl.querySelector('#ovl-header').addEventListener('click', e => {
+    if (!moved) return; // već obrađeno touchend-om ili je klik na dugme
+  });
+})();
 
 // === QGIS MAP TOOLBAR ===
 function setActiveTool(tool) {
