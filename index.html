@@ -779,7 +779,7 @@ select:focus { outline:none; border-color:#3b82f6; }
       </div>
 
       <div id="ovl">
-        <div id="ovl-header" onclick="toggleOvl()">
+        <div id="ovl-header">
           <span>📍 MGI Zone 6 BiH</span>
           <button id="ovl-toggle" title="Minimiziraj">▼</button>
         </div>
@@ -1614,14 +1614,18 @@ function toggleOvl() {
     moveDrag(t.clientX, t.clientY);
   }, { passive: false });
   document.addEventListener('touchend', e => {
-    // Ako nije pomjeren → toggle minimizacija
-    if (!moved && dragging) toggleOvl();
+    if (!moved && dragging) {
+      // Spriječi sintetički click koji browser generira nakon toucha
+      e.preventDefault();
+      toggleOvl();
+    }
     endDrag();
   });
 
-  // Klik na header (ne drag) → toggle
+  // Desktop klik (mouse) → toggle ako nije povučen
   ovl.querySelector('#ovl-header').addEventListener('click', e => {
-    if (!moved) return; // već obrađeno touchend-om ili je klik na dugme
+    if (!moved) toggleOvl();
+    moved = false; // reset
   });
 })();
 
