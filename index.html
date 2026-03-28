@@ -530,8 +530,6 @@ select:focus { outline:none; border-color:#3b82f6; }
     <div class="app-title">🌲 Vlake</div>
     <div id="gps-info">GPS: isključen</div>
     <button class="tbtn tbtn-blue" onclick="toggleGPS()">📡 GPS</button>
-    <button class="tbtn tbtn-gray" onclick="centerMap()">🎯 Centar</button>
-    <button id="btn-text-tool" class="tbtn tbtn-gray" onclick="toggleTextTool()" title="Dodaj tekst / naziv odjela na kartu">🏷 Tekst</button>
     <!-- MENI DROPDOWN -->
     <div style="position:relative;display:inline-block;">
       <button class="tbtn tbtn-gray" onclick="toggleMenuDropdown()" id="menu-btn">☰ Meni ▾</button>
@@ -545,6 +543,8 @@ select:focus { outline:none; border-color:#3b82f6; }
         <div class="mdrop-sep"></div>
         <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('vlake')">📐 Panel vlaka</div>
         <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('projekat')">📁 Projekat</div>
+        <div class="mdrop-sep"></div>
+        <div class="mdrop-item" id="btn-text-tool" onclick="closeMenuDropdown();toggleTextTool()">🏷 Tekst na karti</div>
         <div class="mdrop-sep"></div>
         <div class="mdrop-item" id="menu-user-label" style="color:#64748b;font-size:11px;pointer-events:none;padding:6px 14px;">—</div>
         <div class="mdrop-item" style="color:#f87171;" onclick="closeMenuDropdown();doLogout()">⎋ Odjava</div>
@@ -2507,11 +2507,13 @@ function toggleTextTool() {
   if (textToolOn) {
     btn.style.background = '#7c3aed';
     btn.style.color = '#fff';
+    btn.style.fontWeight = 'bold';
     map.getContainer().style.cursor = 'text';
-    showToast('🏷 Klikni na kartu da dodaš tekst · Ponovo klikni 🏷 za izlaz');
+    showToast('🏷 Klikni na kartu da dodaš tekst · Meni → Tekst za izlaz');
   } else {
     btn.style.background = '';
     btn.style.color = '';
+    btn.style.fontWeight = '';
     // Restore cursor for current active tool
     const cursors = { select:'', addline:'crosshair', addpoint:'cell', edit:'default', delnode:'pointer', merge:'default' };
     map.getContainer().style.cursor = cursors[activeTool] || '';
