@@ -992,6 +992,26 @@ async function doRegister() {
 async function doLogout() {
   await sb.auth.signOut();
   sbUser = null; sbProfile = null;
+
+  // Očisti mapu i stanje
+  vlake.forEach(v => {
+    map.removeLayer(v.poly);
+    v.wpts.forEach(m => map.removeLayer(m));
+    if (v.labelMk) map.removeLayer(v.labelMk);
+  });
+  vlake = []; actI = null;
+
+  textLabels.forEach(l => { if (l.marker) map.removeLayer(l.marker); });
+  textLabels = [];
+
+  kolegeVlake.forEach(p => map.removeLayer(p));
+  kolegeVlake = [];
+
+  Object.keys(_vlakaSaveTimers).forEach(k => clearTimeout(_vlakaSaveTimers[k]));
+  _vlakaSaveTimers = {};
+
+  dnevniLog = []; kolege = [];
+
   document.getElementById('wrapper').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'flex';
   document.getElementById('admin-sec').style.display = 'none';
@@ -1098,7 +1118,7 @@ async function sbLoadVlake() {
     const color = row.boja || '#4ade80';
     const poly  = L.polyline([], { color, weight: 4, opacity: 0.9 }).addTo(map);
     poly.bindTooltip(row.nm, { sticky: true, opacity: 0.9 });
-    const v = { nm: row.nm, br: row.br, kr: row.kr, color, pts: row.pts || [], poly, wpts: [], sbId: row.id };
+    const v = { nm: row.nm, br: row.br, kr: row.kr, color, pts: row.pts || [], poly, wpts: [], sbId: row.id, labelMk: null };
     v.pts.forEach(p => poly.addLatLng([p.la, p.lo]));
     vlake.push(v);
   });
@@ -1555,7 +1575,7 @@ function addV() {
   const color = selC;
   const poly  = L.polyline([],{color,weight:4,opacity:0.9}).addTo(map);
   poly.bindTooltip(nm,{sticky:true,opacity:0.9});
-  vlake.push({nm,br,kr,color,pts:[],poly,wpts:[],sbId:null});
+  vlake.push({nm,br,kr,color,pts:[],poly,wpts:[],sbId:null,labelMk:null});
   sbFlushVlaka(vlake.length-1);
   cIdx=(cIdx+1)%PAL.length; selC=PAL[cIdx];
   document.querySelectorAll('.cdot').forEach((d,j)=>d.classList.toggle('sel',j===cIdx));
@@ -1808,6 +1828,11 @@ function dlV(i) {
   sbDeleteVlaka(vlake[i].sbId);
   clearTimeout(_vlakaSaveTimers[i]);
   vlake.splice(i,1);
+  // Reindeksiraj tajmere nakon splice
+  const nt = {};
+  Object.keys(_vlakaSaveTimers).forEach(k => { const n=+k; if(n<i) nt[n]=_vlakaSaveTimers[n]; else if(n>i) nt[n-1]=_vlakaSaveTimers[n]; });
+  Object.keys(_vlakaSaveTimers).forEach(k=>delete _vlakaSaveTimers[k]);
+  Object.assign(_vlakaSaveTimers, nt);
   if (actI===i) {
     actI = vlake.length > 0 ? Math.min(i, vlake.length-1) : null;
     stopActiveTool();
@@ -2157,6 +2182,7 @@ function doMerge(a,b){
   vb.wpts.forEach(m=>map.removeLayer(m));
   if (vb.labelMk) map.removeLayer(vb.labelMk);
   sbDeleteVlaka(vb.sbId);
+  clearTimeout(_vlakaSaveTimers[b.vi]);
   vlake.splice(b.vi,1);
   // Fix actI: after splice, a.vi may have shifted if b.vi < a.vi
   const finalIdx = b.vi < a.vi ? a.vi - 1 : a.vi;
