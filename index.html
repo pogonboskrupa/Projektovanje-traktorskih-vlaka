@@ -544,9 +544,9 @@ select:focus { outline:none; border-color:#3b82f6; }
     <div style="position:relative;display:inline-block;">
       <button class="tbtn tbtn-gray" onclick="toggleMenuDropdown(event)" id="menu-btn">☰ Meni ▾</button>
       <div id="menu-dropdown" style="
-        display:none;position:absolute;top:calc(100% + 4px);right:0;
+        display:none;position:fixed;top:0;right:0;
         background:#16213e;border:1px solid #0f3460;border-radius:8px;
-        min-width:220px;z-index:8000;box-shadow:0 8px 24px rgba(0,0,0,0.6);
+        min-width:220px;z-index:99000;box-shadow:0 8px 24px rgba(0,0,0,0.6);
         overflow:hidden;touch-action:manipulation;">
         <div class="mdrop-item" onclick="closeMenuDropdown();showExport()">⬆ KML Export</div>
         <div class="mdrop-item" onclick="closeMenuDropdown();showPrintModal()">🖨 Print / Štampanje</div>
@@ -1416,7 +1416,15 @@ document.addEventListener('keydown', e => {
 function toggleMenuDropdown(e) {
   if (e) e.stopPropagation();
   const dd = document.getElementById('menu-dropdown');
-  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+  if (dd.style.display === 'none') {
+    const btn = document.getElementById('menu-btn');
+    const r = btn.getBoundingClientRect();
+    dd.style.top = (r.bottom + 4) + 'px';
+    dd.style.right = (window.innerWidth - r.right) + 'px';
+    dd.style.display = 'block';
+  } else {
+    dd.style.display = 'none';
+  }
 }
 function closeMenuDropdown() {
   document.getElementById('menu-dropdown').style.display = 'none';
