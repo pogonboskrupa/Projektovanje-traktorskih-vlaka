@@ -905,6 +905,7 @@ async function sbLoadProfile() {
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('wrapper').style.display = 'flex';
+  setTimeout(() => map.invalidateSize(), 50);
   loadProj();      // lokalni podaci odmah
   sbInitData();    // Supabase async override
 }
