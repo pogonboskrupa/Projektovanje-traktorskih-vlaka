@@ -425,10 +425,32 @@ select:focus { outline:none; border-color:#3b82f6; }
   background:#16213e; border:1px solid #0f3460;
   border-radius:10px; padding:22px;
   width:420px; max-width:94vw;
+  max-height:90vh; overflow-y:auto;
 }
 .print-mbox h3 { font-size:16px; color:#4ade80; margin-bottom:14px; }
 .print-row { display:flex; gap:10px; margin-bottom:10px; align-items:flex-end; }
 .print-row > div { flex:1; }
+
+/* Offline modal */
+#offline-modal {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.82); z-index:9999;
+  align-items:center; justify-content:center;
+}
+#offline-modal.show { display:flex; }
+.offline-mbox {
+  background:#16213e; border:1px solid #0f3460;
+  border-radius:10px; padding:22px;
+  width:400px; max-width:94vw;
+}
+.offline-mbox h3 { font-size:16px; color:#38bdf8; margin-bottom:14px; }
+#offline-progress-bar {
+  height:8px; background:#0f172a; border-radius:4px; overflow:hidden; margin:10px 0;
+}
+#offline-progress-fill {
+  height:100%; background:#38bdf8; border-radius:4px;
+  transition:width 0.2s; width:0%;
+}
 .scale-btn {
   padding:8px 14px; border-radius:6px; border:2px solid #374151;
   background:#0f172a; color:#94a3b8; font-size:13px;
@@ -1364,14 +1386,61 @@ let textToolOn = false;
 let textLabels = [];
 let editingLabelId = null;
 
+// === OFFLINE TILE CACHE ===
+const TILE_CACHE_NAME = 'tvlake-tiles-v1';
+
+// Cache-backed tile layer — tiles se automatski čuvaju za offline
+function makeCachedTileLayer(urlTemplate, opts) {
+  return L.TileLayer.extend({
+    createTile(coords, done) {
+      const tile = document.createElement('img');
+      tile.setAttribute('role', 'presentation');
+      const url = this.getTileUrl(coords);
+      if (!('caches' in window)) {
+        tile.onload = () => done(null, tile);
+        tile.onerror = e => done(e, tile);
+        tile.src = url; return tile;
+      }
+      caches.open(TILE_CACHE_NAME).then(async cache => {
+        const cached = await cache.match(url);
+        if (cached) {
+          tile.src = URL.createObjectURL(await cached.blob());
+          done(null, tile); return;
+        }
+        try {
+          const resp = await fetch(url, { mode: 'cors' });
+          if (resp.ok) {
+            await cache.put(url, resp.clone());
+            tile.src = URL.createObjectURL(await resp.blob());
+            done(null, tile);
+          } else { throw new Error(); }
+        } catch {
+          tile.onload = () => done(null, tile);
+          tile.onerror = e => done(e, tile);
+          tile.src = url;
+        }
+      }).catch(() => {
+        tile.onload = () => done(null, tile);
+        tile.onerror = e => done(e, tile);
+        tile.src = url;
+      });
+      return tile;
+    }
+  });
+}
+
+const CachedTopo = makeCachedTileLayer();
+const CachedOsm  = makeCachedTileLayer();
+const CachedSat  = makeCachedTileLayer();
+
 // === MAP ===
 const map = L.map('map',{zoomControl:false,attributionControl:false}).setView([44.55,16.85],13);
 const TL = {
-  '🛰 Satelit': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20}),
-  '🗺 Karta':   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}),
-  '⛰ Topo':    L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17})
+  '⛰ Topo':    new CachedTopo('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17,subdomains:['a','b','c']}),
+  '🛰 Satelit': new CachedSat('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20}),
+  '🗺 Karta':   new CachedOsm('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19})
 };
-TL['🛰 Satelit'].addTo(map);
+TL['⛰ Topo'].addTo(map);  // Default: TOPO
 L.control.layers(TL,{},{position:'topright'}).addTo(map);
 
 // Prevent toolbar, overlay, and banner from passing events to Leaflet map
@@ -2983,6 +3052,168 @@ function calcZoomForScale(scale, lat, widthMM, heightMM) {
   return Math.max(1, Math.min(20, Math.round(z)));
 }
 
+// === OFFLINE MODAL ===
+function lngLatToTile(lat, lng, z) {
+  const n = Math.pow(2, z);
+  const x = Math.floor((lng + 180) / 360 * n);
+  const latR = lat * Math.PI / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * n);
+  return { x, y };
+}
+
+function countTiles(bounds, zMin, zMax) {
+  let total = 0;
+  for (let z = zMin; z <= zMax; z++) {
+    const sw = lngLatToTile(bounds.getSouth(), bounds.getWest(), z);
+    const ne = lngLatToTile(bounds.getNorth(), bounds.getEast(), z);
+    total += (Math.abs(ne.x - sw.x) + 1) * (Math.abs(sw.y - ne.y) + 1);
+  }
+  return total;
+}
+
+function buildTileUrls(bounds, zMin, zMax) {
+  const sub = ['a','b','c'];
+  const urls = [];
+  for (let z = zMin; z <= zMax; z++) {
+    const sw = lngLatToTile(bounds.getSouth(), bounds.getWest(), z);
+    const ne = lngLatToTile(bounds.getNorth(), bounds.getEast(), z);
+    for (let x = Math.min(sw.x,ne.x); x <= Math.max(sw.x,ne.x); x++) {
+      for (let y = Math.min(sw.y,ne.y); y <= Math.max(sw.y,ne.y); y++) {
+        const s = sub[(x+y)%3];
+        urls.push(`https://${s}.tile.opentopomap.org/${z}/${x}/${y}.png`);
+      }
+    }
+  }
+  return urls;
+}
+
+function showOfflineModal() {
+  const sel = document.getElementById('offline-area');
+  // Sačuvaj trenutnu opciju
+  const prev = sel.value;
+  // Popuni odjele
+  while (sel.options.length > 1) sel.remove(1);
+  graniceOdjeli.forEach((o, i) => {
+    const opt = document.createElement('option');
+    opt.value = 'odjel:' + i;
+    opt.textContent = o.name;
+    sel.appendChild(opt);
+  });
+  // Auto-odabir odjela iz projekta
+  const projOdjel = getOdjel().trim().toLowerCase();
+  if (projOdjel) {
+    let best = -1, bestScore = 0;
+    graniceOdjeli.forEach((o, i) => {
+      const kml = o.name.toLowerCase();
+      let score = kml === projOdjel ? 100 : (kml.includes(projOdjel)||projOdjel.includes(kml)) ? 50 : 0;
+      if (!score) {
+        const pw = projOdjel.split(/\s+/), kw = kml.split(/\s+/);
+        score = pw.filter(w => w.length>1 && kw.some(k=>k.includes(w)||w.includes(k))).length * 10;
+      }
+      if (score > bestScore) { bestScore = score; best = i; }
+    });
+    if (best >= 0 && bestScore >= 10) sel.value = 'odjel:' + best;
+  }
+  document.getElementById('offline-modal').classList.add('show');
+  updateOfflineEstimate();
+  showCacheInfo();
+}
+
+function closeOfflineModal() {
+  document.getElementById('offline-modal').classList.remove('show');
+}
+
+function getOfflineBounds() {
+  const v = document.getElementById('offline-area').value;
+  if (v.startsWith('odjel:')) {
+    const o = graniceOdjeli[+v.split(':')[1]];
+    if (o) return o.bounds;
+  }
+  return map.getBounds();
+}
+
+function updateOfflineEstimate() {
+  const bounds = getOfflineBounds();
+  const zMin = +document.getElementById('offline-zmin').value;
+  const zMax = +document.getElementById('offline-zmax').value;
+  if (zMin > zMax) { document.getElementById('offline-estimate').textContent = 'Min zoom ne može biti veći od max!'; return; }
+  const n = countTiles(bounds, zMin, zMax);
+  const mb = (n * 25 / 1024).toFixed(1); // ~25KB po tile
+  document.getElementById('offline-estimate').innerHTML =
+    `Procjena: <b style="color:#38bdf8">${n.toLocaleString()}</b> tile-ova · ≈ <b style="color:#fbbf24">${mb} MB</b><br>` +
+    `<span style="font-size:11px;color:#475569;">Zoom ${zMin}–${zMax} · Samo TOPO sloj</span>`;
+  document.getElementById('offline-dl-btn').disabled = n > 50000;
+  if (n > 50000) document.getElementById('offline-estimate').innerHTML += `<br><span style="color:#f87171;">Previše tile-ova — smanjite zoom ili područje</span>`;
+}
+
+async function showCacheInfo() {
+  if (!('caches' in window)) return;
+  const cache = await caches.open(TILE_CACHE_NAME);
+  const keys = await cache.keys();
+  document.getElementById('offline-cache-info').innerHTML =
+    keys.length > 0
+      ? `💾 U cache-u: <b style="color:#4ade80">${keys.length.toLocaleString()}</b> tile-ova · <a href="#" onclick="clearTileCache(event)" style="color:#f87171;">Obriši cache</a>`
+      : `💾 Cache je prazan`;
+}
+
+async function clearTileCache(e) {
+  e.preventDefault();
+  await caches.delete(TILE_CACHE_NAME);
+  showToast('Cache obrisan');
+  showCacheInfo();
+}
+
+let offlineAbort = false;
+async function startOfflineDownload() {
+  if (!('caches' in window)) { alert('Vaš browser ne podržava Cache API.'); return; }
+  const bounds = getOfflineBounds();
+  const zMin = +document.getElementById('offline-zmin').value;
+  const zMax = +document.getElementById('offline-zmax').value;
+  const urls = buildTileUrls(bounds, zMin, zMax);
+  if (urls.length === 0) return;
+
+  const btn = document.getElementById('offline-dl-btn');
+  btn.textContent = '⏹ Zaustavi';
+  btn.onclick = () => { offlineAbort = true; };
+  offlineAbort = false;
+
+  const bar = document.getElementById('offline-progress-bar');
+  const fill = document.getElementById('offline-progress-fill');
+  const status = document.getElementById('offline-status');
+  bar.style.display = 'block';
+
+  const cache = await caches.open(TILE_CACHE_NAME);
+  let done = 0, skipped = 0, failed = 0;
+
+  for (const url of urls) {
+    if (offlineAbort) break;
+    // Provjeri da li je već u cache-u
+    const existing = await cache.match(url);
+    if (existing) { skipped++; done++; }
+    else {
+      try {
+        const resp = await fetch(url, { mode: 'cors' });
+        if (resp.ok) { await cache.put(url, resp); done++; }
+        else failed++;
+      } catch { failed++; done++; }
+    }
+    const pct = Math.round(done / urls.length * 100);
+    fill.style.width = pct + '%';
+    if (done % 20 === 0 || done === urls.length) {
+      status.textContent = `${done} / ${urls.length} · preskočeno: ${skipped} · greška: ${failed}`;
+    }
+    // Mali delay da ne opteretimo server
+    if (done % 10 === 0) await new Promise(r => setTimeout(r, 50));
+  }
+
+  btn.textContent = '📥 Preuzmi';
+  btn.onclick = startOfflineDownload;
+  status.textContent = offlineAbort
+    ? `Prekinuto. Preuzeto ${done} tile-ova.`
+    : `✅ Gotovo! ${done - failed} tile-ova u cache-u.`;
+  showCacheInfo();
+}
+
 function showToast(msg) {
   let t = document.getElementById('toast-msg');
   if (!t) {
@@ -3050,6 +3281,7 @@ let graniceOdjeli = []; // [{ name, bounds }]
   touch-action:manipulation;">
   <div class="mdrop-item" onclick="closeMenuDropdown();showExport()">⬆ KML Export</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showPrintModal()">🖨 Print / Štampanje</div>
+  <div class="mdrop-item" onclick="closeMenuDropdown();showOfflineModal()">📥 Offline karta</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('vlake')">📐 Panel vlaka</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();switchTab('projekat')">📁 Projekat</div>
@@ -3058,6 +3290,59 @@ let graniceOdjeli = []; // [{ name, bounds }]
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" id="menu-user-label" style="color:#64748b;font-size:11px;pointer-events:none;padding:6px 14px;">—</div>
   <div class="mdrop-item" style="color:#f87171;" onclick="closeMenuDropdown();doLogout()">⎋ Odjava</div>
+</div>
+<!-- OFFLINE MODAL -->
+<div id="offline-modal" onclick="if(event.target===this)closeOfflineModal()">
+  <div class="offline-mbox">
+    <h3>📥 Preuzmi kartu za offline</h3>
+
+    <div style="margin-bottom:12px;">
+      <div class="lbl" style="margin-bottom:6px;">Područje za preuzimanje</div>
+      <select id="offline-area"
+        style="width:100%;padding:8px 10px;background:#0f172a;border:1px solid #374151;
+               border-radius:5px;color:#eee;font-size:13px;" onchange="updateOfflineEstimate()">
+        <option value="view">Trenutni prikaz karte</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <div class="lbl" style="margin-bottom:4px;">Nivoi zuma</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <div style="flex:1;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:3px;">Od</div>
+          <select id="offline-zmin" onchange="updateOfflineEstimate()"
+            style="width:100%;padding:7px 8px;background:#0f172a;border:1px solid #374151;border-radius:5px;color:#eee;font-size:13px;">
+            <option value="12">12</option><option value="13" selected>13</option>
+            <option value="14">14</option><option value="15">15</option>
+          </select>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:3px;">Do</div>
+          <select id="offline-zmax" onchange="updateOfflineEstimate()"
+            style="width:100%;padding:7px 8px;background:#0f172a;border:1px solid #374151;border-radius:5px;color:#eee;font-size:13px;">
+            <option value="14">14</option><option value="15">15</option>
+            <option value="16" selected>16</option><option value="17">17</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="offline-estimate" style="font-size:12px;color:#94a3b8;margin-bottom:12px;padding:8px;background:#0f172a;border-radius:6px;">
+      Odaberite područje...
+    </div>
+
+    <div id="offline-progress-bar" style="display:none;">
+      <div id="offline-progress-fill"></div>
+    </div>
+    <div id="offline-status" style="font-size:12px;color:#38bdf8;text-align:center;min-height:18px;margin-bottom:10px;"></div>
+
+    <div id="offline-cache-info" style="font-size:11px;color:#475569;margin-bottom:12px;"></div>
+
+    <div class="mbtns">
+      <button class="btn b" id="offline-dl-btn" onclick="startOfflineDownload()">📥 Preuzmi</button>
+      <button class="btn gr" onclick="closeOfflineModal()">Zatvori</button>
+    </div>
+  </div>
 </div>
 </body>
 </html>
