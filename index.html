@@ -1050,7 +1050,8 @@ async function sbInitData() {
     sbLoadProj(),
     sbLoadVlake(),
     sbLoadLog(),
-    sbLoadTextLabelsDB()
+    sbLoadTextLabelsDB(),
+    autoLoadGranice()
   ]);
   sbLoadKolege();
   await sbLoadKolegeVlake();
@@ -2815,21 +2816,25 @@ function showToast(msg) {
   t._to = setTimeout(() => t.style.opacity = '0', 2500);
 }
 
-// === AUTO-UČITAJ GRANICE.KML ===
-(function autoLoadGranice() {
-  fetch('GRANICE.KML')
-    .then(r => { if (!r.ok) throw new Error('404'); return r.text(); })
-    .then(txt => {
-      const col = '#22c55e';
-      const doc = new DOMParser().parseFromString(txt, 'text/xml');
-      const grp = pkml(doc, col);
-      grp.addTo(map);
-      kmlLs.push({name:'GRANICE.KML', grp, col, vis:true});
-      rndKml();
-      try { const b=grp.getBounds(); if(b.isValid()) map.fitBounds(b,{padding:[30,30]}); } catch(x){}
-    })
-    .catch(() => console.log('GRANICE.KML nije nađen — uploadajte ga u repo.'));
-})();
+// === AUTO-UČITAJ GRANICE.KML IZ SUPABASE STORAGE ===
+async function autoLoadGranice() {
+  try {
+    const { data, error } = await sb.storage
+      .from('Granice odjela')
+      .download('GRANICE.KML');
+    if (error) throw error;
+    const txt = await data.text();
+    const col = '#22c55e';
+    const doc = new DOMParser().parseFromString(txt, 'text/xml');
+    const grp = pkml(doc, col);
+    grp.addTo(map);
+    kmlLs.push({ name: 'GRANICE.KML', grp, col, vis: true });
+    rndKml();
+    try { const b = grp.getBounds(); if (b.isValid()) map.fitBounds(b, { padding: [30, 30] }); } catch(x) {}
+  } catch(e) {
+    console.warn('GRANICE.KML nije učitan iz Supabase Storage:', e.message);
+  }
+}
 </script>
 </body>
 </html>
