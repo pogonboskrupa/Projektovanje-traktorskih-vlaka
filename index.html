@@ -1806,19 +1806,29 @@ function addV() {
   selI(vlake.length-1);
 }
 
-function nextLagerNum() {
-  const used = vlake.map(v => v.lager).filter(Boolean);
+async function nextLagerNum() {
+  // Lokalni lageri (trenutni korisnik)
+  const used = new Set(vlake.map(v => v.lager).filter(Boolean));
+  // Lageri svih kolega u istoj šumariji (Supabase)
+  if (sbProfile?.sumarija) {
+    const { data } = await sb.from('vlake')
+      .select('lager')
+      .eq('sumarija', sbProfile.sumarija)
+      .not('lager', 'is', null);
+    if (data) data.forEach(r => { if (r.lager) used.add(r.lager); });
+  }
   let n = 1;
-  while (used.includes('L' + n)) n++;
+  while (used.has('L' + n)) n++;
   return 'L' + n;
 }
 
-function updLagerPreview() {
+async function updLagerPreview() {
   const chk = document.getElementById('ilager-chk');
   const prev = document.getElementById('ilager-preview');
   const inp = document.getElementById('ilager');
   if (chk.checked) {
-    const lbl = nextLagerNum();
+    prev.textContent = '→ ...';
+    const lbl = await nextLagerNum();
     prev.textContent = '→ ' + lbl;
     inp.value = lbl;
   } else {
