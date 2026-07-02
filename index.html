@@ -4132,7 +4132,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.9.1';
+const APP_VER = 'v3.9.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -11611,6 +11611,7 @@ function stopRec() {
   _recSegStart = 0;
   recOn = false; recPaused = false; _recParentIdx = null;
   _setFreeView(false);
+  _clearRecPreview();
   _kfReset(); _lastRecTime = 0;
   if (_precizActive) _precizReset();  // D3-Q: ne ostavljaj dugme zaglavljeno na "n/10"
   if (!_dozGpsOn) _releaseWakeLock();  // D4-E: ne gasi ekran ako Doznaka GPS i dalje radi
@@ -11672,6 +11673,7 @@ function toggleRecPause() {
   if (recPaused) {
     banner.classList.add('paused');
     btn.textContent = '▶'; btn.title = 'Nastavi snimanje';
+    _clearRecPreview();
     showToast('⏸ Snimanje pauzirano');
   } else {
     banner.classList.remove('paused');
@@ -12007,6 +12009,7 @@ function vratiSeNaRoditelja() {
   _dayWorkEnd = new Date().toISOString();
   _saveDayTiming(todayStr());
   recPaused = true;
+  _clearRecPreview();
   const banner = document.getElementById('rec-banner');
   const btn = document.getElementById('btn-pause');
   banner.classList.add('paused');
@@ -12344,7 +12347,11 @@ const GPS_RESTART_COOLDOWN = 5000;
 let _lastPtAcceptedAt   = 0;
 const GPS_GAP_WARN_MS   = 60000;
 
-function _gpsMedN()    { return _forestMode ? 5 : 3; }
+// Adaptivno po tačnosti: odličan signal (≤6m — otvoren teren, uz put) ne treba
+// medijanu-5 ni u šumskom modu — medijana od 5 prostorno KASNI ~2 fixa iza stvarne
+// pozicije i siječe unutrašnju stranu krivina. Pod krošnjama je tačnost tipično
+// 8–15m pa puna zaštita (5) ostaje automatski.
+function _gpsMedN(ac)  { return _forestMode ? ((ac != null && ac <= 6) ? 3 : 5) : 3; }
 function _gpsDistMul() { return _forestMode ? 0.5 : 0.35; }
 // D3-S: krakovi vlaka skreću i pod 90°+ — prag mora biti IZNAD pravog ugla (uz GPS
 // šum ~90° čita se do ~105°) da se legitiman oštar okret ne odbaci kao multipath.
@@ -12366,9 +12373,9 @@ let _gpsBuf = [];   // [{la, lo, ac}]
 function _gpsBufReset() { _gpsBuf = []; }
 
 function _gpsMedianPt(la, lo, ac) {
-  const N = _gpsMedN();
+  const N = _gpsMedN(ac);
   _gpsBuf.push({ la, lo, ac });
-  if (_gpsBuf.length > N) _gpsBuf.shift();
+  while (_gpsBuf.length > N) _gpsBuf.shift();
   if (_gpsBuf.length < N) return null;
   const m = Math.floor(N / 2);
   return {
@@ -12379,6 +12386,29 @@ function _gpsMedianPt(la, lo, ac) {
 }
 
 function _kfReset() { _kf = null; _gpsBuf = []; _altEma = null; }
+
+// ─── LIVE PREVIEW TRAGA ─────────────────────────────────────────────────────
+// Upisane tačke po dizajnu kasne za stvarnom pozicijom (medijana + Kalman + min-razmak
+// čekaju potvrdu prije upisa) pa puna linija "stoji pa povuče". Isprekidani segment od
+// zadnje upisane tačke do trenutne pozicije markera ažurira se na SVAKI fix — trag
+// vidljivo prati korisnika, a upisuje se i dalje samo filtrirano.
+let _recPrevLine = null;
+function _updRecPreview(la, lo) {
+  const v = (recOn && !recPaused && actI !== null) ? vlake[actI] : null;
+  if (!v || !v.pts.length) { _clearRecPreview(); return; }
+  const last = v.pts[v.pts.length - 1];
+  const pth = [[last.la, last.lo], [la, lo]];
+  if (!_recPrevLine) {
+    _recPrevLine = L.polyline(pth, { color: v.color || '#4ade80', weight: 3, opacity: 0.55,
+      dashArray: '6 8', interactive: false, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
+  } else {
+    _recPrevLine.setLatLngs(pth);
+    if (_recPrevLine.options.color !== (v.color || '#4ade80')) _recPrevLine.setStyle({ color: v.color || '#4ade80' });
+  }
+}
+function _clearRecPreview() {
+  if (_recPrevLine) { try { map.removeLayer(_recPrevLine); } catch(e) {} _recPrevLine = null; }
+}
 
 function _kfStep(la, lo, ac, tMs) {
   const R     = Math.max(KF_MIN_R, ac);
@@ -12523,6 +12553,9 @@ function onP(p) {
 
   // Navigacija do tačke — ažuriraj panel i liniju
   if (_tackaNavIdx !== null) _updateNavPanel(la, lo);
+
+  // Live preview segment prati SVAKI fix (isto kao marker pozicije) — vidi _updRecPreview
+  _updRecPreview(la, lo);
 
   if (!recOn || recPaused || actI === null) return;
 
