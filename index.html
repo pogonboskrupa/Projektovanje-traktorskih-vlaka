@@ -3126,7 +3126,7 @@ select:focus { outline:none; border-color:#3b82f6; }
     <button class="tab-btn" onclick="switchTab('projekat')">📁 Projekat</button>
     <button class="tab-btn" onclick="switchTab('vlake')">📐 Vlake<span class="tab-notif" id="notif-vlake"></span></button>
     <button class="tab-btn" onclick="switchTab('doznaka')">🌲 Doznaka<span class="tab-notif" id="notif-doznaka"></span></button>
-    <button class="tab-btn" id="admin-tab-btn" style="display:none;color:#fbbf24;" onclick="switchTab('admin')">👥 Korisnici</button>
+    <button class="tab-btn" id="admin-tab-btn" style="display:none;color:#fbbf24;" onclick="switchTab('admin')">👥 Korisnici<span class="tab-notif" id="notif-admin"></span></button>
     <button class="tab-btn" id="teren-tab-btn" style="display:none;color:#34d399;" onclick="switchTab('teren')">🧭 Teren</button>
     <span id="offline-badge" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:auto;flex-shrink:0;align-self:center;">📴 OFFLINE</span>
     <span id="sync-badge" onclick="openSyncQueuePanel()" style="display:none;background:#f59e0b;color:#000;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:4px;flex-shrink:0;align-self:center;cursor:pointer;user-select:none;" title="Pending operacije čekaju sync">⟳ <span id="sync-badge-cnt">0</span></span>
@@ -3505,7 +3505,7 @@ select:focus { outline:none; border-color:#3b82f6; }
       <div style="padding:14px 16px 10px;border-bottom:1px solid #1e3a5f;flex-shrink:0;">
         <div style="font-weight:700;color:#fbbf24;font-size:15px;margin-bottom:10px;">👥 Korisnici</div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <select id="admin-filter-sum" onchange="adminLoadUsers()"
+          <select id="admin-filter-sum" onchange="_adminRenderUsers()"
             style="flex:1;padding:7px 10px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:13px;">
             <option value="">— Sve šumarije —</option>
             <option>ŠPD US ŠUME</option>
@@ -3521,10 +3521,15 @@ select:focus { outline:none; border-color:#3b82f6; }
             🔄
           </button>
         </div>
+        <input type="text" id="admin-filter-name" placeholder="🔍 Ime ili prezime..." oninput="_adminRenderUsers()"
+          style="width:100%;margin-top:8px;padding:7px 10px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:13px;box-sizing:border-box;">
       </div>
-      <!-- Lista korisnika -->
-      <div id="admin-panel-user-list" style="flex:1;overflow-y:auto;padding:12px 16px;">
-        <p style="color:#64748b;font-size:12px;text-align:center;padding:16px 0;">Odaberi tab da učitaš...</p>
+      <!-- Statistika po šumariji + lista korisnika -->
+      <div style="flex:1;overflow-y:auto;">
+        <div id="admin-stats-box" style="display:none;margin:12px 16px 0;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px 12px;"></div>
+        <div id="admin-panel-user-list" style="padding:12px 16px;">
+          <p style="color:#64748b;font-size:12px;text-align:center;padding:16px 0;">Odaberi tab da učitaš...</p>
+        </div>
       </div>
     </div>
 
@@ -4132,7 +4137,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.9.2';
+const APP_VER = 'v3.9.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5189,21 +5194,39 @@ function showAdminModal() { switchTab('admin'); }
 function closeAdminModal() {}
 
 // --- Admin: učitaj listu korisnika ---
+let _adminUsers = null; // zadnji fetch — render/filter bez ponovnog RPC poziva
+
 async function adminLoadUsers() {
   if (!sbProfile?.is_admin) return;
   const el = document.getElementById('admin-panel-user-list');
   if (!el) return;
   el.innerHTML = '<p style="color:#64748b;font-size:12px;text-align:center;padding:16px 0;">⏳ Učitavam...</p>';
 
+  _adminLoadStats(); // paralelno, ne blokira listu
+
   const { data, error } = await sb.rpc('admin_get_all_users');
   if (error) {
     el.innerHTML = `<p style="color:#f87171;font-size:12px;text-align:center;padding:16px 0;">Greška: ${_escHtml(error.message)}</p>`;
     return;
   }
+  _adminUsers = data || [];
+  // Badge: broj neodobrenih — osvježi iz svježih podataka (bez dodatnog RPC-a)
+  _notifCounts.admin = _adminUsers.filter(u => u.odobren === false).length;
+  _notifRender('admin');
+  _adminRenderUsers();
+}
 
-  const filterSum = document.getElementById('admin-filter-sum')?.value || '';
-  let rows = data || [];
-  if (filterSum) rows = rows.filter(u => u.sumarija === filterSum);
+function _adminRenderUsers() {
+  if (!sbProfile?.is_admin || _adminUsers === null) return;
+  const el = document.getElementById('admin-panel-user-list');
+  if (!el) return;
+
+  const filterSum  = document.getElementById('admin-filter-sum')?.value || '';
+  const filterName = (document.getElementById('admin-filter-name')?.value || '').trim().toLowerCase();
+  let rows = _adminUsers;
+  if (filterSum)  rows = rows.filter(u => u.sumarija === filterSum);
+  if (filterName) rows = rows.filter(u =>
+    ((u.ime || '') + ' ' + (u.prezime || '')).toLowerCase().includes(filterName));
 
   if (!rows.length) {
     el.innerHTML = '<p style="color:#64748b;font-size:12px;text-align:center;padding:16px 0;">Nema korisnika</p>';
@@ -5248,6 +5271,11 @@ async function adminLoadUsers() {
           <div style="font-size:11px;color:#64748b;margin-bottom:${u.is_admin?'0':'8px'};">
             ${u.created_at ? fmtDateShort(u.created_at) : '—'}
             ${u.login_email ? ' · ' + _escHtml(u.login_email) : ''}
+            ${u.last_sign_in_at !== undefined
+              ? '<br>' + (u.last_sign_in_at
+                  ? '🕐 Aktivan: ' + fmtDateShort(u.last_sign_in_at)
+                  : '<span style="color:#7f8ea3;">nije se još prijavio</span>')
+              : ''}
           </div>
           ${!u.is_admin ? `
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
@@ -5329,6 +5357,45 @@ async function adminResetPin(userId, name) {
   await _dlgConfirm(`Novi PIN za "${name}" je: ${p}\n\nSaopšti ga korisniku — prijaviće se ovim PIN-om.`, { title: '✅ PIN resetovan', okLabel: 'U redu' });
 }
 
+// --- Admin: statistika po šumariji (korisnici · vlake · km) ---
+async function _adminLoadStats() {
+  if (!sbProfile?.is_admin) return;
+  const box = document.getElementById('admin-stats-box');
+  if (!box) return;
+  const { data, error } = await sb.rpc('admin_stats');
+  if (error) {
+    const missing = /function .*does not exist|schema cache|PGRST202/i.test(error.message || '') || error.code === 'PGRST202';
+    box.style.display = missing ? '' : 'none';
+    box.innerHTML = missing
+      ? '<div style="font-size:11px;color:#64748b;">📊 Statistika: primijeni migraciju 20260702 na Supabase</div>'
+      : '';
+    return;
+  }
+  const rows = (data || []).filter(r => r.sumarija);
+  if (!rows.length) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.innerHTML = `
+    <div style="font-size:11px;color:#64748b;font-weight:600;letter-spacing:0.5px;margin-bottom:6px;">📊 STATISTIKA PO ŠUMARIJI</div>
+    ${rows.map(r => `
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid rgba(51,65,85,0.4);">
+        <span style="color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.sumarija)}</span>
+        <span style="color:#94a3b8;white-space:nowrap;">👤 ${r.korisnika} · 📐 ${r.vlaka} · ${(Number(r.ukupno_m || 0) / 1000).toFixed(1)} km</span>
+      </div>`).join('')}`;
+}
+
+// --- Admin: provjera registracija na čekanju (poslije prijave) ---
+async function _adminCheckPending() {
+  if (!sbProfile?.is_admin) return;
+  try {
+    const { data, error } = await sb.rpc('admin_get_all_users');
+    if (error || !data) return;
+    const n = data.filter(u => u.odobren === false).length;
+    _notifCounts.admin = n;
+    _notifRender('admin');
+    if (n > 0) showToast(`⏳ ${n} korisnik${n === 1 ? '' : 'a'} čeka odobrenje — tab Korisnici`);
+  } catch(e) {}
+}
+
 // =====================================================================
 // === SUPABASE DATA ===
 // =====================================================================
@@ -5364,6 +5431,7 @@ async function sbInitData() {
   autoLoadAllKmlBuckets();        // fire-and-forget (granice u pozadini)
   if (navigator.onLine) _processOfflineQueue(); // flush any queued ops from offline sessions
   _updSyncBadge();               // prikaži badge ako ima pending ops iz prošle sesije
+  if (sbProfile?.is_admin) _adminCheckPending().catch(() => {}); // badge+toast: registracije na čekanju
   setTimeout(_crashCheck, 1500); // provjeri nedovršena snimanja (odgodi da se mapa inicijalizira)
 }
 
@@ -8658,7 +8726,7 @@ function _updSyncDot(status) {
 }
 
 // ── Obavijesti (tab badges) ───────────────────────────────────────────────────
-const _notifCounts = { vlake: 0, doznaka: 0 };
+const _notifCounts = { vlake: 0, doznaka: 0, admin: 0 };
 
 function _notifBump(tab) {
   if (_activeTab === tab) return;
