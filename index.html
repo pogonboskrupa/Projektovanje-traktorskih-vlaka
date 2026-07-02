@@ -4132,7 +4132,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.9.0';
+const APP_VER = 'v3.9.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -22839,8 +22839,6 @@ function _sqlmapRenderLayers() {
         <button class="btn ${sl.visible?'b':'gr'}" style="font-size:11px;padding:5px 10px;"
           onclick="sqlmapToggle(${i})">${sl.visible?'👁 Vidljivo':'🙈 Skriveno'}</button>
         <button class="btn gr" style="font-size:11px;padding:5px 10px;"
-          onclick="_sqlmapTestTile(${i})">🔬 Test</button>
-        <button class="btn gr" style="font-size:11px;padding:5px 10px;"
           onclick="sqlmapRemove(${i})">✕ Ukloni</button>
       </div>
       <div class="sqlmap-opacity-row">
@@ -26835,7 +26833,6 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();showExport()">⬆ KML Export</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showPrintModal()">🖨 Print / Štampanje</div>
   <div class="mdrop-item" style="color:#38bdf8;font-weight:700;" onclick="closeMenuDropdown();openLoadMapScreen()">🗺 UČITAJ KARTU</div>
-  <div class="mdrop-item" onclick="closeMenuDropdown();showSqlMapModal()">🔧 Dijagnostika karata (Debug)</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();document.getElementById('kf').click()">📂 Dodaj KML fajl</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" id="mdrop-vlake" onclick="closeMenuDropdown();switchTab('vlake')">📐 Panel vlaka</div>
@@ -26914,12 +26911,32 @@ if (typeof AndroidDownload !== 'undefined') {
 
       <div class="help-sec">
         <div class="help-sec-hdr" onclick="toggleHelpSec(this)">
+          <span class="h-arrow">▶</span>📲 Instalacija na telefon
+        </div>
+        <div class="help-sec-body">
+          <div class="help-row">
+            <div class="help-icon">🤖</div>
+            <div class="help-txt"><b>Android</b><span>Preporučeno: instalirajte APK aplikaciju (dobijate je od administratora). Alternativa: otvorite app u Chrome-u → meni (⋮) → <b>"Dodaj na početni ekran"</b> / "Instaliraj aplikaciju".</span></div>
+          </div>
+          <div class="help-row">
+            <div class="help-icon">🍎</div>
+            <div class="help-txt"><b>iPhone / iPad (Safari)</b><span>1) Otvorite adresu aplikacije u <b>Safariju</b> (ne Chrome). 2) Tapnite dugme <b>Podijeli</b> — kvadrat sa strelicom ⬆ na dnu ekrana. 3) U listi odaberite <b>"Add to Home Screen"</b> / <b>"Dodaj na početni ekran"</b>. 4) Tapnite <b>Add / Dodaj</b>. Aplikacija se pojavljuje kao ikona na početnom ekranu i otvara se preko cijelog ekrana, radi i offline.</span></div>
+          </div>
+          <div class="help-row">
+            <div class="help-icon">⚠</div>
+            <div class="help-txt"><b>iOS ograničenje</b><span>Na iPhone-u GPS snimanje radi samo dok je aplikacija na ekranu — ne zaključavajte telefon i ne prebacujte se u druge aplikacije tokom snimanja (iOS ne dozvoljava pozadinski GPS u web aplikacijama). Za dugotrajna terenska snimanja preporučujemo Android uređaj s APK aplikacijom.</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="help-sec">
+        <div class="help-sec-hdr" onclick="toggleHelpSec(this)">
           <span class="h-arrow">▶</span>🧭 Navigacija — tabovi
         </div>
         <div class="help-sec-body">
           <div class="help-row">
             <div class="help-icon">☰</div>
-            <div class="help-txt"><b>Meni</b><span>Otvara padajući meni sa svim alatima: GPS, Export, Print, Offline karta, Dodavanje KML fajlova i ove upute.</span></div>
+            <div class="help-txt"><b>Meni</b><span>Otvara padajući meni sa svim alatima: GPS, Export, Print, Dodavanje KML fajlova, Uslikaj lokaciju, Promjena PIN-a i ove upute.</span></div>
           </div>
           <div class="help-row">
             <div class="help-icon">📁</div>
@@ -26975,12 +26992,16 @@ if (typeof AndroidDownload !== 'undefined') {
             <div class="help-txt"><b>KML Export</b><span>Izvoz svih vlaka i slojeva u KML format za Google Earth ili GIS softver.</span></div>
           </div>
           <div class="help-row">
-            <div class="help-icon">📥</div>
-            <div class="help-txt"><b>Offline karta</b><span>Preuzimanje karata za rad bez interneta. Bitno za rad na terenu u planinskom predjelu.</span></div>
+            <div class="help-icon">🗺</div>
+            <div class="help-txt"><b>Offline karte</b><span>U prozoru karte (dugme za slojeve) → <b>📂 Dodaj / upravljaj offline kartama</b> učitajte .mbtiles / .sqlitedb kartu za rad bez interneta. Online prikazi (satelit, topo...) se automatski pamte dok ste online i rade i offline — zauzeće memorije i brisanje su u istom prozoru, ispod zaglavlja.</span></div>
           </div>
           <div class="help-row">
             <div class="help-icon">📂</div>
             <div class="help-txt"><b>Dodaj KML fajl</b><span>Učitaj KML fajl s uređaja i prikaži ga na mapi kao poseban sloj. Pojavljuje se u sekciji "Učitani fajlovi".</span></div>
+          </div>
+          <div class="help-row">
+            <div class="help-icon">🔑</div>
+            <div class="help-txt"><b>Promijeni PIN</b><span>Promjena vlastitog PIN-a za prijavu. Ako ste PIN zaboravili, na login ekranu tapnite "Zaboravljen PIN?" — administrator ga resetuje.</span></div>
           </div>
           <div class="help-row">
             <div class="help-icon">📷</div>
@@ -27035,9 +27056,10 @@ if (typeof AndroidDownload !== 'undefined') {
             <li data-n="1.">Aktivirajte projekat u <b>Projekat</b> tabu</li>
             <li data-n="2.">Otvorite <b>Vlake</b> tab i odaberite vlaku (ili dodajte novu)</li>
             <li data-n="3.">Pritisnite <b>▶ Snimi GPS</b> na vlaki — pojavljuje se modal za izbor</li>
-            <li data-n="4.">Odaberite <b>▶ Snimi direktno</b> za nastavak matične trase, ili <b>⊕ Lijevi krak</b> / <b>⊕ Desni krak</b> za odvajanje</li>
-            <li data-n="5.">Hodajte trasom — baner prikazuje dužinu, broj tačaka i nagib terena</li>
-            <li data-n="6.">Pritisnite <b>⏹ Stop</b> za završetak snimanja</li>
+            <li data-n="4.">Kod nove matične vlake odmah na početku (na kamionskom putu) nudi se <b>broj lagera</b> — potvrdite, izmijenite, odaberite postojeći lager u blizini ili preskočite (ponudiće se ponovo na kraju)</li>
+            <li data-n="5.">Odaberite <b>▶ Snimi direktno</b> za nastavak matične trase, ili <b>⊕ Lijevi krak</b> / <b>⊕ Desni krak</b> za odvajanje</li>
+            <li data-n="6.">Hodajte trasom — baner prikazuje dužinu, broj tačaka i nagib terena</li>
+            <li data-n="7.">Pritisnite <b>⏹ Stop</b> za završetak snimanja</li>
           </ul>
         </div>
       </div>
@@ -27049,15 +27071,18 @@ if (typeof AndroidDownload !== 'undefined') {
         <div class="help-sec-body">
           <div class="help-diagram" style="border-color:#f97316;">
             <b style="color:#f97316;">Šta je krak?</b><br>
-            Krak je bočno odvajanje od matične (glavne) trase vlake. Na terenu, vlaka često ima sporedne puteve lijevo ili desno koji vode do stabala za izvlačenje. Svaka vlaka može imati neograničen broj lijevih i desnih krakova.
+            Krak je bočno odvajanje od matične (glavne) trase vlake — uvijek nastaje spojen na maticu. Svaka vlaka može imati neograničen broj lijevih i desnih krakova, a krak može imati i svoje krakove (npr. T5.6.5 = treći lijevi krak sa kraka T5.6).
+          </div>
+          <div class="help-diagram">
+            <b>Numeracija:</b> lijevi krakovi su <b style="color:#38bdf8;">neparni</b> (T4.1, T4.3, T4.5...), desni su <b style="color:#f97316;">parni</b> (T4.2, T4.4, T4.6...). Kratki pritisak na ⊕L/⊕D dodjeljuje sljedeći slobodan broj (prikazan na dugmetu). Krakovi se ne moraju snimati strogo redom — <b>dugi pritisak</b> na ⊕L/⊕D otvara ručni izbor broja (npr. odmah 5.6 i kad 5.4 još ne postoji).
           </div>
           <div class="help-row">
             <div class="help-icon" style="color:#38bdf8;font-size:16px;">⊕ L</div>
-            <div class="help-txt"><b style="color:#38bdf8;">Lijevi krak</b><span>Snima novi lijevi krak. Tokom snimanja, gumb je vidljiv u baneru. Novi krak se crta od trenutne pozicije ulijevo.</span></div>
+            <div class="help-txt"><b style="color:#38bdf8;">Lijevi krak (neparni)</b><span>Kreira novi lijevi krak spojen na najbližu tačku matice. Dugi pritisak = ručni izbor broja.</span></div>
           </div>
           <div class="help-row">
             <div class="help-icon" style="color:#f97316;font-size:16px;">⊕ D</div>
-            <div class="help-txt"><b style="color:#f97316;">Desni krak</b><span>Isto kao lijevi, ali za desnu stranu vlake.</span></div>
+            <div class="help-txt"><b style="color:#f97316;">Desni krak (parni)</b><span>Isto kao lijevi, ali za desnu stranu vlake. Dugi pritisak = ručni izbor broja.</span></div>
           </div>
           <div class="help-row">
             <div class="help-icon">↪</div>
@@ -27065,7 +27090,7 @@ if (typeof AndroidDownload !== 'undefined') {
           </div>
           <div class="help-row">
             <div class="help-icon">↩</div>
-            <div class="help-txt"><b>Vrati na roditelja</b><span>Kad završite krak, tapnite ↩ da se vratite na snimanje matične trase (roditelja).</span></div>
+            <div class="help-txt"><b>Vrati na roditelja</b><span>Kad završite krak, tapnite ↩ — GPS se automatski pauzira dok hodate nazad do matice (povratak se ne snima), a na matici pritisnite ▶ za nastavak. Već snimljeni dio matice iza spoja se čuva.</span></div>
           </div>
         </div>
       </div>
@@ -27082,11 +27107,11 @@ if (typeof AndroidDownload !== 'undefined') {
           </div>
           <div class="help-row">
             <div class="help-icon" style="color:#38bdf8;">⊕ L</div>
-            <div class="help-txt"><b>Novi lijevi krak</b><span>Kreće snimanje novog lijevog kraka od trenutne pozicije.</span></div>
+            <div class="help-txt"><b>Novi lijevi krak</b><span>Kreće snimanje novog lijevog (neparnog) kraka od trenutne pozicije. Dugi pritisak — ručni izbor broja kraka.</span></div>
           </div>
           <div class="help-row">
             <div class="help-icon" style="color:#f97316;">⊕ D</div>
-            <div class="help-txt"><b>Novi desni krak</b><span>Kreće snimanje novog desnog kraka od trenutne pozicije.</span></div>
+            <div class="help-txt"><b>Novi desni krak</b><span>Kreće snimanje novog desnog (parnog) kraka od trenutne pozicije. Dugi pritisak — ručni izbor broja kraka.</span></div>
           </div>
           <div class="help-row">
             <div class="help-icon">↪</div>
@@ -27713,25 +27738,8 @@ if (typeof AndroidDownload !== 'undefined') {
     <div id="sqlmap-layers"></div>
 
     <div class="mbtns" style="margin-top:6px;">
-      <button class="btn gr" onclick="closeSqlMapModal()">Zatvori</button>
-      <button class="btn" style="background:#1e3a5f;color:#93c5fd;" onclick="sqlmapShowDebug()">🔍 Debug info</button>
+      <button class="btn gr" style="width:100%;" onclick="closeSqlMapModal()">Zatvori</button>
     </div>
-    <div class="mbtns" style="margin-top:6px;">
-      <button class="btn" style="background:#3b1e5f;color:#d8b4fe;width:100%;" onclick="sqlmapDebugPro()">🐞 Debug PRO (analiza pločica)</button>
-    </div>
-    <div class="mbtns" style="margin-top:6px;">
-      <button class="btn" style="background:#1e3a5f;color:#7dd3fc;width:100%;" onclick="sqlmapToggleLiveHud()">📊 Live HUD (uživo na ekranu)</button>
-    </div>
-    <div class="mbtns" style="margin-top:6px;">
-      <button class="btn" style="background:#14532d;color:#86efac;width:100%;" onclick="sqlmapForceResize()">🔄 Osvježi veličinu karte (test popravke)</button>
-    </div>
-    <div class="mbtns" style="margin-top:6px;">
-      <button class="btn" style="background:#3f2d1e;color:#fcd34d;width:100%;" onclick="sqlmapCopyDebug()">📋 Kopiraj Debug PRO</button>
-    </div>
-    <div class="mbtns" style="margin-top:6px;">
-      <button class="btn" style="background:#3a1e3f;color:#e9d5ff;width:100%;" onclick="_tileProf.reset();showToast('♻ Profil resetovan — skrolaj/zumiraj pa Debug PRO');closeSqlMapModal();">♻ Reset profila (mjerenje brzine)</button>
-    </div>
-    <div id="sqlmap-debug-out" style="display:none;margin-top:8px;background:#0f172a;color:#94a3b8;font-size:11px;font-family:monospace;padding:10px;border-radius:8px;white-space:pre-wrap;max-height:260px;overflow-y:auto;user-select:text;"></div>
   </div>
 </div>
 
