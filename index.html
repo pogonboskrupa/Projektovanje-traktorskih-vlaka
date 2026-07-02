@@ -3526,6 +3526,10 @@ select:focus { outline:none; border-color:#3b82f6; }
       </div>
       <!-- Statistika po šumariji + lista korisnika -->
       <div style="flex:1;overflow-y:auto;">
+        <button onclick="showProjectManagement()"
+          style="display:block;width:calc(100% - 32px);margin:12px 16px 0;padding:10px;background:#1e3a5f;border:1px solid #3b82f6;border-radius:8px;color:#93c5fd;font-size:13px;font-weight:600;cursor:pointer;">
+          📊 Pregled svih projekata (sve šumarije)
+        </button>
         <div id="admin-stats-box" style="display:none;margin:12px 16px 0;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px 12px;"></div>
         <div id="admin-panel-user-list" style="padding:12px 16px;">
           <p style="color:#64748b;font-size:12px;text-align:center;padding:16px 0;">Odaberi tab da učitaš...</p>
@@ -4137,7 +4141,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.9.3';
+const APP_VER = 'v3.9.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5273,7 +5277,7 @@ function _adminRenderUsers() {
             ${u.login_email ? ' · ' + _escHtml(u.login_email) : ''}
             ${u.last_sign_in_at !== undefined
               ? '<br>' + (u.last_sign_in_at
-                  ? '🕐 Aktivan: ' + fmtDateShort(u.last_sign_in_at)
+                  ? '🕐 Aktivan: ' + _fmtDateTime(u.last_sign_in_at)
                   : '<span style="color:#7f8ea3;">nije se još prijavio</span>')
               : ''}
           </div>
@@ -5374,13 +5378,41 @@ async function _adminLoadStats() {
   const rows = (data || []).filter(r => r.sumarija);
   if (!rows.length) { box.style.display = 'none'; return; }
   box.style.display = '';
+  const v2 = rows[0].maticnih !== undefined; // detaljna migracija 20260703 primijenjena
+  const km = m => (Number(m || 0) / 1000).toFixed(1) + ' km';
+  if (!v2) {
+    // v1 format (migracija 20260702)
+    box.innerHTML = `
+      <div style="font-size:11px;color:#64748b;font-weight:600;letter-spacing:0.5px;margin-bottom:6px;">📊 STATISTIKA PO ŠUMARIJI</div>
+      ${rows.map(r => `
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid rgba(51,65,85,0.4);">
+          <span style="color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.sumarija)}</span>
+          <span style="color:#94a3b8;white-space:nowrap;">👤 ${r.korisnika} · 📐 ${r.vlaka} · ${km(r.ukupno_m)}</span>
+        </div>`).join('')}`;
+    return;
+  }
+  // v2 — detaljno: aktivni/7d, projekti, matične+krakovi, zadnja aktivnost + zbir
+  const tot = rows.reduce((t, r) => ({
+    kor: t.kor + Number(r.korisnika || 0),  a7: t.a7 + Number(r.aktivnih_7d || 0),
+    pr:  t.pr  + Number(r.projekata || 0),  ma: t.ma + Number(r.maticnih || 0),
+    kr:  t.kr  + Number(r.krakova || 0),    m:  t.m  + Number(r.ukupno_m || 0)
+  }), { kor: 0, a7: 0, pr: 0, ma: 0, kr: 0, m: 0 });
   box.innerHTML = `
     <div style="font-size:11px;color:#64748b;font-weight:600;letter-spacing:0.5px;margin-bottom:6px;">📊 STATISTIKA PO ŠUMARIJI</div>
     ${rows.map(r => `
-      <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid rgba(51,65,85,0.4);">
-        <span style="color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.sumarija)}</span>
-        <span style="color:#94a3b8;white-space:nowrap;">👤 ${r.korisnika} · 📐 ${r.vlaka} · ${(Number(r.ukupno_m || 0) / 1000).toFixed(1)} km</span>
-      </div>`).join('')}`;
+      <div style="padding:5px 0;border-bottom:1px solid rgba(51,65,85,0.4);">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;">
+          <span style="color:#e2e8f0;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.sumarija)}</span>
+          <span style="color:#94a3b8;white-space:nowrap;">👤 ${r.korisnika} <span style="color:#4ade80;">(${r.aktivnih_7d}/7d)</span> · 📁 ${r.projekata}</span>
+        </div>
+        <div style="font-size:11px;color:#64748b;margin-top:1px;">
+          📐 ${r.maticnih} vlaka + ${r.krakova} krak. · ${km(r.ukupno_m)} · 🕐 ${r.zadnja_aktivnost ? _fmtDateTime(r.zadnja_aktivnost) : '—'}
+        </div>
+      </div>`).join('')}
+    <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:6px 0 1px;">
+      <span style="color:#fbbf24;font-weight:700;">UKUPNO</span>
+      <span style="color:#e2e8f0;white-space:nowrap;">👤 ${tot.kor} (${tot.a7}/7d) · 📁 ${tot.pr} · 📐 ${tot.ma}+${tot.kr} · ${km(tot.m)}</span>
+    </div>`;
 }
 
 // --- Admin: provjera registracija na čekanju (poslije prijave) ---
@@ -17533,6 +17565,14 @@ function fmtDateShort(s) {
     return String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + d.getFullYear();
   } catch { return String(s); }
 }
+// Datum + vrijeme (lokalno): "28.06.2026 u 14:32"
+function _fmtDateTime(s) {
+  if (!s) return '—';
+  try {
+    const d = new Date(s);
+    return fmtDateShort(s) + ' u ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  } catch { return String(s); }
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // UPRAVLJANJE PROJEKTIMA — pregled svih projekata + detaljna statistika
@@ -17545,8 +17585,25 @@ function _pmUserName(id) {
   return (kolegeMap[id] && kolegeMap[id].ime) || 'Nepoznat';
 }
 
-function showProjectManagement() {
+let _pmAdminRows = null; // admin: agregati svih projekata svih šumarija (RPC), {_err} na grešku
+
+async function showProjectManagement() {
   document.getElementById('pm-modal').classList.add('show');
+  if (sbProfile?.is_admin) {
+    // Admin nadzor: in-memory `vlake` je prazan (read-only nalog) pa se brojevi po
+    // projektu računaju na serveru — admin_projekti_pregled (sve šumarije odjednom)
+    _pmAdminRows = null;
+    _pmShowList(); // prikaže "učitavam" kroz admin granu _pmRenderList
+    try {
+      const { data, error } = await sb.rpc('admin_projekti_pregled');
+      if (error) throw error;
+      _pmAdminRows = data || [];
+    } catch(e) {
+      _pmAdminRows = { _err: e };
+    }
+    if (_pmDetailId === null) _pmRenderList(); // ne pregazi detalj ako je u međuvremenu otvoren
+    return;
+  }
   _pmShowList();
 }
 function closeProjectManagement() {
@@ -17565,6 +17622,7 @@ function _pmShowList() {
 
 function _pmRenderList() {
   let el = document.getElementById('pm-list');
+  if (sbProfile?.is_admin) { _pmRenderAdminList(el); return; }
   if (!_projekti.length) {
     el.innerHTML = '<div class="pm-empty">Nema projekata.</div>';
     return;
@@ -17626,6 +17684,71 @@ function _pmRenderList() {
           </div>
         </div>`;
     }
+  }
+  el.innerHTML = html;
+}
+
+// Admin lista: svi projekti svih šumarija, brojevi sa servera (admin_projekti_pregled).
+// Detalj (_pmOpenDetail) radi nepromijenjen — ionako dohvata vlake server-side po projektu.
+function _pmRenderAdminList(el) {
+  if (_pmAdminRows === null) {
+    el.innerHTML = '<div class="pm-empty">⏳ Učitavam projekte svih šumarija...</div>';
+    return;
+  }
+  if (_pmAdminRows._err) {
+    const e = _pmAdminRows._err;
+    const missing = /function .*does not exist|schema cache|PGRST202/i.test(e.message || '') || e.code === 'PGRST202';
+    el.innerHTML = `<div class="pm-empty">${missing
+      ? '⚠ Primijeni migraciju 20260703 na Supabase (admin_projekti_pregled ne postoji)'
+      : 'Greška: ' + _esc(e.message || '?')}</div>`;
+    return;
+  }
+  const rows = _pmAdminRows;
+  if (!rows.length) { el.innerHTML = '<div class="pm-empty">Nema projekata.</div>'; return; }
+
+  const sums = new Set(rows.map(r => r.sumarija || '—'));
+  let totMa = 0, totKr = 0, totM = 0, totPov = 0;
+  rows.forEach(r => {
+    totMa += Number(r.maticnih || 0); totKr += Number(r.krakova || 0);
+    totM += Number(r.ukupno_m || 0);  totPov += Number(r.povrsina || 0);
+  });
+  const skpi = (v, l) => `<div class="pm-skpi"><div class="pm-skpi-v">${v}</div><div class="pm-skpi-l">${l}</div></div>`;
+  el.innerHTML = `<div class="pm-summary">
+    ${skpi(rows.length, 'Projekata')}
+    ${skpi(sums.size, 'Šumarija')}
+    ${skpi(totMa, 'Vlaka')}
+    ${skpi(totKr, 'Krakova')}
+    ${skpi((totM / 1000).toFixed(1) + ' km', 'Ukupno vlaka')}
+    ${skpi(totPov > 0 ? Math.round(totPov) + ' ha' : '—', 'Površina')}
+  </div><div id="pm-list-inner"></div>`;
+  el = document.getElementById('pm-list-inner');
+
+  // Grupisanje: ŠUMARIJA → GJ (RPC već sortira sumarija, gj, datum DESC)
+  let html = '', curSum = null, curGj = null;
+  for (const r of rows) {
+    const s = r.sumarija || '—';
+    if (s !== curSum) {
+      curSum = s; curGj = null;
+      html += `<div class="pm-gj-hdr" style="color:#fbbf24;">🏛 ${_esc(s)}</div>`;
+    }
+    const g = r.gj || '';
+    if (g !== curGj) {
+      curGj = g;
+      html += `<div class="pm-gj-hdr">${g ? '🗂 GJ ' + _esc(g) : 'Bez GJ'}</div>`;
+    }
+    html += `
+      <div class="pm-card" onclick="_pmOpenDetail('${r.id}')">
+        <div class="pm-card-top">
+          <span class="pm-card-odjel">${_esc(r.odjel || '—')}</span>
+          <span style="font-size:10px;color:#64748b;">${_esc(r.vlasnik || '—')}</span>
+        </div>
+        <div class="pm-card-meta">
+          <span>📐 <b>${r.maticnih}</b> vlaka${Number(r.krakova) ? ' · <b>' + r.krakova + '</b> krak.' : ''}</span>
+          <span>📏 <b>${fmtL(Number(r.ukupno_m || 0))}</b></span>
+          <span>📅 ${fmtDateShort(r.datum)}</span>
+          ${r.zadnja_izmjena ? '<span>✏ ' + fmtDateShort(r.zadnja_izmjena) + '</span>' : ''}
+        </div>
+      </div>`;
   }
   el.innerHTML = html;
 }
