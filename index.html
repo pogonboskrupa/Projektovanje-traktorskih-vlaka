@@ -3559,11 +3559,24 @@ select:focus { outline:none; border-color:#3b82f6; }
             <span style="color:#64748b;">Visina</span><span id="trn-alt" style="color:#34d399;font-family:monospace;">— m</span>
             <span style="color:#64748b;">Tačnost</span><span id="trn-acc" style="color:#94a3b8;font-family:monospace;">— m</span>
           </div>
+          <div id="trn-odjel" style="margin-top:10px;padding:9px 12px;background:#0a2f1f;border:1px solid #14532d;border-radius:10px;font-size:13px;font-weight:700;color:#34d399;">🌲 Odjel: —</div>
           <div style="display:flex;gap:8px;margin-top:12px;">
             <button onclick="fabLokacija()" style="flex:1;padding:11px;background:linear-gradient(135deg,#059669,#10b981);border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🎯 Centriraj</button>
             <button onclick="terenCopyCoords()" style="flex:1;padding:11px;background:#0f3460;border:1px solid #1e3a5f;border-radius:10px;color:#60a5fa;font-size:13px;font-weight:600;cursor:pointer;">📋 Kopiraj</button>
+            <button onclick="terenSendPos()" style="flex:1;padding:11px;background:#0f3460;border:1px solid #1e3a5f;border-radius:10px;color:#34d399;font-size:13px;font-weight:600;cursor:pointer;">📤 Pošalji</button>
           </div>
+          <button onclick="switchTab('karta');setTimeout(()=>startLocPhoto(),50);" style="width:100%;margin-top:8px;padding:11px;background:#1e293b;border:1px solid rgba(251,191,36,0.35);border-radius:10px;color:#fbbf24;font-size:13px;font-weight:600;cursor:pointer;">📷 Uslikaj lokaciju</button>
           <button id="trn-gps-btn" onclick="toggleGPS()" style="width:100%;margin-top:8px;padding:10px;background:#1e293b;border:1px solid #334155;border-radius:10px;color:#94a3b8;font-size:12px;cursor:pointer;">📡 Uključi/isključi GPS</button>
+        </div>
+
+        <!-- DIJELJENJE KRETANJA -->
+        <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-size:13px;font-weight:700;color:#e2e8f0;">📡 Dijeljenje kretanja</span>
+            <span id="trn-share-status" style="font-size:11px;color:#64748b;">isključeno</span>
+          </div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Kolege i nadzor vide tvoju poziciju na karti uživo dok je dijeljenje uključeno.</div>
+          <button id="trn-share-btn" onclick="terenTogShare()" style="width:100%;padding:13px;background:linear-gradient(135deg,#166534,#22c55e);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">🔴 Dijeli moje kretanje</button>
         </div>
 
         <!-- KOMPAS -->
@@ -4141,7 +4154,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.9.4';
+const APP_VER = 'v3.9.5';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -8652,6 +8665,8 @@ function _updShareLiveIndicator() {
   } else {
     if (el) el.remove();
   }
+  // Sinhronizuj i Teren tab dugme (start/stop može doći i kroz meni tok)
+  if (typeof _terenUpdShareUI === 'function') _terenUpdShareUI();
 }
 
 // --- Primanje dijeljene lokacije ---
@@ -8938,6 +8953,16 @@ function terenRender() {
     const dot = g('trn-gps-dot');
     if (dot) dot.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#64748b;display:inline-block;"></span>Nema GPS-a';
   }
+  // Trenutni odjel (iz granica na karti)
+  const odEl = g('trn-odjel');
+  if (odEl) {
+    if (!graniceOdjeli.length) odEl.innerHTML = '🌲 Odjel: <span style="color:#64748b;font-weight:400;">granice nisu učitane</span>';
+    else if (!lastP)           odEl.innerHTML = '🌲 Odjel: <span style="color:#64748b;font-weight:400;">—</span>';
+    else if (_trnCurOdjel)     odEl.innerHTML = '🌲 Odjel: ' + _escHtml(_trnCurOdjel);
+    else                       odEl.innerHTML = '🌲 Odjel: <span style="color:#64748b;font-weight:400;">izvan učitanih odjela</span>';
+  }
+  // Dijeljenje kretanja — stanje dugmeta
+  _terenUpdShareUI();
   // Kompas
   terenUpdCompass();
   // Tačke
@@ -8947,6 +8972,67 @@ function terenRender() {
   terenRenderMjerenja();
   // Trag stats
   if (_tragOn) terenUpdTragStats();
+}
+
+// ── Teren: trenutni odjel (tačka-u-poligonu nad granicama) ───────────────────
+let _trnCurOdjel = null;
+function _trnUpdOdjel(la, lo) {
+  if (!graniceOdjeli.length) return;
+  const od = _findOdjelAtPoint(la, lo);
+  if (od !== _trnCurOdjel) {
+    _trnCurOdjel = od;
+    if (od) showToast('🌲 Ušao si u odjel: ' + od);
+    if (_activeTab === 'teren') terenRender();
+  }
+}
+
+// ── Teren: dijeljenje kretanja — jedan tap, svi kolege ───────────────────────
+function terenTogShare() {
+  if (_shareLiveOn) {
+    _stopShareLive();
+    showToast('⏹ Dijeljenje kretanja zaustavljeno');
+  } else {
+    const ids = Object.keys(kolegeMap || {}).filter(id => id !== sbUser?.id);
+    if (!ids.length) { showToast('⚠ Nema kolega za dijeljenje (provjeri vezu)'); return; }
+    _shareTargetIds = ids;
+    _startShareLive();
+    showToast('🔴 Kretanje se dijeli — kolege te vide na karti');
+  }
+  _terenUpdShareUI();
+}
+
+function _terenUpdShareUI() {
+  const btn = document.getElementById('trn-share-btn');
+  const st  = document.getElementById('trn-share-status');
+  if (!btn) return;
+  if (_shareLiveOn) {
+    btn.textContent = '⏹ Zaustavi dijeljenje';
+    btn.style.background = 'linear-gradient(135deg,#7f1d1d,#ef4444)';
+    if (st) { st.textContent = '🔴 uključeno'; st.style.color = '#f87171'; }
+  } else {
+    btn.textContent = '🔴 Dijeli moje kretanje';
+    btn.style.background = 'linear-gradient(135deg,#166534,#22c55e)';
+    if (st) { st.textContent = 'isključeno'; st.style.color = '#64748b'; }
+  }
+}
+
+// ── Teren: pošalji poziciju van aplikacije (SMS/Viber/WhatsApp...) ───────────
+function terenSendPos() {
+  if (!lastP) { showToast('Nema GPS signala'); return; }
+  const c = wgsToMGI(lastP.la, lastP.lo);
+  const txt = 'Moja pozicija: https://maps.google.com/?q=' + lastP.la.toFixed(6) + ',' + lastP.lo.toFixed(6)
+    + (c ? `\nGK Y: ${c.y}  X: ${c.x}` : '')
+    + (lastP.al != null ? ` · Visina: ${Math.round(lastP.al)} m` : '');
+  if (navigator.share) {
+    navigator.share({ text: txt }).catch(() => {});
+  } else if (navigator.clipboard) {
+    navigator.clipboard.writeText(txt).then(
+      () => showToast('📋 Pozicija kopirana — zalijepi u poruku'),
+      () => showToast(txt)
+    );
+  } else {
+    showToast(txt);
+  }
 }
 
 function terenUpdCompass() {
@@ -12645,6 +12731,9 @@ function onP(p) {
     posCr.setLatLng([la, lo]).setRadius(ac);
     _updateRadiusRings();
   }
+
+  // Terenski profil: detekcija trenutnog odjela (jeftino — bounds pre-check po granici)
+  if (typeof isSpdField === 'function' && isSpdField()) _trnUpdOdjel(la, lo);
 
   // Prati lokaciju kad se snima vlaka ili trag (osim u slobodnom pogledu)
   if (((recOn && !recPaused) || _tragOn) && !_recFreeView) {
