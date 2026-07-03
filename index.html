@@ -4154,7 +4154,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.9.5';
+const APP_VER = 'v3.9.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -26383,12 +26383,15 @@ function dozHideTypePicker() {
 
 function dozStartDraw(type) {
   dozHideTypePicker();
+  // switchTab MORA doći PRIJE postavljanja stanja crtanja: izlazak s doznaka taba
+  // poziva dozCancelDraw() (čišćenje napuštenog crtanja) koji bi inače odmah obrisao
+  // upravo postavljeni _dozDrawType/_dozDrawPts — crtanje mrtvo od 1d00a42 (13.06.).
+  switchTab('karta');
   _dozDrawType = type;
   _dozDrawPts  = [];
   _dozDrawEnabled = false;
   _dozDragLastPt = null;
   const t = DOZ_TYPES[type];
-  switchTab('karta');
   setTimeout(() => {
     document.getElementById('doz-draw-banner').style.display = 'flex';
     document.getElementById('doz-draw-type-label').textContent = `${t.emoji} ${t.label}`;
@@ -26451,6 +26454,7 @@ function dozCancelDraw() {
   document.getElementById('doz-draw-banner').style.display = 'none';
   document.getElementById('map').style.cursor = '';
   document.getElementById('tab-bar').style.display = 'flex';
+  document.getElementById('action-bar').style.display = '';
   if (wasBoundary) {
     _dozCreateBoundary = null; _dozCreateAreaHa = null;
     dozShowCreateOdjel(true);
@@ -26471,6 +26475,7 @@ function dozFinishDraw() {
     document.getElementById('doz-draw-banner').style.display = 'none';
     document.getElementById('map').style.cursor = '';
     document.getElementById('tab-bar').style.display = 'flex';
+    document.getElementById('action-bar').style.display = '';
     dozShowCreateOdjel(true);
     return;
   }
@@ -26801,11 +26806,14 @@ function dozStartNewBoundaryDraw() {
   _dozNewOdjelDrawOdjel = _dozCreateOdjel;
   if (!_dozNewOdjelDrawOdjel) { document.getElementById('doz-create-error').textContent = 'Unesi odjel prvo'; return; }
   dozCloseCreateOdjel();
+  // switchTab PRIJE stanja crtanja — isti razlog kao u dozStartDraw: doznaka-izlazni
+  // dozCancelDraw() bi obrisao _dozDrawType='__boundary__' I _dozCreateBoundary,
+  // pa čak i ponovo otvorio create modal preko karte.
+  switchTab('karta');
   _dozDrawType = '__boundary__';
   _dozDrawPts  = [];
   _dozDrawEnabled = false;
   _dozDragLastPt = null;
-  switchTab('karta');
   setTimeout(() => {
     document.getElementById('doz-draw-banner').style.display = 'flex';
     document.getElementById('doz-draw-type-label').textContent = `📐 Granica — odjel ${_dozNewOdjelDrawOdjel}`;
