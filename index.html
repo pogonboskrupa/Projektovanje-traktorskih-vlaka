@@ -4154,7 +4154,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.9.7';
+const APP_VER = 'v3.10.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4277,7 +4277,18 @@ const _OL = {
       // D2-B: jedinstveni ključ (_qid) — ts sam zna kolidirati za 2 op. u istoj ms,
       // pa bi removeFromQueue obrisao OBJE (tihi gubitak operacije).
       const qid = Date.now() + '-' + (this._seq = (this._seq + 1) % 1e9);
-      q.push({ ...op, ts: Date.now(), _qid: qid });
+      // OS-K1: taguj operaciju vlasnikom — red preživljava promjenu korisnika na
+      // uređaju, pa procesor MORA znati čije su op-e (tuđe preskače, wipe ih čisti).
+      const uid = (typeof sbUser !== 'undefined' && sbUser?.id) || null;
+      // OS-S2: klijentski ID za insert tipove bez prirodnog ključa — retry poslije
+      // izgubljenog odgovora postaje idempotentan (23505 = već upisano). NE za
+      // upsert_trag: procesor po payload.id bira update-vs-insert granu (trag
+      // idempotentnost se rješava pre-lookupom po korisnik+nm u procesoru).
+      if (['insert_doz_marking', 'insert_projekt'].includes(op.type)
+          && op.payload && !op.payload.id && typeof crypto !== 'undefined' && crypto.randomUUID) {
+        op.payload.id = crypto.randomUUID();
+      }
+      q.push({ ...op, ts: Date.now(), _qid: qid, _uid: uid });
       if (q.length > 500) { q.splice(0, q.length - 500); showToast('⚠ Offline red prepun — najstarije operacije odbačene'); }
       localStorage.setItem(this.QUEUE, JSON.stringify(q));
       if (typeof _updSyncBadge === 'function') _updSyncBadge();
@@ -4473,10 +4484,15 @@ async function _processOfflineQueue() {
   _syncInProgress = true;
   try {
   const q = _OL.loadQueue();
-  if (!q.length) return;
+  // OS-V1: NEMA ranog izlaza na prazan red — flush doznaka GPS bafera (i foto) ispod
+  // mora se izvršiti i kad korisnik nije imao drugih izmjena (petlja nad [] je no-op).
   let synced = 0;
   let _authRefreshed = false;   // D2-D: osvježi sesiju najviše jednom po prolazu
   for (const op of [...q]) {
+    // OS-K1: operacija pripada DRUGOM korisniku (red preživljava promjenu naloga na
+    // uređaju) — ne šalji je pod tuđom prijavom (RLS bi je odbio pa bi bila tiho
+    // odbačena). Preskoči; wipe pri promjeni korisnika ih čisti.
+    if (op._uid && sbUser?.id && op._uid !== sbUser.id) continue;
     try {
       let err = null;
       if (op.type === 'upsert_vlaka') {
@@ -4515,19 +4531,23 @@ async function _processOfflineQueue() {
         err = error;
       } else if (op.type === 'insert_doz_marking') {
         const { data, error } = await sb.from('doz_area_markings').insert(op.payload).select('id').single();
-        err = error;
-        if (!err && data && op._localId) {
+        // OS-S2: 23505 s klijentskim ID-jem = insert je VEĆ uspio (odgovor se izgubio) — uspjeh
+        err = (error && error.code === '23505' && op.payload.id) ? null : error;
+        const newMkId = data?.id || op.payload.id;
+        if (!err && newMkId && op._localId) {
           // D4-B: zamijeni privremeni 'local_' ID stvarnim server ID-jem da kasnije
           // brisanje ove markice može pogoditi pravi red (inače ghost-resurrection).
           const dm = _dozMarkings.find(m => m.id === op._localId);
-          if (dm) { dm.id = data.id; _dozCacheLayers(dm.project_id); }
+          if (dm) { dm.id = newMkId; _dozCacheLayers(dm.project_id); }
         }
       } else if (op.type === 'upsert_odjel') {
         const { error } = await sb.from('odjeli').upsert(op.payload, { onConflict: 'sumarija,naziv', ignoreDuplicates: true });
         err = error;
       } else if (op.type === 'insert_projekt') {
         const { _tempId, ...insertPayload } = op.payload;
-        const { data: pd, error } = await sb.from('projekti').insert(insertPayload).select('id').single();
+        let { data: pd, error } = await sb.from('projekti').insert(insertPayload).select('id').single();
+        // OS-S2: 23505 s klijentskim ID-jem = projekat je već upisan u ranijem pokušaju
+        if (error && error.code === '23505' && insertPayload.id) { error = null; pd = { id: insertPayload.id }; }
         err = error;
         if (!err && pd) {
           const realId = pd.id;
@@ -4563,11 +4583,24 @@ async function _processOfflineQueue() {
           const { error } = await sb.from('tragovi').update(upd).eq('id', id);
           err = error;
         } else {
+          // OS-S2: idempotentnost — raniji insert je mogao uspjeti a odgovor se izgubiti.
+          // Pre-lookup po (korisnik, nm): postoji → update umjesto duplog inserta.
+          const { data: exT } = await sb.from('tragovi').select('id')
+            .eq('korisnik_id', op.payload.korisnik_id).eq('nm', op.payload.nm).maybeSingle();
+          if (exT?.id) {
+            const { error } = await sb.from('tragovi').update(op.payload).eq('id', exT.id);
+            err = error;
+            if (!err) {
+              const tr = _tragRegistry.find(t => t.nm === op.payload.nm && !t.sbId);
+              if (tr) { tr.sbId = exT.id; _tragRegSave(); }
+            }
+          } else {
           const { data, error } = await sb.from('tragovi').insert(op.payload).select('id').single();
           err = error;
           if (!err && data) {
             const tr = _tragRegistry.find(t => t.nm === op.payload.nm && !t.sbId);
             if (tr) { tr.sbId = data.id; _tragRegSave(); }
+          }
           }
         }
       } else if (op.type === 'delete_trag') {
@@ -4608,7 +4641,11 @@ async function _processOfflineQueue() {
         // odmah — daj 5 pokušaja prije nego se operacija proglasi trajno
         // neispravnom. Sprečava tihi gubitak snimljenih vlaka.
         const dropped = _OL.bumpRetry(op._qid ?? op.ts, 5);
-        if (dropped) console.warn('Offline queue: operacija odbačena nakon 5 pokušaja', op.type, err);
+        if (dropped) {
+          console.warn('Offline queue: operacija odbačena nakon 5 pokušaja', op.type, err);
+          // OS-N1: tihi drop = tihi gubitak podataka — korisnik MORA vidjeti da je izmjena odbačena
+          showToast('⚠ Jedna offline izmjena (' + op.type.replace(/_/g, ' ') + ') odbačena poslije 5 neuspjelih pokušaja');
+        }
       }
     } catch(e) { break; } // still offline
   }
@@ -4660,6 +4697,8 @@ async function _processOfflineQueue() {
       }
     }
   } catch {}
+  // OS-V2: fotosi slikani offline (bez sbId) — pošalji ih sada
+  try { await _flushPendingFotos(); } catch(e) {}
   if (synced) showToast(`✅ Sinkronizirano ${synced} stavki iz offline reda`);
   if (typeof _updSyncBadge === 'function') _updSyncBadge();
   } finally {
@@ -4733,7 +4772,15 @@ async function initAuth() {
       }
     };
     try {
-      const { data: email } = await sb.rpc('get_login_email', { p_ime: saved.ime, p_prezime: saved.prezime });
+      // OS-S4: navigator.onLine na terenu zna lagati 'true' na mrtvoj vezi — RPC bi
+      // tada visio do Supabase timeouta i korisnik bi čekao 4500ms fallback. Kad
+      // postoji keširani profil, utrkuj prvi mrežni korak s 1500ms — na timeout
+      // odmah offline ulaz (auto-login se ionako ponovi pri sljedećem pokretanju).
+      const _tmo = (cached && saved)
+        ? new Promise((_, rej) => setTimeout(() => rej(new Error('_autologin_timeout')), 1500))
+        : null;
+      const emailPromise = sb.rpc('get_login_email', { p_ime: saved.ime, p_prezime: saved.prezime });
+      const { data: email } = await (_tmo ? Promise.race([emailPromise, _tmo]) : emailPromise);
       if (!email) { goOfflineOrLogin(); return; }
       const { error } = await sb.auth.signInWithPassword({ email, password: saved.pin.padEnd(6, '0') });
       if (error) { goOfflineOrLogin(); return; }
@@ -4741,7 +4788,7 @@ async function initAuth() {
       await sbLoadProfile();
       showApp();
     } catch(e) {
-      console.error('Auto-login error:', e);
+      if (e?.message !== '_autologin_timeout') console.error('Auto-login error:', e);
       if (!sbUser) goOfflineOrLogin();
     }
   }, 800);
@@ -5187,6 +5234,16 @@ async function _wipeAllLocalUserData() {
   localStorage.removeItem(_TACKE_KEY);
   localStorage.removeItem(_KVC_KEY);
   localStorage.removeItem('tvlake_kolege');
+  // OS-K1: ukloni iz sync reda operacije PRETHODNOG korisnika — njegovi lokalni podaci
+  // se upravo brišu, a slanje pod tuđom prijavom RLS ionako odbija (tihi gubitak +
+  // rizik krivog cilja za delete-by-id). Op-i bez _uid (stari format) se zadržavaju
+  // i tretiraju kao od trenutnog korisnika (fail-open kompatibilnost).
+  try {
+    const cur = (typeof sbUser !== 'undefined' && sbUser?.id) || null;
+    const q = _OL.loadQueue().filter(o => !o._uid || o._uid === cur);
+    localStorage.setItem(_OL.QUEUE, JSON.stringify(q));
+    if (typeof _updSyncBadge === 'function') _updSyncBadge();
+  } catch(e) {}
 }
 
 const _DEVICE_LAST_USER_KEY = 'tvlake_device_last_user';
@@ -5489,6 +5546,13 @@ async function _reloadCoreData() {
     await sbLoadProjekti();   // prvo — _aktivniProjektId mora biti validan prije vlaka
     await sbLoadVlake();
     await sbLoadLog();
+    // OS-S3: i ostali sadržaj čiji je initial fetch mogao pasti (granice/odsjeci sa
+    // servera, dijeljeni fotosi, vlake kolega, otvoreni doznaka odjel) — svi imaju
+    // vlastite keš guardove pa je ponovni poziv jeftin/idempotentan.
+    try { autoLoadAllKmlBuckets(); } catch(e) {}
+    try { sbLoadSharedFotos(); } catch(e) {}
+    try { sbLoadKolegeVlake(); } catch(e) {}
+    try { if (typeof _dozSelId !== 'undefined' && _dozSelId) dozLoadLayers(_dozSelId); } catch(e) {}
   } catch(e) {} finally { _coreReloadBusy = false; }
 }
 
@@ -5779,7 +5843,25 @@ async function saveNovProjekt() {
   }
 
   const { data, error } = await sb.from('projekti').insert(payload).select('id').single();
-  if (error) { showToast('Greška: ' + error.message); return; }
+  if (error) {
+    // OS-S1: onLine=true ali zahtjev pao (mrtva/špotava veza) — NE gubi projekat:
+    // isti postupak kao offline grana (temp ID + lokalni upis + red čekanja).
+    if (_isNetworkErr(error)) {
+      const tempId = crypto.randomUUID();
+      const newProj = { ...payload, id: tempId, clanovi: [], _pendingSync: true };
+      _projekti.unshift(newProj);
+      _OL.save(_OL.PROJEKTI, _projekti);
+      _OL.enqueue({ type: 'insert_projekt', payload: { ...payload, _tempId: tempId } });
+      hideNovProjektForm();
+      _aktivniProjektId = tempId;
+      localStorage.setItem('tvlake_akt_proj', tempId);
+      rndProjektiList(); updProjStats();
+      showToast('📴 Veza slaba — projekat sačuvan lokalno, sinhronizuje se kad uspije');
+      return;
+    }
+    showToast('Greška: ' + error.message);
+    return;
+  }
   showToast('Projekat sačuvan!');
   hideNovProjektForm();
   if (data?.id) { _aktivniProjektId = data.id; localStorage.setItem('tvlake_akt_proj', data.id); }
@@ -7355,10 +7437,13 @@ async function sbSaveLogEntry(date, ime, totalM, vSnap, odjel, timing) {
 
 async function sbClearLog() {
   if (!sbUser || !sbProfile) return;
-  await sb.from('dnevni_log')
-    .delete()
-    .eq('korisnik_id', sbUser.id)
-    .eq('sumarija', sbProfile.sumarija || '');
+  try {
+    const { error } = await sb.from('dnevni_log')
+      .delete()
+      .eq('korisnik_id', sbUser.id)
+      .eq('sumarija', sbProfile.sumarija || '');
+    if (error) showToast('⚠ Brisanje dnevnika nije uspjelo: ' + error.message);
+  } catch(e) { showToast('📴 Brisanje dnevnika nije uspjelo — nema veze'); }
 }
 
 // ─── KOLEGE (iz korisnici tabele) ────────────────────────────────────────────
@@ -8023,6 +8108,10 @@ async function onLocPhotoSelected(input) {
     const m = _buildFotoMarker(la, lo, thumb, full, idx, ts, true);
     _locFotos.push({la, lo, ts, thumb, full, marker: m, shared: false, sharedWith: null, sbId: null});
     _saveFotos();
+    // OS-V2: full u IndexedDB dok ne stigne na server — localStorage čuva samo thumb,
+    // a Android ubija WebView pri povratku iz kamere; bez ovoga offline foto trajno
+    // izgubi punu rezoluciju. Briše se u sbUploadFoto po uspješnom uploadu.
+    _kmlcSave('fotofull:' + ts, full).catch(() => {});
     map.panTo([la, lo]);
     showToast('📷 Foto dodano na mapu');
     sbUploadFoto(_locFotos[idx], idx);
@@ -8246,8 +8335,24 @@ async function sbUploadFoto(f, idx) {
     if (!error && data?.id) {
       _locFotos[idx].sbId = data.id;
       _saveFotos();
+      _kmlcDelete('fotofull:' + f.ts).catch(() => {}); // OS-V2: full je na serveru — IDB kopija više ne treba
     }
-  } catch(e) {} // offline — probat će ponovo pri dijeljenju
+  } catch(e) {} // offline — _flushPendingFotos ponovo pokušava pri povratku veze
+}
+
+// OS-V2: pošalji sve fotose koji nisu stigli na server (offline pri slikanju).
+// full se vraća iz IndexedDB ako je WebView u međuvremenu ubijen (restart).
+async function _flushPendingFotos() {
+  if (!sbUser || !sbProfile) return;
+  for (let i = 0; i < _locFotos.length; i++) {
+    const f = _locFotos[i];
+    if (f.sbId) continue;
+    if (!f.full) {
+      try { f.full = await _kmlcGet('fotofull:' + f.ts); } catch(e) {}
+      if (!f.full) continue; // nema full nigdje — ne šalji polovičan zapis
+    }
+    await sbUploadFoto(f, i);
+  }
 }
 
 async function sbSaveFoto(f, idx, sharedWith) {
@@ -8400,6 +8505,11 @@ function _restoreFotos() {
       // full je null dok se ne učita iz Supabase (openFotoFullscreen ga fetchuje)
       const m = _buildFotoMarker(la, lo, thumb, thumb, i, ts, true, !!shared);
       _locFotos.push({la, lo, ts, thumb, full: null, marker: m, shared: !!shared, sharedWith: sharedWith||null, sbId: sbId||null});
+      // OS-V2: foto slikan offline pa app restartovan — full čeka u IndexedDB
+      if (!sbId) {
+        const fi = _locFotos.length - 1;
+        _kmlcGet('fotofull:' + ts).then(full => { if (full && !_locFotos[fi]?.full) _locFotos[fi].full = full; }).catch(() => {});
+      }
     });
   } catch(e) {}
 }
