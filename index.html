@@ -4154,7 +4154,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.11.1';
+const APP_VER = 'v3.11.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -25165,7 +25165,9 @@ function _temLegendUpd() {
   if (!el) {
     el = document.createElement('div');
     el.id = 'tem-legend';
-    el.style.cssText = 'position:absolute;left:10px;bottom:34px;z-index:800;background:rgba(15,23,42,0.92);border:1px solid #334155;border-radius:10px;padding:9px 12px;pointer-events:none;max-width:200px;';
+    // bottom:70px — isti obrazac kao #dem-legend: #action-bar je position:fixed preko
+    // karte (nije flex-sibling koji bi smanjio visinu #map), pa 34px završi ISPOD njega.
+    el.style.cssText = 'position:absolute;left:10px;bottom:calc(70px + env(safe-area-inset-bottom,0px));z-index:800;background:rgba(15,23,42,0.92);border:1px solid #334155;border-radius:10px;padding:9px 12px;pointer-events:none;max-width:200px;';
     document.getElementById('map').appendChild(el);
   }
   const fmtV = v => Math.abs(v) >= 100 ? Math.round(v).toLocaleString('bs') : (+(+v).toFixed(1)).toLocaleString('bs');
