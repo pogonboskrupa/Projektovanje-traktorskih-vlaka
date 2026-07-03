@@ -4154,7 +4154,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.10.0';
+const APP_VER = 'v3.11.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4911,6 +4911,7 @@ async function showApp() {
     _restoreFotos();
     _localKmlRestore();
     _kmlcInit(); // load IDB key list for offline badge rendering
+    _temRestore(); // tematska .gpkg karta iz IDB (async, ne blokira)
   }, 80);
 }
 
@@ -5184,6 +5185,9 @@ async function doLogout() {
 
   kmlLs.forEach(k => { if (k.grp) try { map.removeLayer(k.grp); } catch(e) {} });
   kmlLs = [];
+  // Tematska .gpkg karta — in-memory reset (IDB ostaje: isti korisnik je dobija nazad
+  // kroz _temRestore; promjena korisnika je briše kroz _wipeAllLocalUserData)
+  try { _temRemove(true); } catch(e) {}
 
   if (typeof _geojsonLayer !== 'undefined' && _geojsonLayer) { try { map.removeLayer(_geojsonLayer); } catch(e) {} }
   _geojsonLayer = null;
@@ -5234,6 +5238,10 @@ async function _wipeAllLocalUserData() {
   localStorage.removeItem(_TACKE_KEY);
   localStorage.removeItem(_KVC_KEY);
   localStorage.removeItem('tvlake_kolege');
+  // Tematska .gpkg karta — lokalni per-korisnik sadržaj (ista klasa kao KML)
+  localStorage.removeItem(_TEM_NAME_KEY);
+  localStorage.removeItem(_TEM_THEME_KEY);
+  try { _kmlcDelete(_TEM_IDB_KEY); } catch(e) {}
   // OS-K1: ukloni iz sync reda operacije PRETHODNOG korisnika — njegovi lokalni podaci
   // se upravo brišu, a slanje pod tuđom prijavom RLS ionako odbija (tihi gubitak +
   // rizik krivog cilja za delete-by-id). Op-i bez _uid (stari format) se zadržavaju
@@ -10172,6 +10180,39 @@ function _openLayerSheet() {
   }
   _lsRenderGranice();
   _lsRenderCache();
+  _lsRenderTem();
+}
+
+// Tematska karta (.gpkg) — sekcija u modalu karte: učitavanje / izbor teme / uklanjanje
+function _lsRenderTem() {
+  const box = document.getElementById('ls-tem-box');
+  if (!box) return;
+  if (!_temGrp) {
+    box.innerHTML = `
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px;">Učitaj .gpkg s odjelima/odsjecima — numeričke kolone (visina, zaliha, četinari...) postaju teme za bojenje. Klik na poligon daje karticu s atributima.</div>
+      <button onclick="document.getElementById('tem-file-input').click()"
+        style="width:100%;padding:10px;background:#1e3a5f;border:1px dashed #334155;border-radius:8px;color:#94a3b8;font-size:12px;cursor:pointer;">
+        📂 Učitaj .gpkg (tematska karta)
+      </button>`;
+    return;
+  }
+  const opts = ['<option value="">— Bez teme (samo granice) —</option>']
+    .concat(_temCols.map(c =>
+      `<option value="${_escHtml(c)}"${c === _temTheme ? ' selected' : ''}>${_escHtml(c.replace(/_/g, ' '))}</option>`))
+    .join('');
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <span style="font-size:12px;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📊 ${_escHtml(_temName)}</span>
+      <span style="font-size:10px;color:#64748b;white-space:nowrap;">${_temFeatures.length} polig.</span>
+    </div>
+    <select onchange="_temApplyTheme(this.value || null)"
+      style="width:100%;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:8px;">
+      ${opts}
+    </select>
+    <button onclick="_temRemove()"
+      style="width:100%;padding:8px;background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:8px;color:#f87171;font-size:12px;cursor:pointer;">
+      ✕ Ukloni tematsku kartu
+    </button>`;
 }
 
 // Prikaz zauzeća memorije online karata (keširane pločice) + brisanje — u modalu karte
@@ -24837,6 +24878,319 @@ function _prjToProj4(prjText) {
   return null; // nepoznat → pretpostavi WGS84
 }
 
+// ═══ TEMATSKA KARTA (.gpkg) — bojenje odjela/odsjeka po atributima ═══════════
+// Korisnik učita master_odsjeci.gpkg s uređaja; numeričke kolone postaju teme
+// (automatski kvantili, 5 klasa); klik na poligon daje karticu s atributima.
+const _TEM_IDB_KEY   = 'tematska_gpkg_v1';
+const _TEM_NAME_KEY  = 'tvlake_tem_name';
+const _TEM_THEME_KEY = 'tvlake_tem_theme';
+const _TEM_RAMP      = ['#1a9641','#a6d96a','#ffffbf','#fdae61','#d7191c'];
+let _temGrp      = null;   // L.layerGroup
+let _temRenderer = null;   // L.canvas — hiljade poligona, SVG bi gušio
+let _temFeatures = [];     // [{attrs, polys:[L.polygon]}]
+let _temCols     = [];     // numeričke kolone (dostupne teme)
+let _temTheme    = null;   // aktivna kolona ili null
+let _temName     = '';
+
+// GPKG geometrija: 'GP' magic + flags + srs_id + envelope, pa standardni WKB.
+// Vraća { srsId, polys: [[ring…]] } gdje je ring lista [x, y] SIROVIH koordinata
+// (transformacija u lat/lng se radi poslije, kad se srs razriješi).
+function _parseGpkgGeom(bytes) {
+  if (!bytes || bytes.length < 12 || bytes[0] !== 0x47 || bytes[1] !== 0x50) return null;
+  const blen = bytes.byteLength;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, blen);
+  const flags = bytes[3];
+  if (flags & 0x20) return null;               // prazna geometrija
+  const hdrLe = !!(flags & 0x01);
+  const srsId = view.getInt32(4, hdrLe);
+  const envSizes = [0, 32, 48, 48, 64];
+  let pos = 8 + (envSizes[(flags >> 1) & 0x07] || 0);
+
+  const _OOB = { oob: true };
+  let le = true;
+  const rU32 = () => { if (pos + 4 > blen) throw _OOB; const v = view.getUint32(pos, le); pos += 4; return v; };
+  const rF64 = () => { if (pos + 8 > blen) throw _OOB; const v = view.getFloat64(pos, le); pos += 8; return v; };
+  const dimsOf = t => 2 + (((t >= 1000 && t < 2000) || t >= 3000) ? 1 : 0) + (t >= 2000 ? 1 : 0);
+
+  const polys = [];
+  function readGeom(depth) {
+    if (depth > 3 || pos >= blen) throw _OOB;
+    le = bytes[pos++] === 0x01;                // WKB: svaka geometrija nosi SVOJ endian bajt
+    const gt = rU32(), base = gt % 1000, nd = dimsOf(gt);
+    if (base === 3) {                          // Polygon
+      const nr = rU32(); if (nr > 1e6) throw _OOB;
+      const rings = [];
+      for (let i = 0; i < nr; i++) {
+        const n = rU32(); if (n > 5e6) throw _OOB;
+        const pts = [];
+        for (let j = 0; j < n; j++) {
+          const x = rF64(), y = rF64();
+          for (let k = 2; k < nd; k++) rF64(); // preskoči Z/M
+          pts.push([x, y]);
+        }
+        rings.push(pts);
+      }
+      polys.push(rings);
+    } else if (base === 6 || base === 7) {     // MultiPolygon / GeometryCollection
+      const n = rU32(); if (n > 1e5) throw _OOB;
+      for (let i = 0; i < n; i++) readGeom(depth + 1);
+    }
+    // ostale tipove (tačke/linije) ignorišemo — tematska karta je poligonska
+  }
+  try { readGeom(0); } catch(e) { if (!e.oob) throw e; }
+  return { srsId, polys };
+}
+
+// Razriješi transformaciju srs → WGS84. Vraća fn([x,y]) → [lat,lng] ili null (već WGS84).
+function _temResolveTr(srsId, srsDefs) {
+  if (srsId === 4326 || srsId === 0 || srsId === -1) return null;
+  const known = { 31276: 'EPSG:31276', 31275: 'EPSG:31275', 3908: 'EPSG:3908' };
+  let src = known[srsId] || null;
+  if (!src && srsDefs && srsDefs[srsId]) {
+    try { proj4('TEM_SRC', 'WGS84', [0, 0]); } catch(e) {}
+    try { proj4.defs('TEM_SRC', srsDefs[srsId]); src = 'TEM_SRC'; } catch(e) { src = null; }
+  }
+  if (!src) return null; // nepoznat srs — pretpostavi WGS84, heuristika ispod hvata metre
+  return ([x, y]) => { const [lng, lat] = proj4(src, 'WGS84', [x, y]); return [lat, lng]; };
+}
+
+async function _gpkgLoadFile(file) {
+  if (!file) return;
+  showToast('⏳ Učitavam ' + file.name + '...');
+  try {
+    const buf = await file.arrayBuffer();
+    const ok = await _gpkgParseBuf(buf, file.name, { fit: true });
+    if (ok) {
+      _kmlcSave(_TEM_IDB_KEY, buf).catch(() => {});
+      localStorage.setItem(_TEM_NAME_KEY, file.name);
+    }
+  } catch(e) {
+    console.error('_gpkgLoadFile:', e);
+    showToast('❌ GPKG greška: ' + (e.message || 'nepoznato'));
+  }
+}
+
+async function _gpkgParseBuf(buf, name, opts) {
+  if (!_MiniSqliteMain) { showToast('⚠ SQLite čitač nije dostupan'); return false; }
+  const mini = new _MiniSqliteMain(new File([buf], 'tem.gpkg'));
+  await mini.init();
+
+  // 1. Sve tabele iz sqlite_master
+  const tables = {};
+  await mini._scanLeaves(1, (rid, r) => {
+    if (r[0] === 'table' && r[1]) tables[r[1].toLowerCase()] = { name: r[1], root: r[3], sql: r[4] || '' };
+  });
+
+  // 2. gpkg_spatial_ref_sys → definicije za nepoznate srs-ove (kolona 'definition')
+  const srsDefs = {};
+  const srsT = tables['gpkg_spatial_ref_sys'];
+  if (srsT) {
+    const srsCols = (srsT.sql.match(/\(([^)]+)\)/)?.[1] || '').split(',')
+      .map(c => c.trim().split(/\s+/)[0].toLowerCase().replace(/["'`]/g, ''));
+    const iId = srsCols.indexOf('srs_id'), iDef = srsCols.indexOf('definition');
+    if (iId >= 0 && iDef >= 0) {
+      try { await mini._scanLeaves(srsT.root, (rid, r) => { if (r[iId] != null && r[iDef]) srsDefs[r[iId]] = r[iDef]; }); } catch(e) {}
+    }
+  }
+
+  // 3. Nađi feature tabelu: probe za blob s 'GP' magicom
+  const _isGpBlob = v => v && (v instanceof Uint8Array) && v.length >= 12 && v[0] === 0x47 && v[1] === 0x50;
+  let ft = null, geomIdx = -1;
+  for (const key of Object.keys(tables)) {
+    if (/^(gpkg_|sqlite_|rtree_)/.test(key)) continue;
+    const t = tables[key];
+    let found = -1, probed = 0;
+    try {
+      await mini._scanLeaves(t.root, (rid, r) => {
+        for (let j = 0; j < r.length; j++) { if (_isGpBlob(r[j])) { found = j; throw { stop: 1 }; } }
+        if (++probed >= 50) throw { stop: 1 };
+      });
+    } catch(e) { if (!e.stop) throw e; }
+    if (found >= 0) { ft = t; geomIdx = found; break; }
+  }
+  if (!ft) { showToast('⚠ U GPKG fajlu nije nađena tabela s poligonima'); return false; }
+
+  // 4. Imena kolona + offset (rowid-alias može pomjeriti payload — isti obrazac kao odsjeci)
+  const colNames = (ft.sql.match(/\(([\s\S]+)\)/)?.[1] || '').split(',')
+    .map(c => c.trim().split(/\s+/)[0].toLowerCase().replace(/["'`]/g, ''));
+  const declaredGeom = colNames.findIndex(n => /geom|shape/.test(n));
+  const colOffset = declaredGeom >= 0 ? (declaredGeom - geomIdx) : 0;
+  const attrName = j => colNames[j + colOffset] || ('kolona_' + j);
+
+  // 5. Ukloni postojeći sloj pa gradi novi
+  _temRemove(true);
+  _temRenderer = _temRenderer || L.canvas({ padding: 0.3 });
+  _temGrp = L.layerGroup();
+  _temFeatures = [];
+  const numStats = {}; // ime → {num, tot}
+  let tr = null, trResolved = false, cnt = 0, allBounds = null;
+
+  await mini._scanLeaves(ft.root, (rid, row) => {
+    const blob = row[geomIdx];
+    if (!_isGpBlob(blob)) return;
+    const g = _parseGpkgGeom(blob);
+    if (!g || !g.polys.length) return;
+    if (!trResolved) {
+      tr = _temResolveTr(g.srsId, srsDefs);
+      // Heuristika: koordinate u metrima (nema tr, |x| > 180) → probaj MGI zonu po x_0
+      if (!tr) {
+        const p0 = g.polys[0]?.[0]?.[0];
+        if (p0 && Math.abs(p0[0]) > 180) tr = _temResolveTr(p0[0] > 6e6 ? 31276 : 31275, srsDefs);
+      }
+      trResolved = true;
+    }
+    const attrs = {};
+    for (let j = 0; j < row.length; j++) {
+      if (j === geomIdx) continue;
+      const nm = attrName(j);
+      if (nm === 'fid' || nm === 'id') continue;
+      const v = row[j];
+      attrs[nm] = (v instanceof Uint8Array) ? null : v;
+      const st = numStats[nm] = numStats[nm] || { num: 0, tot: 0 };
+      if (v != null && v !== '') { st.tot++; if (Number.isFinite(Number(v))) st.num++; }
+    }
+    const f = { attrs, polys: [] };
+    for (const rings of g.polys) {
+      const llRings = rings.map(ring => ring.map(pt => {
+        if (tr) { try { return tr(pt); } catch { return [pt[1], pt[0]]; } }
+        return [pt[1], pt[0]];   // WGS84: [x=lng, y=lat] → [lat, lng]
+      }));
+      if (!llRings[0]?.length) continue;
+      const poly = L.polygon(llRings, {
+        renderer: _temRenderer, color: '#94a3b8', weight: 1, opacity: 0.8,
+        fillColor: '#94a3b8', fillOpacity: 0.08, interactive: true
+      });
+      poly.bindPopup(() => _temPopupHtml(f), { maxWidth: 280 });
+      f.polys.push(poly);
+      _temGrp.addLayer(poly);
+      try { const b = poly.getBounds(); if (b.isValid()) allBounds = allBounds ? allBounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast()); } catch {}
+      cnt++;
+    }
+    if (f.polys.length) _temFeatures.push(f);
+  });
+
+  if (!cnt) { showToast('⚠ GPKG: nije parsiran nijedan poligon'); return false; }
+  _temName = name;
+  _temCols = Object.keys(numStats).filter(n => {
+    const s = numStats[n];
+    return s.tot >= 3 && s.num / s.tot >= 0.8;
+  }).sort();
+
+  // U Oznake panel kroz kmlLs (isti obrazac kao Odsjeci SQLite sloj)
+  const ei = kmlLs.findIndex(k => k._isTematska);
+  if (ei >= 0) kmlLs.splice(ei, 1);
+  kmlLs.push({ name: '📊 ' + name, grp: _temGrp, col: '#94a3b8', dash: '', weight: 1,
+    opacity: 0.8, vis: true, fill: true, fillCol: '#94a3b8', fillPattern: 'solid',
+    fillOpacity: 0.08, _isTematska: true });
+  _temGrp.addTo(map);
+  if (typeof rndKml === 'function') rndKml();
+
+  if (opts?.fit && allBounds && allBounds.isValid()) map.fitBounds(allBounds, { padding: [20, 20] });
+  showToast(`✅ ${name}: ${cnt} poligona · ${_temCols.length} tema`);
+
+  // Vrati zapamćenu temu (restore poslije restarta)
+  const savedTheme = localStorage.getItem(_TEM_THEME_KEY);
+  if (savedTheme && _temCols.includes(savedTheme)) _temApplyTheme(savedTheme);
+  if (typeof _lsRenderTem === 'function') _lsRenderTem();
+  return true;
+}
+
+// Popup kartica — svi atributi, aktivna tema boldana (kao QGIS identify)
+function _temPopupHtml(f) {
+  const rows = Object.entries(f.attrs)
+    .filter(([, v]) => v != null && v !== '')
+    .map(([k, v]) => {
+      const hot = k === _temTheme;
+      const vs = (typeof v === 'number' && !Number.isInteger(v)) ? v.toFixed(2) : String(v);
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0;border-bottom:1px solid rgba(51,65,85,0.35);${hot ? 'background:rgba(74,222,128,0.10);' : ''}">
+        <span style="color:#64748b;font-size:11px;">${_escHtml(k.replace(/_/g, ' '))}</span>
+        <span style="color:${hot ? '#4ade80' : '#e2e8f0'};font-size:12px;font-weight:${hot ? 700 : 500};text-align:right;word-break:break-word;">${_escHtml(vs)}</span>
+      </div>`;
+    }).join('');
+  return `<div style="font-size:12px;max-height:280px;overflow-y:auto;min-width:200px;">${rows || '<span style="color:#64748b;">Nema atributa</span>'}</div>`;
+}
+
+// Kvantilna klasifikacija (5 klasa) + bojenje + legenda
+function _temApplyTheme(col) {
+  _temTheme = col || null;
+  if (!col) {
+    _temFeatures.forEach(f => f.polys.forEach(p =>
+      p.setStyle({ color: '#94a3b8', fillColor: '#94a3b8', fillOpacity: 0.08, weight: 1 })));
+    localStorage.removeItem(_TEM_THEME_KEY);
+    _temLegendUpd(null);
+    return;
+  }
+  const vals = _temFeatures.map(f => Number(f.attrs[col])).filter(Number.isFinite).sort((a, b) => a - b);
+  if (vals.length < 2) { showToast('⚠ Premalo vrijednosti za temu "' + col + '"'); return; }
+  const breaks = [];
+  for (let k = 1; k < 5; k++) {
+    const b = vals[Math.min(vals.length - 1, Math.floor(vals.length * k / 5))];
+    if (!breaks.length || b > breaks[breaks.length - 1]) breaks.push(b);
+  }
+  const classOf = v => { let c = 0; for (const b of breaks) { if (v >= b) c++; else break; } return c; };
+  _temFeatures.forEach(f => {
+    const v = Number(f.attrs[col]);
+    if (!Number.isFinite(v)) {
+      f.polys.forEach(p => p.setStyle({ color: '#64748b', fillColor: '#64748b', fillOpacity: 0.05, weight: 0.8 }));
+      return;
+    }
+    const c = _TEM_RAMP[Math.min(classOf(v), _TEM_RAMP.length - 1)];
+    f.polys.forEach(p => p.setStyle({ color: c, fillColor: c, fillOpacity: 0.55, weight: 1 }));
+  });
+  localStorage.setItem(_TEM_THEME_KEY, col);
+  _temLegendUpd({ col, breaks, min: vals[0], max: vals[vals.length - 1] });
+}
+
+function _temLegendUpd(info) {
+  let el = document.getElementById('tem-legend');
+  if (!info) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'tem-legend';
+    el.style.cssText = 'position:absolute;left:10px;bottom:34px;z-index:800;background:rgba(15,23,42,0.92);border:1px solid #334155;border-radius:10px;padding:9px 12px;pointer-events:none;max-width:190px;';
+    document.getElementById('map').appendChild(el);
+  }
+  const fmtV = v => Math.abs(v) >= 100 ? Math.round(v).toLocaleString('bs') : (+v.toFixed(1)).toLocaleString('bs');
+  const edges = [info.min, ...info.breaks, info.max];
+  let rows = '';
+  for (let i = 0; i < _TEM_RAMP.length && i < edges.length - 0; i++) {
+    const lo = edges[Math.min(i, edges.length - 1)], hi = edges[Math.min(i + 1, edges.length - 1)];
+    if (i > 0 && lo === hi && i < _TEM_RAMP.length - 1) continue;
+    rows += `<div style="display:flex;align-items:center;gap:7px;padding:1px 0;">
+      <span style="width:14px;height:11px;border-radius:2px;background:${_TEM_RAMP[i]};flex-shrink:0;"></span>
+      <span style="font-size:10.5px;color:#cbd5e1;">${fmtV(lo)} – ${fmtV(hi)}</span>
+    </div>`;
+  }
+  el.innerHTML = `<div style="font-size:11px;font-weight:700;color:#e2e8f0;margin-bottom:5px;">📊 ${_escHtml(String(info.col).replace(/_/g, ' '))}</div>${rows}`;
+}
+
+function _temRemove(silent) {
+  if (_temGrp) { try { map.removeLayer(_temGrp); } catch(e) {} }
+  _temGrp = null; _temFeatures = []; _temCols = []; _temTheme = null; _temName = '';
+  const ei = kmlLs.findIndex(k => k._isTematska);
+  if (ei >= 0) { kmlLs.splice(ei, 1); if (typeof rndKml === 'function') rndKml(); }
+  _temLegendUpd(null);
+  if (!silent) {
+    _kmlcDelete(_TEM_IDB_KEY).catch(() => {});
+    localStorage.removeItem(_TEM_NAME_KEY);
+    localStorage.removeItem(_TEM_THEME_KEY);
+    if (typeof _lsRenderTem === 'function') _lsRenderTem();
+    showToast('🗑 Tematska karta uklonjena');
+  }
+}
+
+// Restore poslije restarta (poziva se iz showApp, iza prvog painta)
+async function _temRestore() {
+  const name = localStorage.getItem(_TEM_NAME_KEY);
+  if (!name || _temGrp) return;
+  try {
+    const c = await _kmlcGet(_TEM_IDB_KEY);
+    if (!c) return;
+    const buf = c instanceof ArrayBuffer ? c : c.buffer;
+    await _gpkgParseBuf(buf, name, { fit: false });
+  } catch(e) { console.warn('_temRestore:', e); }
+}
+
 // ── Rekurzivno listanje Supabase bucketa (root + svi podfolderi) ──────────────
 async function _listBucketAll(bucketName, path = '') {
   const { data, error } = await sb.storage.from(bucketName).list(path, { limit: 500 });
@@ -28924,6 +29278,14 @@ if (typeof AndroidDownload !== 'undefined') {
         style="width:100%;padding:10px;background:#1e3a5f;border:1px dashed #334155;border-radius:8px;color:#94a3b8;font-size:12px;cursor:pointer;">
         📂 Dodaj / upravljaj offline kartama
       </button>
+    </div>
+
+    <!-- Tematska karta (.gpkg) -->
+    <div style="margin-top:14px;border-top:1px solid #1e3a5f;padding-top:14px;">
+      <h3 style="margin-bottom:10px;">📊 Tematska karta</h3>
+      <div id="ls-tem-box"></div>
+      <input type="file" id="tem-file-input" accept=".gpkg" style="display:none;"
+        onchange="_gpkgLoadFile(this.files[0]);this.value=''">
     </div>
 
     <div style="margin-top:14px;border-top:1px solid #1e3a5f;padding-top:14px;">
