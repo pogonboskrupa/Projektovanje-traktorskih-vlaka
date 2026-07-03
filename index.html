@@ -3017,9 +3017,9 @@ select:focus { outline:none; border-color:#3b82f6; }
         </div>
 
         <div class="auth-remember-row">
-          <div class="auth-cbx" id="auth-cbx-el" onclick="this.classList.toggle('checked');document.getElementById('auth-zapamti').checked=this.classList.contains('checked')"></div>
-          <input type="checkbox" id="auth-zapamti" style="display:none;">
-          <span class="auth-cbx-lbl" onclick="document.getElementById('auth-cbx-el').click()">Zapamti me na ovom uređaju</span>
+          <div class="auth-cbx checked" id="auth-cbx-el" onclick="this.classList.toggle('checked');document.getElementById('auth-zapamti').checked=this.classList.contains('checked')"></div>
+          <input type="checkbox" id="auth-zapamti" style="display:none;" checked>
+          <span class="auth-cbx-lbl" onclick="document.getElementById('auth-cbx-el').click()">Ostani prijavljen na ovom uređaju</span>
         </div>
 
         <button class="auth-btn-primary" onclick="doLogin()">
@@ -4178,7 +4178,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.12.0';
+const APP_VER = 'v3.12.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5238,7 +5238,11 @@ async function doLogout() {
     document.getElementById('auth-ime').value = '';
     document.getElementById('auth-prezime').value = '';
     document.getElementById('auth-pin').value = '';
-    document.getElementById('auth-zapamti').checked = false;
+    // "Ostani prijavljen" ostaje UKLJUČEN po defaultu i poslije odjave — sljedeća prijava
+    // opet pamti korisnika (login se traži samo jednom, do sljedeće ručne odjave).
+    document.getElementById('auth-zapamti').checked = true;
+    const _cbx = document.getElementById('auth-cbx-el');
+    if (_cbx) _cbx.classList.add('checked');
   }
 }
 
