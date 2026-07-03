@@ -4154,7 +4154,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.11.0';
+const APP_VER = 'v3.11.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5185,9 +5185,9 @@ async function doLogout() {
 
   kmlLs.forEach(k => { if (k.grp) try { map.removeLayer(k.grp); } catch(e) {} });
   kmlLs = [];
-  // Tematska .gpkg karta — in-memory reset (IDB ostaje: isti korisnik je dobija nazad
-  // kroz _temRestore; promjena korisnika je briše kroz _wipeAllLocalUserData)
-  try { _temRemove(true); } catch(e) {}
+  // Tematske .gpkg karte — in-memory reset (IDB + registar ostaju: isti korisnik ih
+  // dobija nazad kroz _temRestore; promjena korisnika ih briše kroz _wipeAllLocalUserData)
+  try { _temRemoveAll(true); } catch(e) {}
 
   if (typeof _geojsonLayer !== 'undefined' && _geojsonLayer) { try { map.removeLayer(_geojsonLayer); } catch(e) {} }
   _geojsonLayer = null;
@@ -5238,7 +5238,13 @@ async function _wipeAllLocalUserData() {
   localStorage.removeItem(_TACKE_KEY);
   localStorage.removeItem(_KVC_KEY);
   localStorage.removeItem('tvlake_kolege');
-  // Tematska .gpkg karta — lokalni per-korisnik sadržaj (ista klasa kao KML)
+  // Tematske .gpkg karte — lokalni per-korisnik sadržaj (ista klasa kao KML):
+  // obriši sve IDB fajlove iz registra + registar + legacy ključeve
+  try {
+    const reg = JSON.parse(localStorage.getItem(_TEM_REG_KEY) || '[]');
+    reg.forEach(m => { try { _kmlcDelete(_TEM_IDB_PFX + m.id); } catch(e) {} });
+  } catch(e) {}
+  localStorage.removeItem(_TEM_REG_KEY);
   localStorage.removeItem(_TEM_NAME_KEY);
   localStorage.removeItem(_TEM_THEME_KEY);
   try { _kmlcDelete(_TEM_IDB_KEY); } catch(e) {}
@@ -10183,11 +10189,11 @@ function _openLayerSheet() {
   _lsRenderTem();
 }
 
-// Tematska karta (.gpkg) — sekcija u modalu karte: učitavanje / izbor teme / uklanjanje
+// Tematske karte (.gpkg) — brza sekcija u modalu karte; puno upravljanje u tem-modal panelu
 function _lsRenderTem() {
   const box = document.getElementById('ls-tem-box');
   if (!box) return;
-  if (!_temGrp) {
+  if (!_temMaps.length) {
     box.innerHTML = `
       <div style="font-size:11px;color:#64748b;margin-bottom:8px;">Učitaj .gpkg s odjelima/odsjecima — numeričke kolone (visina, zaliha, četinari...) postaju teme za bojenje. Klik na poligon daje karticu s atributima.</div>
       <button onclick="document.getElementById('tem-file-input').click()"
@@ -10196,22 +10202,15 @@ function _lsRenderTem() {
       </button>`;
     return;
   }
-  const opts = ['<option value="">— Bez teme (samo granice) —</option>']
-    .concat(_temCols.map(c =>
-      `<option value="${_escHtml(c)}"${c === _temTheme ? ' selected' : ''}>${_escHtml(c.replace(/_/g, ' '))}</option>`))
-    .join('');
-  box.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-      <span style="font-size:12px;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📊 ${_escHtml(_temName)}</span>
-      <span style="font-size:10px;color:#64748b;white-space:nowrap;">${_temFeatures.length} polig.</span>
-    </div>
-    <select onchange="_temApplyTheme(this.value || null)"
-      style="width:100%;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:8px;">
-      ${opts}
-    </select>
-    <button onclick="_temRemove()"
-      style="width:100%;padding:8px;background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:8px;color:#f87171;font-size:12px;cursor:pointer;">
-      ✕ Ukloni tematsku kartu
+  const rows = _temMaps.map(m => `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;">
+      <span style="font-size:12px;color:${m.visible ? '#e2e8f0' : '#64748b'};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📊 ${_escHtml(m.name)}</span>
+      <span style="font-size:10px;color:#64748b;white-space:nowrap;">${m.theme ? _escHtml(m.theme.replace(/_/g, ' ')) : 'bez teme'}</span>
+    </div>`).join('');
+  box.innerHTML = `${rows}
+    <button onclick="closeLayerSheet();showTemModal();"
+      style="width:100%;margin-top:6px;padding:9px;background:#1e3a5f;border:1px solid #334155;border-radius:8px;color:#93c5fd;font-size:12px;font-weight:600;cursor:pointer;">
+      📊 Upravljaj tematskim kartama
     </button>`;
 }
 
@@ -24881,16 +24880,25 @@ function _prjToProj4(prjText) {
 // ═══ TEMATSKA KARTA (.gpkg) — bojenje odjela/odsjeka po atributima ═══════════
 // Korisnik učita master_odsjeci.gpkg s uređaja; numeričke kolone postaju teme
 // (automatski kvantili, 5 klasa); klik na poligon daje karticu s atributima.
-const _TEM_IDB_KEY   = 'tematska_gpkg_v1';
-const _TEM_NAME_KEY  = 'tvlake_tem_name';
-const _TEM_THEME_KEY = 'tvlake_tem_theme';
+const _TEM_REG_KEY   = 'tvlake_tem_reg_v1';      // registar učitanih karata (bez geometrije)
+const _TEM_IDB_PFX   = 'tematska_gpkg_';          // IDB ključ po karti: prefiks + id
+const _TEM_IDB_KEY   = 'tematska_gpkg_v1';        // legacy (v3.11.0 single-map) — migrira se
+const _TEM_NAME_KEY  = 'tvlake_tem_name';         // legacy
+const _TEM_THEME_KEY = 'tvlake_tem_theme';        // legacy
 const _TEM_RAMP      = ['#1a9641','#a6d96a','#ffffbf','#fdae61','#d7191c'];
-let _temGrp      = null;   // L.layerGroup
+// Registar u memoriji: {id, name, grp, features:[{attrs,polys}], cols, theme, visible,
+//  styles:{kolona:{breaks:[4],colors:[5]}} (ručne klase/boje), _cls (aktivne klase za legendu)}
+let _temMaps     = [];
 let _temRenderer = null;   // L.canvas — hiljade poligona, SVG bi gušio
-let _temFeatures = [];     // [{attrs, polys:[L.polygon]}]
-let _temCols     = [];     // numeričke kolone (dostupne teme)
-let _temTheme    = null;   // aktivna kolona ili null
-let _temName     = '';
+let _temEdOpenId = null;   // karta čiji je editor klasa otvoren u modalu
+
+function _temRegSave() {
+  try {
+    localStorage.setItem(_TEM_REG_KEY, JSON.stringify(_temMaps.map(m =>
+      ({ id: m.id, name: m.name, theme: m.theme, visible: m.visible, styles: m.styles || {} }))));
+  } catch(e) {}
+}
+function _temById(id) { return _temMaps.find(m => m.id === id); }
 
 // GPKG geometrija: 'GP' magic + flags + srs_id + envelope, pa standardni WKB.
 // Vraća { srsId, polys: [[ring…]] } gdje je ring lista [x, y] SIROVIH koordinata
@@ -24959,10 +24967,10 @@ async function _gpkgLoadFile(file) {
   showToast('⏳ Učitavam ' + file.name + '...');
   try {
     const buf = await file.arrayBuffer();
-    const ok = await _gpkgParseBuf(buf, file.name, { fit: true });
-    if (ok) {
-      _kmlcSave(_TEM_IDB_KEY, buf).catch(() => {});
-      localStorage.setItem(_TEM_NAME_KEY, file.name);
+    const entry = await _gpkgParseBuf(buf, file.name, { fit: true });
+    if (entry) {
+      _kmlcSave(_TEM_IDB_PFX + entry.id, buf).catch(() => {});
+      _temRegSave();
     }
   } catch(e) {
     console.error('_gpkgLoadFile:', e);
@@ -24970,7 +24978,9 @@ async function _gpkgLoadFile(file) {
   }
 }
 
-async function _gpkgParseBuf(buf, name, opts) {
+// Parsira buf i registruje novu kartu. `saved` = zapis iz registra (restore poslije
+// restarta: id/theme/visible/styles se zadržavaju). Vraća entry ili null.
+async function _gpkgParseBuf(buf, name, opts, saved) {
   if (!_MiniSqliteMain) { showToast('⚠ SQLite čitač nije dostupan'); return false; }
   const mini = new _MiniSqliteMain(new File([buf], 'tem.gpkg'));
   await mini.init();
@@ -25008,7 +25018,7 @@ async function _gpkgParseBuf(buf, name, opts) {
     } catch(e) { if (!e.stop) throw e; }
     if (found >= 0) { ft = t; geomIdx = found; break; }
   }
-  if (!ft) { showToast('⚠ U GPKG fajlu nije nađena tabela s poligonima'); return false; }
+  if (!ft) { showToast('⚠ U GPKG fajlu nije nađena tabela s poligonima'); return null; }
 
   // 4. Imena kolona + offset (rowid-alias može pomjeriti payload — isti obrazac kao odsjeci)
   const colNames = (ft.sql.match(/\(([\s\S]+)\)/)?.[1] || '').split(',')
@@ -25017,11 +25027,14 @@ async function _gpkgParseBuf(buf, name, opts) {
   const colOffset = declaredGeom >= 0 ? (declaredGeom - geomIdx) : 0;
   const attrName = j => colNames[j + colOffset] || ('kolona_' + j);
 
-  // 5. Ukloni postojeći sloj pa gradi novi
-  _temRemove(true);
+  // 5. Novi entry u registru (restore zadržava id/temu/vidljivost/ručne klase)
   _temRenderer = _temRenderer || L.canvas({ padding: 0.3 });
-  _temGrp = L.layerGroup();
-  _temFeatures = [];
+  const entry = {
+    id: saved?.id || ('t' + Date.now().toString(36) + Math.floor(Math.random() * 1e4)),
+    name, grp: L.layerGroup(), features: [], cols: [],
+    theme: null, visible: saved ? saved.visible !== false : true,
+    styles: (saved && saved.styles) || {}, _cls: null
+  };
   const numStats = {}; // ime → {num, tot}
   let tr = null, trResolved = false, cnt = 0, allBounds = null;
 
@@ -25060,47 +25073,40 @@ async function _gpkgParseBuf(buf, name, opts) {
         renderer: _temRenderer, color: '#94a3b8', weight: 1, opacity: 0.8,
         fillColor: '#94a3b8', fillOpacity: 0.08, interactive: true
       });
-      poly.bindPopup(() => _temPopupHtml(f), { maxWidth: 280 });
+      poly.bindPopup(() => _temPopupHtml(entry, f), { maxWidth: 280 });
       f.polys.push(poly);
-      _temGrp.addLayer(poly);
+      entry.grp.addLayer(poly);
       try { const b = poly.getBounds(); if (b.isValid()) allBounds = allBounds ? allBounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast()); } catch {}
       cnt++;
     }
-    if (f.polys.length) _temFeatures.push(f);
+    if (f.polys.length) entry.features.push(f);
   });
 
-  if (!cnt) { showToast('⚠ GPKG: nije parsiran nijedan poligon'); return false; }
-  _temName = name;
-  _temCols = Object.keys(numStats).filter(n => {
+  if (!cnt) { showToast('⚠ GPKG: nije parsiran nijedan poligon'); return null; }
+  entry.cols = Object.keys(numStats).filter(n => {
     const s = numStats[n];
     return s.tot >= 3 && s.num / s.tot >= 0.8;
   }).sort();
-
-  // U Oznake panel kroz kmlLs (isti obrazac kao Odsjeci SQLite sloj)
-  const ei = kmlLs.findIndex(k => k._isTematska);
-  if (ei >= 0) kmlLs.splice(ei, 1);
-  kmlLs.push({ name: '📊 ' + name, grp: _temGrp, col: '#94a3b8', dash: '', weight: 1,
-    opacity: 0.8, vis: true, fill: true, fillCol: '#94a3b8', fillPattern: 'solid',
-    fillOpacity: 0.08, _isTematska: true });
-  _temGrp.addTo(map);
-  if (typeof rndKml === 'function') rndKml();
+  entry._bounds = allBounds;
+  _temMaps.push(entry);
+  if (entry.visible) entry.grp.addTo(map);
 
   if (opts?.fit && allBounds && allBounds.isValid()) map.fitBounds(allBounds, { padding: [20, 20] });
-  showToast(`✅ ${name}: ${cnt} poligona · ${_temCols.length} tema`);
+  showToast(`✅ ${name}: ${cnt} poligona · ${entry.cols.length} tema`);
 
   // Vrati zapamćenu temu (restore poslije restarta)
-  const savedTheme = localStorage.getItem(_TEM_THEME_KEY);
-  if (savedTheme && _temCols.includes(savedTheme)) _temApplyTheme(savedTheme);
+  if (saved?.theme && entry.cols.includes(saved.theme)) _temApplyTheme(entry.id, saved.theme);
   if (typeof _lsRenderTem === 'function') _lsRenderTem();
-  return true;
+  if (typeof _temModalRender === 'function') _temModalRender();
+  return entry;
 }
 
-// Popup kartica — svi atributi, aktivna tema boldana (kao QGIS identify)
-function _temPopupHtml(f) {
+// Popup kartica — svi atributi, aktivna tema karte boldana (kao QGIS identify)
+function _temPopupHtml(entry, f) {
   const rows = Object.entries(f.attrs)
     .filter(([, v]) => v != null && v !== '')
     .map(([k, v]) => {
-      const hot = k === _temTheme;
+      const hot = k === entry.theme;
       const vs = (typeof v === 'number' && !Number.isInteger(v)) ? v.toFixed(2) : String(v);
       return `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0;border-bottom:1px solid rgba(51,65,85,0.35);${hot ? 'background:rgba(74,222,128,0.10);' : ''}">
         <span style="color:#64748b;font-size:11px;">${_escHtml(k.replace(/_/g, ' '))}</span>
@@ -25110,85 +25116,268 @@ function _temPopupHtml(f) {
   return `<div style="font-size:12px;max-height:280px;overflow-y:auto;min-width:200px;">${rows || '<span style="color:#64748b;">Nema atributa</span>'}</div>`;
 }
 
-// Kvantilna klasifikacija (5 klasa) + bojenje + legenda
-function _temApplyTheme(col) {
-  _temTheme = col || null;
-  if (!col) {
-    _temFeatures.forEach(f => f.polys.forEach(p =>
-      p.setStyle({ color: '#94a3b8', fillColor: '#94a3b8', fillOpacity: 0.08, weight: 1 })));
-    localStorage.removeItem(_TEM_THEME_KEY);
-    _temLegendUpd(null);
-    return;
-  }
-  const vals = _temFeatures.map(f => Number(f.attrs[col])).filter(Number.isFinite).sort((a, b) => a - b);
-  if (vals.length < 2) { showToast('⚠ Premalo vrijednosti za temu "' + col + '"'); return; }
+// Automatske kvantilne granice (5 klasa → 4 granice, deduplikovano)
+function _temQuantiles(vals) {
   const breaks = [];
   for (let k = 1; k < 5; k++) {
     const b = vals[Math.min(vals.length - 1, Math.floor(vals.length * k / 5))];
     if (!breaks.length || b > breaks[breaks.length - 1]) breaks.push(b);
   }
+  return breaks;
+}
+
+// Primijeni temu na kartu: ručne klase/boje (entry.styles[col]) imaju prednost, inače kvantili
+function _temApplyTheme(id, col) {
+  const entry = _temById(id);
+  if (!entry) return;
+  entry.theme = col || null;
+  if (!col) {
+    entry.features.forEach(f => f.polys.forEach(p =>
+      p.setStyle({ color: '#94a3b8', fillColor: '#94a3b8', fillOpacity: 0.08, weight: 1 })));
+    entry._cls = null;
+    _temRegSave(); _temLegendUpd();
+    return;
+  }
+  const vals = entry.features.map(f => Number(f.attrs[col])).filter(Number.isFinite).sort((a, b) => a - b);
+  if (vals.length < 2) { showToast('⚠ Premalo vrijednosti za temu "' + col + '"'); return; }
+  const ov = entry.styles?.[col];
+  const breaks = (ov?.breaks?.length ? ov.breaks.slice().sort((a, b) => a - b) : _temQuantiles(vals));
+  const colors = (ov?.colors?.length === 5 ? ov.colors : _TEM_RAMP);
   const classOf = v => { let c = 0; for (const b of breaks) { if (v >= b) c++; else break; } return c; };
-  _temFeatures.forEach(f => {
+  entry.features.forEach(f => {
     const v = Number(f.attrs[col]);
     if (!Number.isFinite(v)) {
       f.polys.forEach(p => p.setStyle({ color: '#64748b', fillColor: '#64748b', fillOpacity: 0.05, weight: 0.8 }));
       return;
     }
-    const c = _TEM_RAMP[Math.min(classOf(v), _TEM_RAMP.length - 1)];
+    const c = colors[Math.min(classOf(v), colors.length - 1)];
     f.polys.forEach(p => p.setStyle({ color: c, fillColor: c, fillOpacity: 0.55, weight: 1 }));
   });
-  localStorage.setItem(_TEM_THEME_KEY, col);
-  _temLegendUpd({ col, breaks, min: vals[0], max: vals[vals.length - 1] });
+  entry._cls = { col, breaks, colors, min: vals[0], max: vals[vals.length - 1] };
+  _temRegSave(); _temLegendUpd();
 }
 
-function _temLegendUpd(info) {
+// Legenda: jedan blok po VIDLJIVOJ karti s aktivnom temom
+function _temLegendUpd() {
   let el = document.getElementById('tem-legend');
-  if (!info) { if (el) el.remove(); return; }
+  const active = _temMaps.filter(m => m.visible && m._cls);
+  if (!active.length) { if (el) el.remove(); return; }
   if (!el) {
     el = document.createElement('div');
     el.id = 'tem-legend';
-    el.style.cssText = 'position:absolute;left:10px;bottom:34px;z-index:800;background:rgba(15,23,42,0.92);border:1px solid #334155;border-radius:10px;padding:9px 12px;pointer-events:none;max-width:190px;';
+    el.style.cssText = 'position:absolute;left:10px;bottom:34px;z-index:800;background:rgba(15,23,42,0.92);border:1px solid #334155;border-radius:10px;padding:9px 12px;pointer-events:none;max-width:200px;';
     document.getElementById('map').appendChild(el);
   }
-  const fmtV = v => Math.abs(v) >= 100 ? Math.round(v).toLocaleString('bs') : (+v.toFixed(1)).toLocaleString('bs');
-  const edges = [info.min, ...info.breaks, info.max];
-  let rows = '';
-  for (let i = 0; i < _TEM_RAMP.length && i < edges.length - 0; i++) {
-    const lo = edges[Math.min(i, edges.length - 1)], hi = edges[Math.min(i + 1, edges.length - 1)];
-    if (i > 0 && lo === hi && i < _TEM_RAMP.length - 1) continue;
-    rows += `<div style="display:flex;align-items:center;gap:7px;padding:1px 0;">
-      <span style="width:14px;height:11px;border-radius:2px;background:${_TEM_RAMP[i]};flex-shrink:0;"></span>
-      <span style="font-size:10.5px;color:#cbd5e1;">${fmtV(lo)} – ${fmtV(hi)}</span>
-    </div>`;
-  }
-  el.innerHTML = `<div style="font-size:11px;font-weight:700;color:#e2e8f0;margin-bottom:5px;">📊 ${_escHtml(String(info.col).replace(/_/g, ' '))}</div>${rows}`;
+  const fmtV = v => Math.abs(v) >= 100 ? Math.round(v).toLocaleString('bs') : (+(+v).toFixed(1)).toLocaleString('bs');
+  el.innerHTML = active.map(m => {
+    const { col, breaks, colors, min, max } = m._cls;
+    const edges = [min, ...breaks, max];
+    let rows = '';
+    for (let i = 0; i < colors.length; i++) {
+      const lo = edges[Math.min(i, edges.length - 1)], hi = edges[Math.min(i + 1, edges.length - 1)];
+      if (i > 0 && lo === hi && i < colors.length - 1) continue;
+      rows += `<div style="display:flex;align-items:center;gap:7px;padding:1px 0;">
+        <span style="width:14px;height:11px;border-radius:2px;background:${colors[i]};flex-shrink:0;"></span>
+        <span style="font-size:10.5px;color:#cbd5e1;">${fmtV(lo)} – ${fmtV(hi)}</span>
+      </div>`;
+    }
+    return `<div style="font-size:11px;font-weight:700;color:#e2e8f0;margin-bottom:4px;">📊 ${_escHtml(String(col).replace(/_/g, ' '))}</div>${rows}`;
+  }).join('<div style="height:7px;"></div>');
 }
 
-function _temRemove(silent) {
-  if (_temGrp) { try { map.removeLayer(_temGrp); } catch(e) {} }
-  _temGrp = null; _temFeatures = []; _temCols = []; _temTheme = null; _temName = '';
-  const ei = kmlLs.findIndex(k => k._isTematska);
-  if (ei >= 0) { kmlLs.splice(ei, 1); if (typeof rndKml === 'function') rndKml(); }
-  _temLegendUpd(null);
-  if (!silent) {
-    _kmlcDelete(_TEM_IDB_KEY).catch(() => {});
-    localStorage.removeItem(_TEM_NAME_KEY);
-    localStorage.removeItem(_TEM_THEME_KEY);
-    if (typeof _lsRenderTem === 'function') _lsRenderTem();
-    showToast('🗑 Tematska karta uklonjena');
-  }
+// Vidljivost jedne karte (toggle u panelu)
+function _temSetVisible(id, on) {
+  const entry = _temById(id);
+  if (!entry) return;
+  entry.visible = !!on;
+  try { if (on) entry.grp.addTo(map); else map.removeLayer(entry.grp); } catch(e) {}
+  _temRegSave(); _temLegendUpd(); _temModalRender();
+  if (typeof _lsRenderTem === 'function') _lsRenderTem();
 }
 
-// Restore poslije restarta (poziva se iz showApp, iza prvog painta)
+function _temZoom(id) {
+  const entry = _temById(id);
+  if (entry?._bounds?.isValid()) { closeTemModal(); map.fitBounds(entry._bounds, { padding: [20, 20] }); }
+}
+
+// Ukloni JEDNU kartu (trajno — briše i IDB i registar)
+async function _temRemoveMap(id) {
+  const entry = _temById(id);
+  if (!entry) return;
+  if (!await _dlgConfirm(`Ukloniti tematsku kartu "${entry.name}"?`, { danger: true })) return;
+  try { map.removeLayer(entry.grp); } catch(e) {}
+  _temMaps = _temMaps.filter(m => m.id !== id);
+  if (_temEdOpenId === id) _temEdOpenId = null;
+  _kmlcDelete(_TEM_IDB_PFX + id).catch(() => {});
+  _temRegSave(); _temLegendUpd(); _temModalRender();
+  if (typeof _lsRenderTem === 'function') _lsRenderTem();
+  showToast('🗑 Tematska karta uklonjena');
+}
+
+// In-memory reset SVIH karata (odjava) — IDB + registar OSTAJU (isti korisnik ih vraća)
+function _temRemoveAll(silent) {
+  _temMaps.forEach(m => { try { map.removeLayer(m.grp); } catch(e) {} });
+  _temMaps = [];
+  _temEdOpenId = null;
+  _temLegendUpd();
+  if (!silent && typeof _lsRenderTem === 'function') _lsRenderTem();
+}
+
+// Restore poslije restarta/prijave (poziva se iz showApp, iza prvog painta)
 async function _temRestore() {
-  const name = localStorage.getItem(_TEM_NAME_KEY);
-  if (!name || _temGrp) return;
+  if (_temMaps.length) return;
+  // Legacy migracija (v3.11.0 single-map format)
   try {
-    const c = await _kmlcGet(_TEM_IDB_KEY);
-    if (!c) return;
-    const buf = c instanceof ArrayBuffer ? c : c.buffer;
-    await _gpkgParseBuf(buf, name, { fit: false });
-  } catch(e) { console.warn('_temRestore:', e); }
+    const legacyName = localStorage.getItem(_TEM_NAME_KEY);
+    if (legacyName) {
+      const c = await _kmlcGet(_TEM_IDB_KEY);
+      if (c) {
+        const buf = c instanceof ArrayBuffer ? c : c.buffer;
+        const legacyTheme = localStorage.getItem(_TEM_THEME_KEY);
+        const entry = await _gpkgParseBuf(buf, legacyName, { fit: false },
+          { id: 'legacy1', theme: legacyTheme, visible: true, styles: {} });
+        if (entry) { _kmlcSave(_TEM_IDB_PFX + entry.id, buf).catch(() => {}); _temRegSave(); }
+      }
+      localStorage.removeItem(_TEM_NAME_KEY);
+      localStorage.removeItem(_TEM_THEME_KEY);
+      _kmlcDelete(_TEM_IDB_KEY).catch(() => {});
+    }
+  } catch(e) { console.warn('_temRestore legacy:', e); }
+  // Registar
+  let reg = [];
+  try { reg = JSON.parse(localStorage.getItem(_TEM_REG_KEY) || '[]'); } catch { reg = []; }
+  for (const saved of reg) {
+    if (_temById(saved.id)) continue;
+    try {
+      const c = await _kmlcGet(_TEM_IDB_PFX + saved.id);
+      if (!c) continue;
+      const buf = c instanceof ArrayBuffer ? c : c.buffer;
+      await _gpkgParseBuf(buf, saved.name, { fit: false }, saved);
+    } catch(e) { console.warn('_temRestore:', saved.name, e); }
+  }
+}
+
+// ── Panel "Tematska karta" (meni) — pregled, teme, klase/boje, brisanje ───────
+function showTemModal() {
+  document.getElementById('tem-modal').style.display = 'flex';
+  _temModalRender();
+}
+function closeTemModal() {
+  document.getElementById('tem-modal').style.display = 'none';
+  _temEdOpenId = null;
+}
+
+function _temModalRender() {
+  const body = document.getElementById('tem-modal-body');
+  if (!body || document.getElementById('tem-modal').style.display === 'none') return;
+  const cards = _temMaps.map(m => {
+    const opts = ['<option value="">— Bez teme —</option>']
+      .concat(m.cols.map(c =>
+        `<option value="${_escHtml(c)}"${c === m.theme ? ' selected' : ''}>${_escHtml(c.replace(/_/g, ' '))}</option>`))
+      .join('');
+    const edOpen = _temEdOpenId === m.id && m.theme;
+    return `
+    <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:12px;padding:12px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+        <span style="font-size:13px;font-weight:700;color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📊 ${_escHtml(m.name)}</span>
+        <span style="font-size:10px;color:#64748b;white-space:nowrap;">${m.features.length} polig.</span>
+      </div>
+      <select onchange="_temApplyTheme('${m.id}', this.value || null);_temModalRender()"
+        style="width:100%;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:8px;">
+        ${opts}
+      </select>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button onclick="_temSetVisible('${m.id}', ${m.visible ? 'false' : 'true'})"
+          style="flex:1;min-width:80px;padding:7px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:${m.visible ? '#4ade80' : '#64748b'};font-size:12px;cursor:pointer;">${m.visible ? '👁 Vidljivo' : '🙈 Skriveno'}</button>
+        <button onclick="_temZoom('${m.id}')"
+          style="flex:1;min-width:70px;padding:7px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#60a5fa;font-size:12px;cursor:pointer;">🔍 Zumiraj</button>
+        <button onclick="_temEdToggle('${m.id}')" ${m.theme ? '' : 'disabled'}
+          style="flex:1;min-width:90px;padding:7px;background:${edOpen ? '#1e3a5f' : '#1e293b'};border:1px solid ${m.theme ? '#3b82f6' : '#334155'};border-radius:8px;color:${m.theme ? '#93c5fd' : '#475569'};font-size:12px;cursor:${m.theme ? 'pointer' : 'default'};">🎨 Klase i boje</button>
+        <button onclick="_temRemoveMap('${m.id}')"
+          style="padding:7px 10px;background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:8px;color:#f87171;font-size:12px;cursor:pointer;">✕</button>
+      </div>
+      ${edOpen ? _temClassEdHtml(m) : ''}
+    </div>`;
+  }).join('');
+  body.innerHTML = `
+    ${cards || '<div style="font-size:12px;color:#64748b;text-align:center;padding:14px 0;">Nema učitanih tematskih karata.</div>'}
+    <button onclick="document.getElementById('tem-file-input').click()"
+      style="width:100%;padding:10px;background:#1e3a5f;border:1px dashed #334155;border-radius:8px;color:#94a3b8;font-size:12px;cursor:pointer;">
+      📂 Učitaj novi .gpkg
+    </button>
+    <div style="font-size:10px;color:#475569;margin-top:8px;">Numeričke kolone iz .gpkg fajla automatski postaju teme. Klase i boje se mogu ručno urediti po temi (🎨).</div>`;
+}
+
+function _temEdToggle(id) {
+  _temEdOpenId = _temEdOpenId === id ? null : id;
+  _temModalRender();
+}
+
+// Editor klasa/boja za aktivnu temu karte: 5 boja + 4 granice između klasa
+function _temClassEdHtml(m) {
+  const cls = m._cls || {};
+  const colors = (cls.colors || _TEM_RAMP).slice(0, 5);
+  const breaks = (cls.breaks || []).slice(0, 4);
+  const fmtN = v => (v == null || !Number.isFinite(v)) ? '' : (+(+v).toFixed(2));
+  const rows = colors.map((c, i) => {
+    const from = i === 0 ? fmtN(cls.min) : fmtN(breaks[i - 1]);
+    const isLast = i === colors.length - 1;
+    const brInput = isLast
+      ? `<span style="flex:1;font-size:11px;color:#64748b;text-align:right;">do ${fmtN(cls.max)}</span>`
+      : `<input type="number" step="any" id="tem-ed-b-${i}" value="${fmtN(breaks[i])}"
+           style="flex:1;min-width:0;padding:6px 8px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:12px;text-align:right;">`;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+      <input type="color" id="tem-ed-c-${i}" value="${c}"
+        style="width:34px;height:28px;padding:0;border:1px solid #334155;border-radius:6px;background:none;cursor:pointer;flex-shrink:0;">
+      <span style="font-size:11px;color:#94a3b8;white-space:nowrap;">${i + 1}. klasa · od ${from || '—'}</span>
+      ${brInput}
+    </div>`;
+  }).join('');
+  return `
+  <div style="margin-top:10px;border-top:1px solid #1e3a5f;padding-top:10px;">
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">🎨 <b>${_escHtml(String(m.theme).replace(/_/g, ' '))}</b> — granice klasa (rastuće) i boje:</div>
+    ${rows}
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <button onclick="_temClassEdApply('${m.id}')"
+        style="flex:1;padding:8px;background:#166534;border:1px solid #4ade80;border-radius:8px;color:#4ade80;font-size:12px;font-weight:600;cursor:pointer;">✓ Primijeni</button>
+      <button onclick="_temClassEdReset('${m.id}')"
+        style="flex:1;padding:8px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:12px;cursor:pointer;">↺ Automatski (kvantili)</button>
+    </div>
+  </div>`;
+}
+
+function _temClassEdApply(id) {
+  const entry = _temById(id);
+  if (!entry || !entry.theme) return;
+  const colors = [], breaks = [];
+  for (let i = 0; i < 5; i++) {
+    const c = document.getElementById('tem-ed-c-' + i);
+    colors.push(c ? c.value : _TEM_RAMP[i]);
+  }
+  for (let i = 0; i < 4; i++) {
+    const b = document.getElementById('tem-ed-b-' + i);
+    if (!b) continue;
+    const v = parseFloat(b.value);
+    if (Number.isFinite(v)) breaks.push(v);
+  }
+  const sorted = breaks.slice().sort((a, b) => a - b);
+  if (breaks.length && breaks.some((v, i) => v !== sorted[i])) {
+    showToast('⚠ Granice moraju biti rastuće'); return;
+  }
+  entry.styles = entry.styles || {};
+  entry.styles[entry.theme] = { breaks: sorted, colors };
+  _temApplyTheme(id, entry.theme);
+  _temModalRender();
+  showToast('✅ Klase i boje primijenjene');
+}
+
+function _temClassEdReset(id) {
+  const entry = _temById(id);
+  if (!entry || !entry.theme) return;
+  if (entry.styles) delete entry.styles[entry.theme];
+  _temApplyTheme(id, entry.theme);
+  _temModalRender();
+  showToast('↺ Vraćeno na automatske kvantile');
 }
 
 // ── Rekurzivno listanje Supabase bucketa (root + svi podfolderi) ──────────────
@@ -27616,6 +27805,7 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();showPrintModal()">🖨 Print / Štampanje</div>
   <div class="mdrop-item" style="color:#38bdf8;font-weight:700;" onclick="closeMenuDropdown();openLoadMapScreen()">🗺 UČITAJ KARTU</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();document.getElementById('kf').click()">📂 Dodaj KML fajl</div>
+  <div class="mdrop-item" onclick="closeMenuDropdown();showTemModal()">📊 Tematska karta</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" id="mdrop-vlake" onclick="closeMenuDropdown();switchTab('vlake')">📐 Panel vlaka</div>
   <div class="mdrop-item" id="mdrop-projekat" onclick="closeMenuDropdown();switchTab('projekat')">📁 Projekat</div>
@@ -28627,6 +28817,18 @@ if (typeof AndroidDownload !== 'undefined') {
     <button style="background:#374151;color:#94a3b8;" onclick="vcCancel()">✕ Odustani</button>
   </div>
 </div>
+<!-- TEMATSKE KARTE PANEL -->
+<div id="tem-modal" style="display:none;position:fixed;inset:0;z-index:99000;background:rgba(0,0,0,0.65);align-items:center;justify-content:center;padding:16px;"
+  onclick="if(event.target===this)closeTemModal()">
+  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;width:100%;max-width:440px;max-height:86vh;overflow-y:auto;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,0.7);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="margin:0;font-size:15px;color:#4ade80;">📊 Tematske karte</h3>
+      <button onclick="closeTemModal()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
+    </div>
+    <div id="tem-modal-body"></div>
+  </div>
+</div>
+
 <!-- LAGER DIALOG -->
 <div id="lager-dlg">
   <div class="ld-title" id="ld-title">🏷 Broj lagera</div>
