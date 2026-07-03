@@ -3127,6 +3127,7 @@ select:focus { outline:none; border-color:#3b82f6; }
     <button class="tab-btn" onclick="switchTab('vlake')">📐 Vlake<span class="tab-notif" id="notif-vlake"></span></button>
     <button class="tab-btn" onclick="switchTab('doznaka')">🌲 Doznaka<span class="tab-notif" id="notif-doznaka"></span></button>
     <button class="tab-btn" id="admin-tab-btn" style="display:none;color:#fbbf24;" onclick="switchTab('admin')">👥 Korisnici<span class="tab-notif" id="notif-admin"></span></button>
+    <button class="tab-btn" id="postavke-tab-btn" style="display:none;color:#a78bfa;" onclick="switchTab('postavke')">⚙ Postavke</button>
     <button class="tab-btn" id="teren-tab-btn" style="display:none;color:#34d399;" onclick="switchTab('teren')">🧭 Teren</button>
     <span id="offline-badge" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:auto;flex-shrink:0;align-self:center;">📴 OFFLINE</span>
     <span id="sync-badge" onclick="openSyncQueuePanel()" style="display:none;background:#f59e0b;color:#000;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:4px;flex-shrink:0;align-self:center;cursor:pointer;user-select:none;" title="Pending operacije čekaju sync">⟳ <span id="sync-badge-cnt">0</span></span>
@@ -3533,6 +3534,29 @@ select:focus { outline:none; border-color:#3b82f6; }
         <div id="admin-stats-box" style="display:none;margin:12px 16px 0;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px 12px;"></div>
         <div id="admin-panel-user-list" style="padding:12px 16px;">
           <p style="color:#64748b;font-size:12px;text-align:center;padding:16px 0;">Odaberi tab da učitaš...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ POSTAVKE PANEL (samo admin) ═══ -->
+    <div id="postavke-panel" style="display:none;flex-direction:column;height:100%;overflow-y:auto;background:#0f172a;">
+      <div style="padding:14px 16px 10px;border-bottom:1px solid #1e3a5f;flex-shrink:0;">
+        <div style="font-weight:700;color:#a78bfa;font-size:15px;">⚙ Postavke</div>
+      </div>
+      <div style="padding:14px 16px;">
+        <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;">
+          <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px;">📧 Email obavještenja o registraciji</div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Na ove adrese stiže email kad se neko novi registruje — sa dugmadima za direktno odobravanje ili odbijanje, bez otvaranja aplikacije.</div>
+          <div id="postavke-email-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
+            <p style="color:#64748b;font-size:12px;text-align:center;padding:8px 0;">⏳ Učitavam...</p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <input type="email" id="postavke-email-input" placeholder="nova.adresa@primjer.com"
+              onkeydown="if(event.key==='Enter')postavkeAddEmail()"
+              style="flex:1;padding:9px 10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;">
+            <button onclick="postavkeAddEmail()"
+              style="padding:9px 14px;background:#166534;border:1px solid #4ade80;border-radius:8px;color:#4ade80;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">＋ Dodaj</button>
+          </div>
         </div>
       </div>
     </div>
@@ -4154,7 +4178,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.11.2';
+const APP_VER = 'v3.12.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4840,12 +4864,14 @@ async function sbLoadProfile() {
   const isFld = isSpdField();      // ŠPD terenski: samo navigacija/orijentacija
 
   // Tabovi
-  const adminTabBtn = document.getElementById('admin-tab-btn');
+  const adminTabBtn    = document.getElementById('admin-tab-btn');
+  const postavkeTabBtn = document.getElementById('postavke-tab-btn');
   const terenBtn    = document.getElementById('teren-tab-btn');
   const projBtn = document.querySelector(`button[onclick="switchTab('projekat')"]`);
   const vlkBtn  = document.querySelector(`button[onclick="switchTab('vlake')"]`);
   const dozTab  = document.querySelector(`button[onclick="switchTab('doznaka')"]`);
-  if (adminTabBtn) adminTabBtn.style.display = isAdm ? '' : 'none';
+  if (adminTabBtn)    adminTabBtn.style.display    = isAdm ? '' : 'none';
+  if (postavkeTabBtn) postavkeTabBtn.style.display = isAdm ? '' : 'none';
   if (terenBtn)    terenBtn.style.display    = isFld ? '' : 'none';
   if (projBtn)     projBtn.style.display     = isFld ? 'none' : '';
   if (vlkBtn)      vlkBtn.style.display      = isFld ? 'none' : '';
@@ -4855,6 +4881,8 @@ async function sbLoadProfile() {
   // Meni stavke
   const adminItem = document.getElementById('menu-admin-item');
   if (adminItem) adminItem.style.display = isAdm ? 'block' : 'none';
+  const postavkeItem = document.getElementById('menu-postavke-item');
+  if (postavkeItem) postavkeItem.style.display = isAdm ? 'block' : 'none';
   const mv = document.getElementById('mdrop-vlake');
   const mp = document.getElementById('mdrop-projekat');
   if (mv) mv.style.display = isFld ? 'none' : '';
@@ -5440,6 +5468,59 @@ async function adminResetPin(userId, name) {
     return;
   }
   await _dlgConfirm(`Novi PIN za "${name}" je: ${p}\n\nSaopšti ga korisniku — prijaviće se ovim PIN-om.`, { title: '✅ PIN resetovan', okLabel: 'U redu' });
+}
+
+// ═══ POSTAVKE — email adrese za obavještenja o novoj registraciji ═══════════
+// Tabela admin_notify_emails (RLS: samo admin) čita se Edge Function-om
+// notify-new-registration pri svakoj novoj registraciji — vidi
+// supabase/migrations/20260704_admin_notify_emails.sql.
+async function postavkeLoadEmails() {
+  if (!sbProfile?.is_admin) return;
+  const el = document.getElementById('postavke-email-list');
+  if (!el) return;
+  el.innerHTML = '<p style="color:#64748b;font-size:12px;text-align:center;padding:8px 0;">⏳ Učitavam...</p>';
+  const { data, error } = await sb.from('admin_notify_emails').select('id,email').order('created_at');
+  if (error) {
+    const missing = /relation .* does not exist|schema cache|PGRST20[0-9]/i.test(error.message || '');
+    el.innerHTML = `<p style="color:#f87171;font-size:12px;text-align:center;padding:8px 0;">${
+      missing ? '⚠ Primijeni migraciju 20260704 na Supabase' : 'Greška: ' + _escHtml(error.message)
+    }</p>`;
+    return;
+  }
+  if (!data?.length) {
+    el.innerHTML = '<p style="color:#64748b;font-size:12px;text-align:center;padding:8px 0;">Nema dodanih adresa — niko ne prima obavještenja.</p>';
+    return;
+  }
+  el.innerHTML = data.map(r => `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;">
+      <span style="font-size:13px;color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📧 ${_escHtml(r.email)}</span>
+      <button onclick="postavkeDeleteEmail('${r.id}','${_escHtml(r.email).replace(/'/g, "\\'")}')"
+        style="padding:5px 9px;background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:6px;color:#f87171;font-size:12px;cursor:pointer;flex-shrink:0;">✕</button>
+    </div>`).join('');
+}
+
+async function postavkeAddEmail() {
+  if (!sbProfile?.is_admin) return;
+  const input = document.getElementById('postavke-email-input');
+  const email = (input?.value || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('⚠ Unesi ispravnu email adresu'); return; }
+  const { error } = await sb.from('admin_notify_emails').insert({ email, added_by: sbUser.id });
+  if (error) {
+    const dup = error.code === '23505' || /duplicate/i.test(error.message || '');
+    showToast(dup ? '⚠ Ta adresa je već dodana' : 'Greška: ' + error.message);
+    return;
+  }
+  if (input) input.value = '';
+  showToast('✅ Adresa dodana');
+  postavkeLoadEmails();
+}
+
+async function postavkeDeleteEmail(id, email) {
+  if (!await _dlgConfirm(`Ukloniti "${email}" sa liste obavještenja?`, { danger: true })) return;
+  const { error } = await sb.from('admin_notify_emails').delete().eq('id', id);
+  if (error) { showToast('Greška: ' + error.message); return; }
+  showToast('🗑 Adresa uklonjena');
+  postavkeLoadEmails();
 }
 
 // --- Admin: statistika po šumariji (korisnici · vlake · km) ---
@@ -19623,6 +19704,7 @@ function switchTab(tab) {
   const pdoz     = document.getElementById('doznaka-panel');
   const pmjtrg   = document.getElementById('mjtrg-panel');
   const padmin   = document.getElementById('admin-panel');
+  const ppostavke= document.getElementById('postavke-panel');
   const pteren   = document.getElementById('teren-panel');
   const ptragovi = document.getElementById('tragovi-panel');
   document.querySelectorAll('.tab-btn').forEach(b => {
@@ -19634,9 +19716,11 @@ function switchTab(tab) {
   pdoz.style.display    = tab==='doznaka'  ? 'flex' : 'none';
   pmjtrg.style.display  = tab==='mjtrg'   ? 'flex' : 'none';
   if (padmin)   padmin.style.display   = tab==='admin'   ? 'flex' : 'none';
+  if (ppostavke)ppostavke.style.display= tab==='postavke'? 'flex' : 'none';
   if (pteren)   pteren.style.display   = tab==='teren'   ? 'flex' : 'none';
   if (ptragovi) ptragovi.style.display = tab==='tragovi' ? 'flex' : 'none';
-  if (tab === 'admin')   adminLoadUsers();
+  if (tab === 'admin')    adminLoadUsers();
+  if (tab === 'postavke') postavkeLoadEmails();
   if (tab === 'teren')   { terenRender(); terenRenderTragovi(); }
   if (tab === 'tragovi') { _tragoviRender(); _tragoviUpdBtn(); }
   _updFabVisibility();
@@ -19671,6 +19755,10 @@ function switchTab(tab) {
     msrActivateIfNeeded();
     _tragRegRender();
   } else if (tab==='admin') {
+    _mapFullScreen = false;
+    _setMapUIVisible(false, false);
+    msrStop(true);
+  } else if (tab==='postavke') {
     _mapFullScreen = false;
     _setMapUIVisible(false, false);
     msrStop(true);
@@ -27822,6 +27910,7 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();showHelp()">📖 Upute za korištenje</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" id="menu-admin-item" style="display:none;color:#fbbf24;" onclick="closeMenuDropdown();switchTab('admin')">🔑 Admin — Korisnici</div>
+  <div class="mdrop-item" id="menu-postavke-item" style="display:none;color:#a78bfa;" onclick="closeMenuDropdown();switchTab('postavke')">⚙ Postavke</div>
   <div class="mdrop-item" id="menu-user-label" style="color:#64748b;font-size:11px;pointer-events:none;padding:6px 14px;">—</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();promijeniPin()">🔑 Promijeni PIN</div>
   <div class="mdrop-item" style="color:#f87171;" onclick="closeMenuDropdown();doLogout()">⎋ Odjava</div>
