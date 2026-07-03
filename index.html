@@ -4154,7 +4154,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.9.6';
+const APP_VER = 'v3.9.7';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4784,50 +4784,47 @@ async function sbLoadProfile() {
   if (lbl) lbl.textContent = (data.is_admin ? '★ ' : '👤 ') + fullName;
   const verEl = document.getElementById('menu-app-ver');
   if (verEl) verEl.textContent = APP_VER;
+  // ── Vidljivost UI po ulozi — DETERMINISTIČKI za sve uloge ──────────────────
+  // SPA: odjava → prijava drugog korisnika ide BEZ reload-a stranice, pa svaki
+  // element MORA biti eksplicitno postavljen u OBA smjera. Jednosmjerno sakrivanje
+  // (samo if-grana bez else) preživi iz prethodne prijave → projektant poslije
+  // ŠPD-terenskog naloga na istom uređaju ostane bez Projekat/Vlake/Doznaka tabova.
+  const isAdm = !!data.is_admin;   // admin: nadzor, bez praktičnih alata
+  const isFld = isSpdField();      // ŠPD terenski: samo navigacija/orijentacija
+
+  // Tabovi
   const adminTabBtn = document.getElementById('admin-tab-btn');
-  if (adminTabBtn) adminTabBtn.style.display = data.is_admin ? '' : 'none';
-  if (data.is_admin) {
-    const adminItem = document.getElementById('menu-admin-item');
-    if (adminItem) adminItem.style.display = 'block';
-  }
+  const terenBtn    = document.getElementById('teren-tab-btn');
+  const projBtn = document.querySelector(`button[onclick="switchTab('projekat')"]`);
+  const vlkBtn  = document.querySelector(`button[onclick="switchTab('vlake')"]`);
+  const dozTab  = document.querySelector(`button[onclick="switchTab('doznaka')"]`);
+  if (adminTabBtn) adminTabBtn.style.display = isAdm ? '' : 'none';
+  if (terenBtn)    terenBtn.style.display    = isFld ? '' : 'none';
+  if (projBtn)     projBtn.style.display     = isFld ? 'none' : '';
+  if (vlkBtn)      vlkBtn.style.display      = isFld ? 'none' : '';
+  // Doznaka: vide šumarijski nalozi — nema je admin (nadzor) ni ŠPD terenski
+  if (dozTab)      dozTab.style.display      = (isAdm || isFld) ? 'none' : '';
 
-  // Admin nadzorni nalog: sakrij elemente za praktičan rad (crtanje, snimanje)
-  // Doznaka tab OSTAJE vidljiv za šumarijske naloge — samo admin ga nema
-  if (data.is_admin) {
-    const dozTab = document.querySelector('button[onclick="switchTab(\'doznaka\')"]');
-    if (dozTab) dozTab.style.display = 'none';
-    // Sakrij "+ Novi" projekat dugme
-    const noviBtn = document.querySelector('#proj-list-sec .btn.b[onclick="showNovProjektForm()"]');
-    if (noviBtn) noviBtn.style.display = 'none';
-    // Sakrij import vlaka dugme i alate za projektante
-    const impBtn = document.querySelector('#proj-list-sec .btn[onclick="impVlakaOpen()"]');
-    if (impBtn) impBtn.style.display = 'none';
-    const routeBtn = document.getElementById('route-suggest-btn');
-    if (routeBtn) routeBtn.parentElement.style.display = 'none';
-    // Sakrij foto dugme
-    const fotoCam = document.getElementById('loc-photo-cam');
-    const fotoGal = document.getElementById('loc-photo-gal');
-    if (fotoCam) fotoCam.disabled = true;
-    if (fotoGal) fotoGal.disabled = true;
-  }
+  // Meni stavke
+  const adminItem = document.getElementById('menu-admin-item');
+  if (adminItem) adminItem.style.display = isAdm ? 'block' : 'none';
+  const mv = document.getElementById('mdrop-vlake');
+  const mp = document.getElementById('mdrop-projekat');
+  if (mv) mv.style.display = isFld ? 'none' : '';
+  if (mp) mp.style.display = isFld ? 'none' : '';
 
-  // ŠPD US ŠUME terenski korisnik (nije admin): samo navigacija/orijentacija.
-  // Sakrij Projekat/Vlake/Doznaka tabove, prikaži Teren tab.
-  const terenBtn = document.getElementById('teren-tab-btn');
-  if (isSpdField()) {
-    ['projekat','vlake','doznaka'].forEach(t => {
-      const b = document.querySelector(`button[onclick="switchTab('${t}')"]`);
-      if (b) b.style.display = 'none';
-    });
-    // Sakrij i iz dropdown menija
-    const mv = document.getElementById('mdrop-vlake');
-    const mp = document.getElementById('mdrop-projekat');
-    if (mv) mv.style.display = 'none';
-    if (mp) mp.style.display = 'none';
-    if (terenBtn) terenBtn.style.display = '';
-  } else {
-    if (terenBtn) terenBtn.style.display = 'none';
-  }
+  // Projektantski alati (admin nadzorni nalog ih nema)
+  const noviBtn = document.querySelector('#proj-list-sec .btn.b[onclick="showNovProjektForm()"]');
+  if (noviBtn) noviBtn.style.display = isAdm ? 'none' : '';
+  const impBtn = document.querySelector('#proj-list-sec .btn[onclick="impVlakaOpen()"]');
+  if (impBtn) impBtn.style.display = isAdm ? 'none' : '';
+  const routeBtn = document.getElementById('route-suggest-btn');
+  if (routeBtn) routeBtn.parentElement.style.display = isAdm ? 'none' : '';
+  const fotoCam = document.getElementById('loc-photo-cam');
+  const fotoGal = document.getElementById('loc-photo-gal');
+  if (fotoCam) fotoCam.disabled = isAdm;
+  if (fotoGal) fotoGal.disabled = isAdm;
+
   _updFabVisibility();
 }
 
