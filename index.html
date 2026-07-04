@@ -2534,6 +2534,24 @@ select:focus { outline:none; border-color:#3b82f6; }
 .kml-info-popup .leaflet-popup-tip { background:#0f172a;border:1px solid #1e3a5f; }
 .kml-info-popup .leaflet-popup-close-button { color:#64748b;font-size:18px;top:6px;right:8px; }
 .kml-info-popup .leaflet-popup-close-button:hover { color:#e2e8f0; }
+/* Tematska karta — moderna, čitljiva info kartica (tamna, jak kontrast) */
+.tem-popup .leaflet-popup-content-wrapper { background:#0f172a;border:1px solid #334155;border-radius:14px;box-shadow:0 10px 34px rgba(0,0,0,0.55);padding:0;overflow:hidden; }
+.tem-popup .leaflet-popup-content { margin:0;font-size:13px;width:auto !important; }
+.tem-popup .leaflet-popup-tip { background:#0f172a;border:1px solid #334155; }
+.tem-popup .leaflet-popup-close-button { color:#94a3b8;font-size:20px;top:9px;right:10px;font-weight:400; }
+.tem-popup .leaflet-popup-close-button:hover { color:#fff; }
+.tem-card { min-width:210px;max-width:260px; }
+.tem-card-hd { padding:11px 14px 9px;background:linear-gradient(135deg,#166534,#065f46);border-bottom:1px solid #14532d; }
+.tem-card-hd .odjel { font-size:19px;font-weight:800;color:#fff;line-height:1.1; }
+.tem-card-hd .gj { font-size:11px;color:#bbf7d0;font-weight:600;letter-spacing:0.3px;margin-top:2px; }
+.tem-card-body { padding:6px 0;max-height:270px;overflow-y:auto; }
+.tem-card-row { display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:6px 14px; }
+.tem-card-row + .tem-card-row { border-top:1px solid rgba(51,65,85,0.4); }
+.tem-card-row .k { color:#94a3b8;font-size:11.5px;font-weight:500;white-space:nowrap; }
+.tem-card-row .v { color:#f1f5f9;font-size:14px;font-weight:600;text-align:right;word-break:break-word; }
+.tem-card-row.hot { background:rgba(74,222,128,0.12);border-left:3px solid #4ade80; }
+.tem-card-row.hot .k { color:#86efac; }
+.tem-card-row.hot .v { color:#4ade80;font-weight:800; }
 .tacka-popup-btn, .foto-popup-btn {
   background:#7f1d1d;border:none;color:#fca5a5;border-radius:4px;
   padding:3px 10px;cursor:pointer;font-size:11px;margin-top:6px;
@@ -4178,7 +4196,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.2';
+const APP_VER = 'v3.15.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -25424,7 +25442,7 @@ function _temRegSave() {
   try {
     localStorage.setItem(_TEM_REG_KEY, JSON.stringify(_temMaps.map(m =>
       ({ id: m.id, name: m.name, theme: m.theme, visible: m.visible,
-         styles: m.styles || {}, colLabels: m.colLabels || {} }))));
+         opacity: m.opacity, styles: m.styles || {}, colLabels: m.colLabels || {} }))));
   } catch(e) {}
 }
 function _temById(id) { return _temMaps.find(m => m.id === id); }
@@ -25567,6 +25585,7 @@ async function _gpkgParseBuf(buf, name, opts, saved) {
     id: saved?.id || ('t' + Date.now().toString(36) + Math.floor(Math.random() * 1e4)),
     name, grp: L.layerGroup(), features: [], cols: [],
     theme: null, visible: saved ? saved.visible !== false : true,
+    opacity: (saved && Number.isFinite(saved.opacity)) ? saved.opacity : 0.55,
     styles: (saved && saved.styles) || {}, colLabels: (saved && saved.colLabels) || {}, _cls: null
   };
   const numStats = {}; // ime → {num, tot}
@@ -25607,7 +25626,7 @@ async function _gpkgParseBuf(buf, name, opts, saved) {
         renderer: _temRenderer, color: '#94a3b8', weight: 1, opacity: 0.8,
         fillColor: '#94a3b8', fillOpacity: 0.08, interactive: true
       });
-      poly.bindPopup(() => _temPopupHtml(entry, f), { maxWidth: 280 });
+      poly.bindPopup(() => _temPopupHtml(entry, f), { maxWidth: 280, className: 'tem-popup' });
       f.polys.push(poly);
       entry.grp.addLayer(poly);
       try { const b = poly.getBounds(); if (b.isValid()) allBounds = allBounds ? allBounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast()); } catch {}
@@ -25635,19 +25654,34 @@ async function _gpkgParseBuf(buf, name, opts, saved) {
   return entry;
 }
 
-// Popup kartica — svi atributi, aktivna tema karte boldana (kao QGIS identify)
+// Popup kartica — moderna, tamna, jak kontrast. Zaglavlje istakne odjel/GJ,
+// aktivna tema karte je naglašena (kao QGIS identify).
 function _temPopupHtml(entry, f) {
-  const rows = Object.entries(f.attrs)
-    .filter(([, v]) => v != null && v !== '')
+  const entries = Object.entries(f.attrs).filter(([, v]) => v != null && v !== '');
+  // Prepoznaj odjel i GJ za zaglavlje (raw ili preimenovan naziv)
+  const findKey = (...names) => entries.find(([k]) =>
+    names.includes(k.toLowerCase()) || names.includes(_temColLabel(entry, k).toLowerCase()))?.[0];
+  const kOdjel = findKey('odjel', 'odsjek', 'odjel/odsjek');
+  const kGj = findKey('gj', 'gazdinska jedinica');
+  const odjelV = kOdjel ? f.attrs[kOdjel] : null;
+  const gjV = kGj ? f.attrs[kGj] : null;
+  const header = (odjelV != null || gjV != null) ? `<div class="tem-card-hd">
+    ${odjelV != null ? `<div class="odjel">${_escHtml(String(odjelV))}</div>` : ''}
+    ${gjV != null ? `<div class="gj">${_escHtml(String(gjV))}</div>` : ''}
+  </div>` : '';
+  const rows = entries
+    .filter(([k]) => k !== kOdjel && k !== kGj)
     .map(([k, v]) => {
       const hot = k === entry.theme;
       const vs = (typeof v === 'number' && !Number.isInteger(v)) ? v.toFixed(2) : String(v);
-      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0;border-bottom:1px solid rgba(51,65,85,0.35);${hot ? 'background:rgba(74,222,128,0.10);' : ''}">
-        <span style="color:#64748b;font-size:11px;">${_escHtml(_temColLabel(entry, k))}</span>
-        <span style="color:${hot ? '#4ade80' : '#e2e8f0'};font-size:12px;font-weight:${hot ? 700 : 500};text-align:right;word-break:break-word;">${_escHtml(vs)}</span>
+      return `<div class="tem-card-row${hot ? ' hot' : ''}">
+        <span class="k">${_escHtml(_temColLabel(entry, k))}</span>
+        <span class="v">${_escHtml(vs)}</span>
       </div>`;
     }).join('');
-  return `<div style="font-size:12px;max-height:280px;overflow-y:auto;min-width:200px;">${rows || '<span style="color:#64748b;">Nema atributa</span>'}</div>`;
+  return `<div class="tem-card">${header}
+    <div class="tem-card-body">${rows || '<div class="tem-card-row"><span class="k">Nema atributa</span></div>'}</div>
+  </div>`;
 }
 
 // Automatske kvantilne granice (5 klasa → 4 granice, deduplikovano)
@@ -25678,14 +25712,15 @@ function _temApplyTheme(id, col) {
   const breaks = (ov?.breaks?.length ? ov.breaks.slice().sort((a, b) => a - b) : _temQuantiles(vals));
   const colors = (ov?.colors?.length === 5 ? ov.colors : _TEM_RAMP);
   const classOf = v => { let c = 0; for (const b of breaks) { if (v >= b) c++; else break; } return c; };
+  const fo = Number.isFinite(entry.opacity) ? entry.opacity : 0.55;
   entry.features.forEach(f => {
     const v = Number(f.attrs[col]);
     if (!Number.isFinite(v)) {
-      f.polys.forEach(p => p.setStyle({ color: '#64748b', fillColor: '#64748b', fillOpacity: 0.05, weight: 0.8 }));
+      f.polys.forEach(p => p.setStyle({ color: '#64748b', fillColor: '#64748b', fillOpacity: Math.min(0.1, fo * 0.15), weight: 0.8 }));
       return;
     }
     const c = colors[Math.min(classOf(v), colors.length - 1)];
-    f.polys.forEach(p => p.setStyle({ color: c, fillColor: c, fillOpacity: 0.55, weight: 1 }));
+    f.polys.forEach(p => p.setStyle({ color: c, fillColor: c, fillOpacity: fo, weight: 1 }));
   });
   // lo/hi: ručno postavljene granice prve/zadnje klase (samo prikaz u legendi/editoru —
   // klasifikacija ostaje vođena isključivo sa 4 unutrašnje granice, kao i do sada).
@@ -25693,6 +25728,28 @@ function _temApplyTheme(id, col) {
   const hi = Number.isFinite(ov?.hi) ? ov.hi : vals[vals.length - 1];
   entry._cls = { col, breaks, colors, min: lo, max: hi };
   _temRegSave(); _temLegendUpd();
+}
+
+// Jačina boje (fill opacity) tematskog sloja — uživo, bez reklasifikacije.
+// clsdown lbl: osvježi samo prikaz postotka pored slidera; kad korisnik pusti (change) → save.
+function _temSetOpacity(id, val, commit) {
+  const entry = _temById(id);
+  if (!entry) return;
+  const fo = Math.max(0.05, Math.min(1, parseFloat(val)));
+  entry.opacity = fo;
+  const lbl = document.getElementById('tem-op-lbl-' + id);
+  if (lbl) lbl.textContent = Math.round(fo * 100) + '%';
+  if (entry.theme && entry._cls) {
+    // primijeni na već obojene poligone bez ponovnog računanja klasa
+    const { col, breaks, colors } = entry._cls;
+    const classOf = v => { let c = 0; for (const b of breaks) { if (v >= b) c++; else break; } return c; };
+    entry.features.forEach(f => {
+      const v = Number(f.attrs[col]);
+      if (!Number.isFinite(v)) { f.polys.forEach(p => p.setStyle({ fillOpacity: Math.min(0.1, fo * 0.15) })); return; }
+      f.polys.forEach(p => p.setStyle({ fillOpacity: fo }));
+    });
+  }
+  if (commit) _temRegSave();
 }
 
 // Legenda: jedan blok po VIDLJIVOJ karti s aktivnom temom
@@ -25859,6 +25916,14 @@ function _temModalRender() {
         <button onclick="_temRemoveMap('${m.id}')"
           style="padding:7px 10px;background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:8px;color:#f87171;font-size:12px;cursor:pointer;">✕</button>
       </div>
+      ${m.theme ? `<div style="display:flex;align-items:center;gap:9px;margin-top:9px;">
+        <span style="font-size:11px;color:#94a3b8;flex-shrink:0;">🎨 Jačina boje</span>
+        <input type="range" min="5" max="100" step="5" value="${Math.round((m.opacity ?? 0.55) * 100)}"
+          oninput="_temSetOpacity('${m.id}', this.value / 100, false)"
+          onchange="_temSetOpacity('${m.id}', this.value / 100, true)"
+          style="flex:1;min-width:0;accent-color:#4ade80;height:22px;">
+        <span id="tem-op-lbl-${m.id}" style="font-size:11px;color:#e2e8f0;width:34px;text-align:right;flex-shrink:0;">${Math.round((m.opacity ?? 0.55) * 100)}%</span>
+      </div>` : ''}
       ${edOpen ? _temClassEdHtml(m) : ''}
     </div>`;
   }).join('');
