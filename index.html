@@ -4178,7 +4178,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.1';
+const APP_VER = 'v3.15.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -18646,6 +18646,19 @@ function _wxCode(c) {
   return { e: '🌡', t: '—' };
 }
 
+// Kao _wxCode, ali usklađuje ikonu s vjerovatnoćom/količinom padavina.
+// Open-Meteo znak weather_code zna vratiti kišnu ikonu iako je prob nizak i
+// suma zanemariva (npr. "kiša" pri 8%). U tom slučaju vrati "prom. oblačno".
+function _wxCodeP(c, prob, amount) {
+  if (c >= 51 && c <= 82) {  // padavinski kodovi (rosulja/kiša/pljuskovi)
+    const mostlyDry =
+      (prob != null && prob < 30 && (amount == null || amount < 1)) ||
+      (prob == null && amount != null && amount < 0.2);
+    if (mostlyDry) return { e: '⛅', t: 'Prom. oblačno' };
+  }
+  return _wxCode(c);
+}
+
 // Detalj prognoze za jedno mjesto (id iz _wxPlaces, ili null = Moja lokacija)
 async function _wxOpenPlace(id) {
   const m = document.getElementById('weather-modal');
@@ -18674,7 +18687,7 @@ async function showWeather() { showWeatherPanel(); }
 
 function _wxRender(body, d, cachedTs) {
   const cur = d.current || {};
-  const wc = _wxCode(cur.weather_code);
+  const wc = _wxCodeP(cur.weather_code, null, cur.precipitation);
   const now = new Date();
   const h = d.hourly || {};
   // Sljedećih 12h od trenutnog sata
@@ -18686,7 +18699,7 @@ function _wxRender(body, d, cachedTs) {
     const pp = h.precipitation_probability ? h.precipitation_probability[i] : null;
     hourCells.push(`<div style="flex:0 0 auto;text-align:center;padding:4px 8px;">
       <div style="font-size:10px;color:#64748b;">${String(t.getHours()).padStart(2,'0')}h</div>
-      <div style="font-size:16px;">${_wxCode(h.weather_code ? h.weather_code[i] : 0).e}</div>
+      <div style="font-size:16px;">${_wxCodeP(h.weather_code ? h.weather_code[i] : 0, pp, h.precipitation ? h.precipitation[i] : null).e}</div>
       <div style="font-size:12px;color:#e2e8f0;">${Math.round(h.temperature_2m[i])}°</div>
       <div style="font-size:10px;color:${pp>=50?'#60a5fa':'#475569'};">${pp!=null?pp+'%':''}</div>
     </div>`);
@@ -18699,7 +18712,7 @@ function _wxRender(body, d, cachedTs) {
   const dayRows = (dy.time || []).map((t, i) => {
     const dt = new Date(t);
     const dan = ['NED','PON','UTO','SRI','ČET','PET','SUB'][dt.getDay()];
-    const c = _wxCode(dy.weather_code[i]);
+    const c = _wxCodeP(dy.weather_code[i], dy.precipitation_probability_max[i], dy.precipitation_sum ? dy.precipitation_sum[i] : null);
     const mn = allMin[i], mx = allMax[i];
     const left = ((mn - gMin) / gSpan) * 100;
     const w = Math.max(6, ((mx - mn) / gSpan) * 100);
@@ -18795,10 +18808,10 @@ async function _wxRenderList() {
   const cards = items.map((it, idx) => {
     const d = results[idx].data;
     const cur = d?.current;
-    const wc = cur ? _wxCode(cur.weather_code) : { e: '—', t: '' };
+    const wc = cur ? _wxCodeP(cur.weather_code, null, cur.precipitation) : { e: '—', t: '' };
     const dy = d?.daily;
     const mini = dy?.time ? dy.time.slice(0, 7).map((t, i) =>
-      `<span style="font-size:13px;" title="${['ned','pon','uto','sri','čet','pet','sub'][new Date(t).getDay()]}">${_wxCode(dy.weather_code[i]).e}</span>`).join('') : '';
+      `<span style="font-size:13px;" title="${['ned','pon','uto','sri','čet','pet','sub'][new Date(t).getDay()]}">${_wxCodeP(dy.weather_code[i], dy.precipitation_probability_max[i], dy.precipitation_sum ? dy.precipitation_sum[i] : null).e}</span>`).join('') : '';
     const delBtn = it.id ? `<button onclick="event.stopPropagation();_wxDeletePlace('${it.id}')" style="padding:6px 9px;background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:7px;color:#f87171;font-size:12px;cursor:pointer;flex-shrink:0;">🗑</button>` : '';
     return `<div onclick="_wxOpenPlace(${it.id ? `'${it.id}'` : 'null'})"
       style="display:flex;align-items:center;gap:10px;background:#16213e;border:1px solid #1e3a5f;border-radius:12px;padding:11px 12px;margin-bottom:8px;cursor:pointer;">
