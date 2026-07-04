@@ -4242,7 +4242,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.7';
+const APP_VER = 'v3.15.8';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -18704,8 +18704,11 @@ function _wxCode(c) {
 // suma zanemariva (npr. "kiša" pri 8%). U tom slučaju vrati "prom. oblačno".
 function _wxCodeP(c, prob, amount) {
   if (c >= 51 && c <= 82) {  // padavinski kodovi (rosulja/kiša/pljuskovi)
+    // Vjerovatnoća je PRIMARNA: ako je mala, ne prikazuj kišnu ikonu iako model-kod
+    // tvrdi da pada (Open-Meteo dnevni weather_code zna biti kišni pri 8% šanse).
+    // Izuzetak: stvarno velika najavljena količina (pravi pljusak) — tad ostaje kiša.
     const mostlyDry =
-      (prob != null && prob < 30 && (amount == null || amount < 1)) ||
+      (prob != null && prob < 40 && (amount == null || amount < 10)) ||
       (prob == null && amount != null && amount < 0.2);
     if (mostlyDry) return { e: '⛅', t: 'Prom. oblačno' };
   }
