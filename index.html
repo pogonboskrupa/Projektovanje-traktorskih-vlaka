@@ -4242,7 +4242,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.5';
+const APP_VER = 'v3.15.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -25947,11 +25947,14 @@ function _temTblCols(entry) {
   const lc = s => String(s).toLowerCase();
   const findKey = (...names) => keys.find(k =>
     names.includes(lc(k)) || names.includes(lc(_temColLabel(entry, k))));
-  const kOdjel = findKey('odjel', 'odsjek', 'odjel/odsjek');
+  const kOdjel = findKey('odjel', 'odjel/odsjek', 'odjel_odsjek', 'odsjek');
+  let kOdsjek = findKey('odsjek', 'odsjek broj');
+  if (kOdsjek === kOdjel) kOdsjek = null;   // isti stub → nema zasebnog odsjeka
   const kGj = findKey('gj', 'gazdinska jedinica');
-  const head = [kOdjel, kGj].filter(Boolean);
+  const locked = [kOdjel, kOdsjek].filter(Boolean);   // uvijek prikazane, nisu u pickeru
+  const head = [kOdjel, kOdsjek, kGj].filter(Boolean);
   const rest = keys.filter(k => !head.includes(k));
-  return { cols: [...head, ...rest], kOdjel, kGj };
+  return { cols: [...head, ...rest], kOdjel, kOdsjek, kGj, locked };
 }
 
 // Set izabranih kolona za kartu (init = sve pri prvom otvaranju)
@@ -25959,17 +25962,18 @@ function _temTblSelSet(entry) {
   if (!_temTblSelById[entry.id]) _temTblSelById[entry.id] = new Set(_temTblCols(entry).cols);
   return _temTblSelById[entry.id];
 }
-// Vidljive kolone = sve kolone filtrirane kroz izbor (čuva redoslijed)
+// Vidljive kolone = zaključane (odjel/odsjek) uvijek + ostale po izboru (čuva redoslijed)
 function _temTblVisibleCols(entry) {
+  const { cols, locked } = _temTblCols(entry);
   const sel = _temTblSelSet(entry);
-  return _temTblCols(entry).cols.filter(c => sel.has(c));
+  return cols.filter(c => locked.includes(c) || sel.has(c));
 }
 
 function showTemTable(id) {
   const entry = _temById(id);
   if (!entry) return;
   _temTblId = id;
-  _temTblSort = { col: null, dir: 1 };
+  _temTblSort = { col: _temTblCols(entry).kOdjel || null, dir: 1 };   // default: po broju odjela ↑
   _temTblQ = '';
   _temTblColsOpen = false;
   const s = document.getElementById('ttm-search'); if (s) s.value = '';
@@ -26021,9 +26025,14 @@ function _temTblColsRenderMenu() {
   const entry = _temById(_temTblId);
   const menu = document.getElementById('ttm-cols-menu');
   if (!entry || !menu) return;
-  const all = _temTblCols(entry).cols;
+  const { cols: all, locked } = _temTblCols(entry);
   const sel = _temTblSelSet(entry);
   const items = all.map((c, ci) => {
+    if (locked.includes(c)) {   // odjel/odsjek — uvijek prikazano, zaključano
+      return `<div class="ttm-col-item on" style="cursor:default;opacity:0.85;">
+        <span class="cb">🔒</span><span>${_escHtml(_temColLabel(entry, c))}</span>
+      </div>`;
+    }
     const on = sel.has(c);
     return `<div class="ttm-col-item ${on ? 'on' : 'off'}" onclick="_temTblColToggle(${ci})">
       <span class="cb">${on ? '☑' : '☐'}</span><span>${_escHtml(_temColLabel(entry, c))}</span>
@@ -26037,7 +26046,9 @@ function _temTblColsRenderMenu() {
 function _temTblColToggle(ci) {
   const entry = _temById(_temTblId);
   if (!entry) return;
-  const col = _temTblCols(entry).cols[ci];
+  const { cols, locked } = _temTblCols(entry);
+  const col = cols[ci];
+  if (!col || locked.includes(col)) return;   // zaključane se ne mijenjaju
   const sel = _temTblSelSet(entry);
   if (sel.has(col)) sel.delete(col); else sel.add(col);
   _temTblColsRenderMenu();
