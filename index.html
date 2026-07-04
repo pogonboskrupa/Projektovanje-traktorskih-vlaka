@@ -4178,7 +4178,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.12.3';
+const APP_VER = 'v3.13.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -15979,6 +15979,7 @@ function _escAttr(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;
 function _kmlPopFindLayer(uid) {
   let found = null;
   kmlLs.forEach(kl => {
+    if (!kl.grp) return;
     kl.grp.eachLayer(l => { if (l._kmlPopupId === uid) found = l; });
   });
   return found;
@@ -15986,6 +15987,7 @@ function _kmlPopFindLayer(uid) {
 
 function _kmlPopFindIdx(uid) {
   for (let i = 0; i < kmlLs.length; i++) {
+    if (!kmlLs[i].grp) continue;
     let hit = false;
     kmlLs[i].grp.eachLayer(l => { if (l._kmlPopupId === uid) hit = true; });
     if (hit) return i;
@@ -16380,6 +16382,7 @@ function setKmlWeight(i, w)     { kmlLs[i].weight = w;              applyKmlStyl
 function setKmlOpacity(i, val)  { kmlLs[i].opacity = parseFloat(val); applyKmlStyle(i); saveKmlStyles(); rndGraniceModal(); }
 function togK(i) {
   const k = kmlLs[i];
+  if (!k.grp) return;   // server placeholder (nije preuzeto) — nema sloja za prikaz
   k.vis ? map.removeLayer(k.grp) : k.grp.addTo(map);
   k.vis = !k.vis;
   saveKmlStyles();
@@ -16418,6 +16421,7 @@ function rndKml() {
 const _ozCollapsed = new Set(['local','foto']);
 
 function _kmlCalcLen(grp) {
+  if (!grp) return 0;   // server placeholder (nije preuzeto) — nema sloja
   let d = 0;
   grp.eachLayer(l => {
     if (!l.getLatLngs) return;
@@ -16429,6 +16433,7 @@ function _kmlCalcLen(grp) {
 }
 
 function _kmlFeatureCount(grp) {
+  if (!grp) return 0;   // server placeholder (nije preuzeto)
   let n = 0;
   grp.eachLayer(l => { if (!(l.getLatLngs && l.getLatLngs().length === 1 && !l.getLatLngs()[0].length)) n++; });
   return n || grp.getLayers().length;
@@ -16473,18 +16478,36 @@ function _rndOznakePanel() {
 
   const _kmlRow = ({k, i}) => {
     const shortName = k.name.replace(/^.*\//, '');
+    // Server placeholder = fajl dostupan na serveru ali nije skinut (nema grp, _key postoji)
+    const isPlaceholder = !!k._key && k._downloaded === false;
+    if (isPlaceholder) {
+      const kb = _b64keys([k._key]);
+      return `<div class="oz-row" style="opacity:0.62;">
+        <div class="oz-row-color" style="background:#475569;width:5px;height:38px;border-radius:3px;flex-shrink:0;"></div>
+        <div class="oz-row-info">
+          <div class="oz-row-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(shortName)}</div>
+          <div class="oz-row-meta" style="color:#64748b;">nije preuzeto</div>
+        </div>
+        <button class="oz-dl-btn" onclick="event.stopPropagation();_srvDownload('${kb}')" title="Skini za offline">⬇</button>
+      </div>`;
+    }
     const cnt  = _kmlFeatureCount(k.grp);
     const lenM = _kmlCalcLen(k.grp);
     const lenS = lenM > 0 ? _tragFmtLen(lenM) : '';
     const tagChip = k.tag ? `<span class="oz-tag-chip">${_escHtml(k.tag)}</span>` : '';
     const meta = [cnt + (cnt===1?' element':' elemenata'), lenS].filter(Boolean).join(' · ');
     const isEdit = _kmlEditIdx === i;
+    // Per-fajl 🗑 samo za skinute server fajlove (lokalni KML-ovi nemaju _key)
+    const delBtn = (k._key && k._downloaded)
+      ? `<button class="oz-dl-btn cached" onclick="event.stopPropagation();_srvDelete('${_b64keys([k._key])}')" title="Obriši offline kopiju">🗑</button>`
+      : '';
     return `<div class="oz-row${k.vis?'':' hidden-layer'}" onclick="event.stopPropagation();_ozKmlToggleEdit(${i})">
       <div id="oz-kml-sw-${i}" class="oz-row-color" style="background:${k.col};width:5px;height:38px;border-radius:3px;flex-shrink:0;"></div>
       <div class="oz-row-info">
         <div class="oz-row-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(shortName)}</div>
         <div class="oz-row-meta">${tagChip}${meta}</div>
       </div>
+      ${delBtn}
       <button class="oz-vis-btn${k.vis?' on':''}" onclick="event.stopPropagation();togK(${i})" title="${k.vis?'Sakrij':'Prikaži'}">
         ${k.vis ? '👁' : '🙈'}
       </button>
@@ -16556,31 +16579,35 @@ function _rndOznakePanel() {
       let html = '';
       Object.entries(gjGroups).sort(([a],[b]) => a.localeCompare(b,'bs')).forEach(([gj, items]) => {
         const collapsed = !_ozBucketExpanded.has(gj);
-        const allVis = items.every(x => x.k.vis);
-        const anyVis = items.some(x => x.k.vis);
+        const dlItems = items.filter(x => x.k._downloaded);
+        const anyVis = dlItems.some(x => x.k.vis);
+        const allVis = dlItems.length > 0 && dlItems.every(x => x.k.vis);
         const visIcon = allVis ? '👁' : anyVis ? '◑' : '🙈';
         const gjEsc = gj.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        const idxArr = JSON.stringify(items.map(x => x.i));
-        const idxArrEsc = idxArr.replace(/'/g,"\\'");
-        const allCached  = items.every(x => _kmlcKeys.has('file:' + x.k._key));
-        const someCached = items.some(x => _kmlcKeys.has('file:' + x.k._key));
+        const idxArr = JSON.stringify(dlItems.map(x => x.i));  // vis toggle samo za skinute
+        const notDlKeys  = _b64keys(items.filter(x => !x.k._downloaded).map(x => x.k._key));
+        const dlKeys     = _b64keys(dlItems.map(x => x.k._key));
+        const allCached  = items.every(x => x.k._downloaded);
+        const someCached = items.some(x => x.k._downloaded);
         const offlineBadge = allCached
           ? `<span class="oz-offline-badge">✓ offline</span>`
           : someCached
           ? `<span class="oz-offline-badge partial">↻ djel.</span>`
           : '';
-        const dlBtn = allCached
-          ? `<button class="oz-dl-btn cached" onclick="event.stopPropagation();_kmlcUiDelete('${idxArrEsc}')" title="Obriši offline kopiju">🗑</button>`
-          : `<button class="oz-dl-btn" onclick="event.stopPropagation();_kmlcUiDownload('${idxArrEsc}')" title="Sačuvaj grupu za offline">⬇</button>`;
+        // ⬇ preuzmi sve neskinute; 🗑 obriši sve skinute (mogu se pojaviti oba za miješanu grupu)
+        const dlBtn = (allCached ? '' :
+          `<button class="oz-dl-btn" onclick="event.stopPropagation();_srvDownload('${notDlKeys}')" title="Skini grupu za offline">⬇</button>`)
+          + (someCached ?
+          `<button class="oz-dl-btn cached" onclick="event.stopPropagation();_srvDelete('${dlKeys}')" title="Obriši offline kopiju grupe">🗑</button>` : '');
         html += `<div class="oz-gj-hdr" onclick="event.stopPropagation();_ozBucketToggleGroup('${gjEsc}')">
           <span class="oz-gj-arrow${collapsed?'':' open'}">›</span>
           <span class="oz-gj-name">${_escHtml(gj)}</span>
           <span class="oz-gj-cnt">${items.length}</span>
           ${offlineBadge}
           ${dlBtn}
-          <button class="oz-vis-btn${allVis?' on':anyVis?' half':''}"
+          ${dlItems.length ? `<button class="oz-vis-btn${allVis?' on':anyVis?' half':''}"
             onclick="event.stopPropagation();_ozBucketToggleGroupVis(${idxArr})"
-            title="${allVis?'Sakrij grupu':'Prikaži grupu'}">${visIcon}</button>
+            title="${allVis?'Sakrij grupu':'Prikaži grupu'}">${visIcon}</button>` : ''}
         </div>`;
         if (!collapsed) html += items.map(x => _kmlRow(x)).join('');
       });
@@ -16807,7 +16834,7 @@ function _ozBucketToggleGroup(gj) {
 function _ozBucketToggleGroupVis(indices) {
   const allVis = indices.every(i => kmlLs[i]?.vis);
   indices.forEach(i => {
-    if (!kmlLs[i]) return;
+    if (!kmlLs[i] || !kmlLs[i].grp) return;
     kmlLs[i].vis = !allVis;
     allVis ? map.removeLayer(kmlLs[i].grp) : kmlLs[i].grp.addTo(map);
   });
@@ -17076,6 +17103,7 @@ function togGlGroup(gk) {
 function togGlGroupVis(indices) {
   const allVis = indices.every(i => kmlLs[i].vis);
   indices.forEach(i => {
+    if (!kmlLs[i] || !kmlLs[i].grp) return;
     kmlLs[i].vis = !allVis;
     allVis ? map.removeLayer(kmlLs[i].grp) : kmlLs[i].grp.addTo(map);
   });
@@ -17096,6 +17124,7 @@ function rndGraniceModal() {
   // a ima grupa — defaultno ih sve sruši
   const groupKeys = Object.keys(
     kmlLs.reduce((acc, k) => {
+      if (!k.grp) return acc;   // preskoči neskinute server placeholdere
       const bucket = k._bucket || 'Lokalni';
       const folder = k.name.includes('/') ? k.name.split('/')[0] : '—';
       acc[`${bucket} / ${folder}`] = true;
@@ -17112,9 +17141,10 @@ function rndGraniceModal() {
        </div>`
     : '';
 
-  // Grupiraj po bucketu/folderu
+  // Grupiraj po bucketu/folderu (bez neskinutih server placeholdera — nemaju sloj za stil)
   const groups = {};
   kmlLs.forEach((k, i) => {
+    if (!k.grp) return;
     const bucket = k._bucket || 'Lokalni';
     const nameParts = k.name.split('/');
     const folder = nameParts.length > 1 ? nameParts[0] : '—';
@@ -25661,35 +25691,94 @@ async function _kmlcDeleteGroup(items) {
   }
 }
 
-// UI handlers called from _rndOznakePanel
-async function _kmlcUiDownload(idxArrJson) {
-  const idxArr = JSON.parse(idxArrJson);
-  const items  = idxArr.map(i => ({ k: kmlLs[i], i }));
-  showToast('⬇ Preuzimam fajlove za offline...');
-  const saved = await _kmlcDownloadGroup(items);
-  // Ukloni vis:false override — fajlovi ponovo vidljivi pri idućem ulasku
-  items.forEach(({k}) => {
-    if (!k._key) return;
-    try {
-      const um = JSON.parse(localStorage.getItem(_KML_USER_STYLES_KEY) || '{}');
-      if (um[k._key]) { um[k._key].vis = true; localStorage.setItem(_KML_USER_STYLES_KEY, JSON.stringify(um)); }
-    } catch {}
-    // Prikaži i u trenutnoj sesiji
-    k.vis = true;
-    if (k.grp) k.grp.addTo(map);
-  });
-  showToast(`✅ ${saved} fajl${saved === 1 ? '' : 'a'} sačuvano offline`);
-  _rndOznakePanel();
+// ── OPT-IN server fajlovi ────────────────────────────────────────────────────
+// Registruj dostupan server fajl BEZ preuzimanja/rendera — placeholder u panelu.
+function _registerServerPlaceholder(bucketName, file, opts, extractOdjeli) {
+  const key = bucketName + '/' + file.path;
+  if (kmlLs.find(k => k._key === key)) return; // dedup (ili već skinut)
+  const label = file.folder ? `${file.folder.split('/').pop()}/${file.name}` : file.name;
+  const col = (opts && (opts.color || opts.col)) || '#22c55e';
+  kmlLs.push({ name: label, _key: key, _bucket: bucketName, _folder: file.folder || '',
+    grp: null, _downloaded: false, _srvOpts: opts || {}, _srvExtract: !!extractOdjeli,
+    col, dash: (opts && (opts.dashArray || opts.dash)) || '', weight: (opts && opts.weight) || 2,
+    opacity: (opts && opts.opacity) ?? 0.9, vis: false,
+    fill: false, fillCol: col, fillPattern: 'solid', fillOpacity: 0.35,
+    tag: '', _loadedAt: Date.now() });
 }
 
-async function _kmlcUiDelete(idxArrJson) {
-  const idxArr = JSON.parse(idxArrJson);
-  const items  = idxArr.map(i => ({ k: kmlLs[i], i }));
-  await _kmlcDeleteGroup(items);
-  // Sačuvaj vis:false za sve obrisane fajlove — ne auto-učitavaj idući put
-  items.forEach(({k}) => { if (k._key) _kmlPersistHidden(k._key); });
-  showToast('🗑 Offline kopija obrisana — fajl neće biti prikazan pri idućem ulasku');
-  _rndOznakePanel();
+// _key nizovi se prosljeđuju kroz onclick kao base64(JSON) — izbjegava lomljenje HTML
+// atributa navodnicima iz putanja fajlova. Prima i sirov niz (interni pozivi).
+function _b64keys(arr) { return btoa(unescape(encodeURIComponent(JSON.stringify(arr)))); }
+function _srvDecodeKeys(arg) {
+  if (Array.isArray(arg)) return arg;
+  try { return JSON.parse(decodeURIComponent(escape(atob(arg)))); }
+  catch { try { return JSON.parse(arg); } catch { return []; } }
+}
+
+// Preuzmi (za offline) + učitaj na kartu jedan ili više server fajlova po _key.
+async function _srvDownload(keysArg) {
+  const keys = _srvDecodeKeys(keysArg);
+  if (!keys.length) return;
+  showToast('⬇ Preuzimam fajlove za offline...');
+  let saved = 0;
+  for (const key of keys) {
+    const idx = kmlLs.findIndex(k => k._key === key);
+    if (idx < 0) continue;
+    const entry = kmlLs[idx];
+    if (entry._downloaded) continue;
+    const slash = key.indexOf('/');
+    const bucketName = key.slice(0, slash);
+    const filePath   = key.slice(slash + 1);
+    const fileObj = { path: filePath, name: filePath.split('/').pop(), folder: entry._folder || '' };
+    const opts = entry._srvOpts || {};
+    const extract = entry._srvExtract;
+    // Ukloni placeholder pa pusti _loadOne* da fetch-uje (→ IDB keš), parsira i renderuje.
+    kmlLs.splice(idx, 1);
+    try {
+      if (/\.shp$/i.test(filePath)) await _loadOneShp(bucketName, fileObj, opts, extract, null);
+      else                          await _loadOneKml(bucketName, fileObj, opts, extract);
+    } catch(e) { console.warn('_srvDownload load err', key, e); }
+    const nk = kmlLs.find(k => k._key === key);
+    if (nk) {
+      nk._downloaded = true; nk.vis = true;
+      if (nk.grp && !map.hasLayer(nk.grp)) nk.grp.addTo(map);
+      // ukloni eventualni raniji vis:false override
+      try {
+        const um = JSON.parse(localStorage.getItem(_KML_USER_STYLES_KEY) || '{}');
+        if (um[key]) { um[key].vis = true; localStorage.setItem(_KML_USER_STYLES_KEY, JSON.stringify(um)); }
+      } catch {}
+      saved++;
+    } else {
+      // Fetch pao (offline/greška) — vrati placeholder da ostane u listi
+      _registerServerPlaceholder(bucketName, fileObj, opts, extract);
+    }
+  }
+  showToast(saved ? `✅ ${saved} fajl${saved === 1 ? '' : 'a'} sačuvano offline` : '⚠ Preuzimanje nije uspjelo — provjeri vezu');
+  rndKml(); _rndOznakePanel();
+}
+
+// Obriši offline kopiju + skloni s karte; ostaje kao placeholder za ponovno skidanje.
+async function _srvDelete(keysArg) {
+  const keys = _srvDecodeKeys(keysArg);
+  if (!keys.length) return;
+  for (const key of keys) {
+    await _kmlcDelete('file:' + key);
+    if (/\.shp$/i.test(key)) {
+      const base = key.replace(/\.shp$/i, '');
+      for (const ext of ['.dbf', '.prj']) await _kmlcDelete('file:' + base + ext);
+    }
+    const idx = kmlLs.findIndex(k => k._key === key);
+    if (idx >= 0) {
+      const e = kmlLs[idx];
+      if (e.grp) { try { map.removeLayer(e.grp); } catch(_) {} }
+      // Konvertuj nazad u placeholder (ostaje listan, ne renderuje se dok se ne skine)
+      e.grp = null; e._downloaded = false; e.vis = false;
+      e._srvOpts = e._srvOpts || {};
+    }
+    _kmlPersistHidden(key);
+  }
+  showToast('🗑 Offline kopija obrisana — fajl uklonjen s karte');
+  rndKml(); _rndOznakePanel();
 }
 
 // ── Fetch helper ──────────────────────────────────────────────────────────────
@@ -25726,7 +25815,7 @@ async function _loadOneKml(bucketName, file, opts, extractOdjeli) {
     weight: finalOpts.weight || 2, opacity: finalOpts.opacity ?? 0.9,
     vis: finalOpts.vis !== false,
     fill: false, fillCol: _fc, fillPattern: 'solid', fillOpacity: 0.35,
-    tag: '', _loadedAt: Date.now() });
+    tag: '', _loadedAt: Date.now(), _downloaded: true });
   // Apply visibility
   if (finalOpts.vis === false) map.removeLayer(grp);
   return grp;
@@ -25833,7 +25922,7 @@ async function _loadOneShp(bucketName, file, opts, extractOdjeli, existingPaths)
   kmlLs.push({ name: label, _key: key, _bucket: bucketName, _folder: file.folder || '', grp,
     col: shpStyle.color, dash: shpStyle.dashArray || '',
     weight: shpStyle.weight, opacity: shpStyle.opacity,
-    vis: finalOptsShp.vis !== false });
+    vis: finalOptsShp.vis !== false, _downloaded: true });
   return grp;
 }
 
@@ -25888,8 +25977,15 @@ async function autoLoadStorageBucket(bucketName, getOpts, extractOdjeli = false)
     let didFit = false;
     for (const file of supported) {
       const opts = typeof getOpts === 'function' ? getOpts(file.name) : { ...getOpts };
+      const key = bucketName + '/' + file.path;
+      // OPT-IN: učitaj (i renderuj) SAMO fajlove koje je korisnik ranije skinuo
+      // (postoje u IDB kešu). Ostale samo registruj kao placeholder u panelu — bez
+      // fetch-a i bez rendera — dok ih korisnik ne skine dugmetom ⬇.
+      if (!_kmlcKeys.has('file:' + key)) {
+        _registerServerPlaceholder(bucketName, file, opts, extractOdjeli);
+        continue;
+      }
       let grp = null;
-
       if (/\.kml$/i.test(file.name)) {
         grp = await _loadOneKml(bucketName, file, opts, extractOdjeli);
       } else if (/\.shp$/i.test(file.name)) {
