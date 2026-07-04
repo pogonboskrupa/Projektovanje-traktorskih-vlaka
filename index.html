@@ -2552,6 +2552,38 @@ select:focus { outline:none; border-color:#3b82f6; }
 .tem-card-row.hot { background:rgba(74,222,128,0.12);border-left:3px solid #4ade80; }
 .tem-card-row.hot .k { color:#86efac; }
 .tem-card-row.hot .v { color:#4ade80;font-weight:800; }
+/* Tematska karta — profesionalna tabela atributa (QGIS-style attribute table) */
+#tem-table-modal .ttm-panel { background:#0b1220;border:1px solid #1e3a5f;border-radius:16px;width:100%;max-width:960px;height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 48px rgba(0,0,0,0.75); }
+.ttm-head { display:flex;align-items:center;gap:10px;padding:13px 16px;background:linear-gradient(135deg,#0f2a1a,#0b1220);border-bottom:1px solid #1e3a5f;flex-shrink:0; }
+.ttm-head .ttm-ico { font-size:18px; }
+.ttm-head .ttm-name { font-size:14px;font-weight:800;color:#e8f5ec;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.ttm-head .ttm-sub { font-size:11px;color:#5b8c74;font-weight:600;flex-shrink:0; }
+.ttm-x { margin-left:auto;background:none;border:none;color:#64748b;font-size:22px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0; }
+.ttm-x:hover { color:#fff; }
+.ttm-tools { display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #14233c;flex-shrink:0; }
+.ttm-search { flex:1;min-width:0;display:flex;align-items:center;gap:7px;background:#0f172a;border:1px solid #334155;border-radius:999px;padding:7px 13px; }
+.ttm-search input { flex:1;min-width:0;background:none;border:none;outline:none;color:#e2e8f0;font-size:13px; }
+.ttm-search input::placeholder { color:#475569; }
+.ttm-csv { flex-shrink:0;display:flex;align-items:center;gap:6px;background:#14233c;border:1px solid #1e3a5f;border-radius:9px;color:#7dd3fc;font-size:12px;font-weight:600;padding:8px 13px;cursor:pointer; }
+.ttm-csv:active { opacity:0.7; }
+.ttm-scroll { flex:1;overflow:auto;-webkit-overflow-scrolling:touch; }
+table.ttm-tbl { border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px;color:#e2e8f0; }
+table.ttm-tbl thead th { position:sticky;top:0;z-index:3;background:linear-gradient(180deg,#16233c,#111c2f);color:#93c5b4;font-size:10.5px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;padding:10px 12px;text-align:left;white-space:nowrap;cursor:pointer;border-bottom:2px solid #1e3a5f;user-select:none; }
+table.ttm-tbl thead th:hover { color:#cbeadc; }
+table.ttm-tbl thead th .arw { color:#4ade80;font-size:10px;margin-left:3px; }
+table.ttm-tbl thead th.hot { background:linear-gradient(180deg,#14532d,#0f3d22);color:#bbf7d0; }
+table.ttm-tbl thead th.num, table.ttm-tbl td.num { text-align:right;font-variant-numeric:tabular-nums;font-family:'SFMono-Regular',ui-monospace,Menlo,monospace; }
+table.ttm-tbl tbody td { padding:8px 12px;border-bottom:1px solid rgba(30,58,95,0.35);white-space:nowrap; }
+table.ttm-tbl tbody tr:nth-child(even) td { background:rgba(30,41,59,0.32); }
+table.ttm-tbl tbody tr:active td { background:rgba(59,130,246,0.18); }
+@media (hover:hover){ table.ttm-tbl tbody tr:hover td { background:rgba(59,130,246,0.13);cursor:pointer; } }
+table.ttm-tbl td.hot { color:#e8f7ee;font-weight:700; }
+table.ttm-tbl td.hot .chip { display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:middle;box-shadow:0 0 0 1px rgba(255,255,255,0.15); }
+table.ttm-tbl th.stick, table.ttm-tbl td.stick { position:sticky;left:0;z-index:2;box-shadow:2px 0 6px rgba(0,0,0,0.35); }
+table.ttm-tbl thead th.stick { z-index:4; }
+table.ttm-tbl tbody td.stick { background:#0b1220;font-weight:700;color:#f1f5f9; }
+table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
+.ttm-foot { flex-shrink:0;padding:9px 16px;border-top:1px solid #14233c;font-size:11px;color:#64748b;background:#0b1220; }
 .tacka-popup-btn, .foto-popup-btn {
   background:#7f1d1d;border:none;color:#fca5a5;border-radius:4px;
   padding:3px 10px;cursor:pointer;font-size:11px;margin-top:6px;
@@ -4196,7 +4228,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.3';
+const APP_VER = 'v3.15.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -25883,6 +25915,171 @@ function closeTemModal() {
   _temEdOpenId = null;
 }
 
+// ── Tabela atributa (QGIS-style) ──────────────────────────────────────────────
+let _temTblId = null;
+let _temTblSort = { col: null, dir: 1 };
+let _temTblQ = '';
+const _TEM_TBL_MAX = 1200;   // perf kapa; pretraga sužava
+
+// Redoslijed kolona za tabelu: odjel/GJ prve, ostale u redoslijedu prvog pojavljivanja.
+function _temTblCols(entry) {
+  const keys = [];
+  const seen = new Set();
+  entry.features.forEach(f => Object.keys(f.attrs).forEach(k => {
+    if (!seen.has(k)) { seen.add(k); keys.push(k); }
+  }));
+  const lc = s => String(s).toLowerCase();
+  const findKey = (...names) => keys.find(k =>
+    names.includes(lc(k)) || names.includes(lc(_temColLabel(entry, k))));
+  const kOdjel = findKey('odjel', 'odsjek', 'odjel/odsjek');
+  const kGj = findKey('gj', 'gazdinska jedinica');
+  const head = [kOdjel, kGj].filter(Boolean);
+  const rest = keys.filter(k => !head.includes(k));
+  return { cols: [...head, ...rest], kOdjel, kGj };
+}
+
+function showTemTable(id) {
+  const entry = _temById(id);
+  if (!entry) return;
+  _temTblId = id;
+  _temTblSort = { col: null, dir: 1 };
+  _temTblQ = '';
+  const s = document.getElementById('ttm-search'); if (s) s.value = '';
+  document.getElementById('ttm-name').textContent = entry.name;
+  document.getElementById('tem-table-modal').style.display = 'flex';
+  _temTblRender();
+}
+function closeTemTable() {
+  document.getElementById('tem-table-modal').style.display = 'none';
+  _temTblId = null;
+}
+
+function _temTblSortBy(ci) {
+  const entry = _temById(_temTblId);
+  if (!entry) return;
+  const col = _temTblCols(entry).cols[ci];
+  if (!col) return;
+  if (_temTblSort.col === col) _temTblSort.dir *= -1;
+  else _temTblSort = { col, dir: 1 };
+  _temTblRender();
+}
+function _temTblSearch(v) { _temTblQ = (v || '').trim().toLowerCase(); _temTblRender(); }
+
+function _temFmtVal(v) {
+  if (v == null || v === '') return '';
+  return (typeof v === 'number' && !Number.isInteger(v)) ? v.toFixed(2) : String(v);
+}
+
+function _temTblRender() {
+  const entry = _temById(_temTblId);
+  const scroll = document.getElementById('ttm-scroll');
+  const foot = document.getElementById('ttm-foot');
+  if (!entry || !scroll) return;
+  const { cols, kOdjel } = _temTblCols(entry);
+  const numSet = new Set(entry.cols);   // numeričke kolone
+  const total = entry.features.length;
+
+  // Redovi sa originalnim indeksom (za klik → zoom)
+  let rows = entry.features.map((f, i) => ({ i, attrs: f.attrs }));
+  if (_temTblQ) {
+    rows = rows.filter(r => cols.some(c => {
+      const v = r.attrs[c];
+      return v != null && String(v).toLowerCase().includes(_temTblQ);
+    }));
+  }
+  const sc = _temTblSort.col;
+  if (sc) {
+    const isNum = numSet.has(sc);
+    rows.sort((a, b) => {
+      let av = a.attrs[sc], bv = b.attrs[sc];
+      const ae = av == null || av === '', be = bv == null || bv === '';
+      if (ae && be) return 0;
+      if (ae) return 1;               // prazne vrijednosti uvijek na dno
+      if (be) return -1;
+      let cmp;
+      if (isNum) cmp = Number(av) - Number(bv);
+      else cmp = String(av).localeCompare(String(bv), 'bs', { numeric: true });
+      return cmp * _temTblSort.dir;
+    });
+  }
+
+  const shown = rows.slice(0, _TEM_TBL_MAX);
+  // klasifikator boje aktivne teme (za color-chip u tema-koloni)
+  const cls = entry._cls;
+  const colorOf = v => {
+    if (!cls || !Number.isFinite(Number(v))) return null;
+    let c = 0; for (const b of cls.breaks) { if (Number(v) >= b) c++; else break; }
+    return cls.colors[Math.min(c, cls.colors.length - 1)];
+  };
+
+  const arw = c => c === sc ? `<span class="arw">${_temTblSort.dir > 0 ? '▲' : '▼'}</span>` : '';
+  const thead = '<tr>' + cols.map((c, ci) => {
+    const hot = c === entry.theme ? ' hot' : '';
+    const stick = ci === 0 ? ' stick' : '';
+    const num = numSet.has(c) ? ' num' : '';
+    return `<th class="${(hot + stick + num).trim()}" onclick="_temTblSortBy(${ci})">${_escHtml(_temColLabel(entry, c))}${arw(c)}</th>`;
+  }).join('') + '</tr>';
+
+  const tbody = shown.map(r => {
+    const tds = cols.map((c, ci) => {
+      const v = r.attrs[c];
+      const hot = c === entry.theme;
+      const stick = ci === 0;
+      const num = numSet.has(c);
+      const chip = (hot && v != null && v !== '') ? (col => col ? `<span class="chip" style="background:${col};"></span>` : '')(colorOf(v)) : '';
+      const klass = [hot ? 'hot' : '', stick ? 'stick' : '', num ? 'num' : ''].filter(Boolean).join(' ');
+      return `<td${klass ? ` class="${klass}"` : ''}>${chip}${_escHtml(_temFmtVal(v))}</td>`;
+    }).join('');
+    return `<tr onclick="_temTblRowClick(${r.i})">${tds}</tr>`;
+  }).join('');
+
+  scroll.innerHTML = `<table class="ttm-tbl"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+  scroll.scrollTop = 0;
+  document.getElementById('ttm-sub').textContent = `${cols.length} kolona`;
+  const capNote = rows.length > _TEM_TBL_MAX ? ` · prikazano prvih ${_TEM_TBL_MAX} (suzi pretragom)` : '';
+  foot.textContent = `Prikazano ${shown.length} od ${total}${capNote}`;
+}
+
+// Klik na red → zumira na taj odsjek na karti i otvori popup
+function _temTblRowClick(i) {
+  const entry = _temById(_temTblId);
+  if (!entry) return;
+  const f = entry.features[i];
+  if (!f || !f.polys.length) return;
+  closeTemTable();
+  closeTemModal();
+  if (!entry.visible) _temSetVisible(entry.id, true);
+  let b = null;
+  f.polys.forEach(p => { try { const pb = p.getBounds(); if (pb.isValid()) b = b ? b.extend(pb) : L.latLngBounds(pb.getSouthWest(), pb.getNorthEast()); } catch(e) {} });
+  if (b && b.isValid()) map.fitBounds(b, { padding: [40, 40], maxZoom: 16 });
+  setTimeout(() => { try { f.polys[0].openPopup(); } catch(e) {} }, 250);
+}
+
+// CSV izvoz svih feature-a (svi atributi, prikazni nazivi u zaglavlju)
+function _temTblExport() {
+  const entry = _temById(_temTblId);
+  if (!entry) return;
+  const { cols } = _temTblCols(entry);
+  const esc = v => {
+    const s = (v == null) ? '' : (typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(2) : String(v));
+    return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [cols.map(c => esc(_temColLabel(entry, c))).join(';')];
+  entry.features.forEach(f => lines.push(cols.map(c => esc(f.attrs[c])).join(';')));
+  const csv = '﻿' + lines.join('\r\n');   // BOM za Excel/ćirilicu-latinicu
+  try {
+    const safe = s => String(s || 'tabela').replace(/[^\w\-]+/g, '_').slice(0, 48);
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'Tabela_' + safe(entry.name) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    showToast('⬇ CSV preuzet — otvori/podijeli iz Fajlova (Downloads)');
+  } catch(e) {
+    showToast('⚠ CSV nije uspio: ' + (e.message || 'nepoznato'));
+  }
+}
+
 function _temModalRender() {
   const body = document.getElementById('tem-modal-body');
   if (!body || document.getElementById('tem-modal').style.display === 'none') return;
@@ -25911,6 +26108,8 @@ function _temModalRender() {
           style="flex:1;min-width:80px;padding:7px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:${m.visible ? '#4ade80' : '#64748b'};font-size:12px;cursor:pointer;">${m.visible ? '👁 Vidljivo' : '🙈 Skriveno'}</button>
         <button onclick="_temZoom('${m.id}')"
           style="flex:1;min-width:70px;padding:7px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#60a5fa;font-size:12px;cursor:pointer;">🔍 Zumiraj</button>
+        <button onclick="showTemTable('${m.id}')"
+          style="flex:1;min-width:80px;padding:7px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#a5b4fc;font-size:12px;cursor:pointer;">📋 Tabela</button>
         <button onclick="_temEdToggle('${m.id}')" ${m.theme ? '' : 'disabled'}
           style="flex:1;min-width:90px;padding:7px;background:${edOpen ? '#1e3a5f' : '#1e293b'};border:1px solid ${m.theme ? '#3b82f6' : '#334155'};border-radius:8px;color:${m.theme ? '#93c5fd' : '#475569'};font-size:12px;cursor:${m.theme ? 'pointer' : 'default'};">🎨 Klase i boje</button>
         <button onclick="_temRemoveMap('${m.id}')"
@@ -29626,6 +29825,28 @@ if (typeof AndroidDownload !== 'undefined') {
       <button onclick="closeTemModal()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
     </div>
     <div id="tem-modal-body"></div>
+  </div>
+</div>
+
+<!-- TEMATSKA KARTA — TABELA ATRIBUTA (attribute table) -->
+<div id="tem-table-modal" style="display:none;position:fixed;inset:0;z-index:99010;background:rgba(0,0,0,0.72);align-items:center;justify-content:center;padding:12px;"
+  onclick="if(event.target===this)closeTemTable()">
+  <div class="ttm-panel">
+    <div class="ttm-head">
+      <span class="ttm-ico">📋</span>
+      <span class="ttm-name" id="ttm-name">Tabela atributa</span>
+      <span class="ttm-sub" id="ttm-sub"></span>
+      <button class="ttm-x" onclick="closeTemTable()">✕</button>
+    </div>
+    <div class="ttm-tools">
+      <div class="ttm-search">
+        <span style="color:#475569;font-size:13px;">🔍</span>
+        <input id="ttm-search" type="text" placeholder="Pretraži atribute…" oninput="_temTblSearch(this.value)">
+      </div>
+      <button class="ttm-csv" onclick="_temTblExport()">⬇ CSV</button>
+    </div>
+    <div class="ttm-scroll" id="ttm-scroll"></div>
+    <div class="ttm-foot" id="ttm-foot"></div>
   </div>
 </div>
 
