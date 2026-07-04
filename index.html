@@ -4242,7 +4242,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.6';
+const APP_VER = 'v3.15.7';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4947,10 +4947,6 @@ async function sbLoadProfile() {
   if (adminItem) adminItem.style.display = isAdm ? 'block' : 'none';
   const postavkeItem = document.getElementById('menu-postavke-item');
   if (postavkeItem) postavkeItem.style.display = isAdm ? 'block' : 'none';
-  const mv = document.getElementById('mdrop-vlake');
-  const mp = document.getElementById('mdrop-projekat');
-  if (mv) mv.style.display = isFld ? 'none' : '';
-  if (mp) mp.style.display = isFld ? 'none' : '';
 
   // Projektantski alati (admin nadzorni nalog ih nema)
   const noviBtn = document.querySelector('#proj-list-sec .btn.b[onclick="showNovProjektForm()"]');
@@ -12786,14 +12782,7 @@ function togCompassCone() {
   if (_compassConeOn && _compassHeading != null) _updCompassOnMarker(_compassHeading);
 }
 
-let _devPitch = null;   // nagib uređaja naprijed-nazad (e.beta) — za klinometar
 function _onDeviceOrientation(e) {
-  // Klinometar: beta = ugao naprijed/nazad. Telefon uspravno (portret) = ~90°;
-  // preračunavamo tako da je 0° kad je vrh telefona u horizontu (nišanjenje ravno).
-  if (typeof e.beta === 'number') {
-    _devPitch = e.beta - 90;
-    if (_clinoOpen) _clinoLiveUpd();
-  }
   let heading = null;
   if (typeof e.webkitCompassHeading === 'number') {
     heading = e.webkitCompassHeading;
@@ -12805,9 +12794,9 @@ function _onDeviceOrientation(e) {
   _updCompassOnMarker(heading);
 }
 
-// iOS: deviceorientation s webkitCompassHeading (+ beta za klinometar)
+// iOS: deviceorientation s webkitCompassHeading (kompas)
 window.addEventListener('deviceorientation', e => {
-  if (typeof e.webkitCompassHeading === 'number' || typeof e.beta === 'number') _onDeviceOrientation(e);
+  if (typeof e.webkitCompassHeading === 'number' || typeof e.alpha === 'number') _onDeviceOrientation(e);
 }, true);
 // Android: deviceorientationabsolute
 window.addEventListener('deviceorientationabsolute', _onDeviceOrientation, true);
@@ -18963,50 +18952,6 @@ function _wxRestore() {
   _wxLoadPlaces();
 }
 
-// ═══ KLINOMETAR / VISINA STABLA ═══════════════════════════════════════════════
-let _clinoOpen = false, _clinoTop = null, _clinoBase = null;
-function showClino() {
-  _clinoOpen = true;
-  document.getElementById('clino-modal').style.display = 'flex';
-  // iOS zahtijeva eksplicitnu dozvolu za senzor orijentacije (user gesture)
-  try {
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      DeviceOrientationEvent.requestPermission().catch(() => {});
-    }
-  } catch(e) {}
-  setTimeout(() => {
-    document.getElementById('clino-nosensor').style.display = (_devPitch === null) ? 'block' : 'none';
-  }, 800);
-  _clinoLiveUpd();
-}
-function _clinoLiveUpd() {
-  const el = document.getElementById('clino-angle');
-  if (el) el.textContent = (_devPitch === null) ? '—°' : (_devPitch >= 0 ? '+' : '') + _devPitch.toFixed(1) + '°';
-}
-function _clinoCapture(which) {
-  if (_devPitch === null) { showToast('⚠ Senzor nagiba nije dostupan'); return; }
-  if (which === 'top') { _clinoTop = _devPitch; document.getElementById('clino-top').textContent = _clinoTop.toFixed(1) + '°'; }
-  else { _clinoBase = _devPitch; document.getElementById('clino-base').textContent = _clinoBase.toFixed(1) + '°'; }
-}
-function _clinoCalc() {
-  const D = parseFloat(document.getElementById('clino-dist').value);
-  if (!Number.isFinite(D) || D <= 0) { showToast('⚠ Upiši udaljenost do stabla'); return; }
-  if (_clinoTop === null || _clinoBase === null) { showToast('⚠ Nišani i vrh i podnožje'); return; }
-  const rad = deg => deg * Math.PI / 180;
-  const H = D * (Math.tan(rad(_clinoTop)) - Math.tan(rad(_clinoBase)));
-  const res = document.getElementById('clino-result');
-  res.style.display = 'block';
-  document.getElementById('clino-height').textContent = (H > 0 ? H.toFixed(1) : '—') + ' m';
-}
-function _clinoReset() {
-  _clinoTop = _clinoBase = null;
-  document.getElementById('clino-top').textContent = '—';
-  document.getElementById('clino-base').textContent = '—';
-  document.getElementById('clino-result').style.display = 'none';
-  document.getElementById('clino-dist').value = '';
-}
-function closeClino() { _clinoOpen = false; document.getElementById('clino-modal').style.display = 'none'; }
-
 function _pmBuildDetail(p, vlakeRows, logRows) {
   // ── Vlake agregacija ──
   const valid = vlakeRows.filter(r => (r.pts || []).length >= 2);
@@ -20923,6 +20868,7 @@ initAuth();
 function toggleTextTool() {
   textToolOn = !textToolOn;
   const btn = document.getElementById('btn-text-tool');
+  if (!btn) return;   // stavka uklonjena iz menija — alat dormant
   if (textToolOn) {
     btn.style.background = '#7c3aed';
     btn.style.color = '#fff';
@@ -28863,17 +28809,12 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();document.getElementById('kf').click()">📂 Dodaj KML fajl</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showTemModal()">📊 Tematska karta</div>
   <div class="mdrop-sep"></div>
-  <div class="mdrop-item" id="mdrop-vlake" onclick="closeMenuDropdown();switchTab('vlake')">📐 Panel vlaka</div>
-  <div class="mdrop-item" id="mdrop-projekat" onclick="closeMenuDropdown();switchTab('projekat')">📁 Projekat</div>
   <div class="mdrop-item" id="mdrop-upravljanje" onclick="closeMenuDropdown();showProjectManagement()">📊 Upravljanje projektima</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();toggleMjtrgDropdown()">📏 Mjerenja &amp; Tragovi</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();openGraniceModal()">🗺 Granice Odjela</div>
-  <div class="mdrop-item" id="btn-text-tool" onclick="closeMenuDropdown();toggleTextTool()">🏷 Tekst na karti</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();startLocPhoto()">📷 Uslikaj lokaciju</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showShareLocMenu()">📍 Podijeli lokaciju</div>
-  <div class="mdrop-sep"></div>
-  <div class="mdrop-item" onclick="closeMenuDropdown();showClino()">📐 Visina stabla</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showHelp()">📖 Upute za korištenje</div>
   <div class="mdrop-sep"></div>
@@ -29897,40 +29838,6 @@ if (typeof AndroidDownload !== 'undefined') {
       <button onclick="closeWeatherPanel()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
     </div>
     <div id="wx-panel-body"></div>
-  </div>
-</div>
-
-<!-- KLINOMETAR / VISINA STABLA -->
-<div id="clino-modal" style="display:none;position:fixed;inset:0;z-index:99000;background:rgba(0,0,0,0.65);align-items:center;justify-content:center;padding:16px;"
-  onclick="if(event.target===this)closeClino()">
-  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;width:100%;max-width:400px;max-height:90vh;overflow-y:auto;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,0.7);">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <h3 style="margin:0;font-size:15px;color:#34d399;">📐 Visina stabla</h3>
-      <button onclick="closeClino()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
-    </div>
-    <div id="clino-nosensor" style="display:none;background:#3a1e1e;border:1px solid #7f1d1d;border-radius:10px;padding:12px;font-size:12px;color:#fca5a5;margin-bottom:10px;">
-      ⚠ Senzor nagiba nije dostupan na ovom uređaju/pregledniku.
-    </div>
-    <div style="text-align:center;background:#16213e;border:1px solid #1e3a5f;border-radius:12px;padding:16px;margin-bottom:12px;">
-      <div style="font-size:11px;color:#64748b;">Trenutni ugao nišanjenja</div>
-      <div id="clino-angle" style="font-size:38px;font-weight:700;color:#34d399;font-family:monospace;">—°</div>
-    </div>
-    <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Udaljenost do stabla (m)</label>
-    <input type="number" id="clino-dist" inputmode="decimal" step="0.1" placeholder="npr. 20"
-      style="width:100%;padding:9px 10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:14px;box-sizing:border-box;margin-bottom:10px;">
-    <div style="display:flex;gap:8px;margin-bottom:8px;">
-      <button onclick="_clinoCapture('top')" style="flex:1;padding:11px;background:#1e3a5f;border:1px solid #38bdf8;border-radius:8px;color:#38bdf8;font-size:13px;font-weight:600;cursor:pointer;">① Nišani vrh<br><span id="clino-top" style="font-size:11px;font-weight:400;opacity:0.8;">—</span></button>
-      <button onclick="_clinoCapture('base')" style="flex:1;padding:11px;background:#1e3a5f;border:1px solid #f59e0b;border-radius:8px;color:#fbbf24;font-size:13px;font-weight:600;cursor:pointer;">② Nišani podnožje<br><span id="clino-base" style="font-size:11px;font-weight:400;opacity:0.8;">—</span></button>
-    </div>
-    <div id="clino-result" style="text-align:center;background:#052e16;border:1px solid #166534;border-radius:12px;padding:14px;margin-bottom:10px;display:none;">
-      <div style="font-size:11px;color:#4ade80;">Procijenjena visina stabla</div>
-      <div id="clino-height" style="font-size:32px;font-weight:700;color:#4ade80;">—</div>
-    </div>
-    <div style="display:flex;gap:8px;">
-      <button onclick="_clinoCalc()" style="flex:1;padding:10px;background:#166534;border:1px solid #4ade80;border-radius:8px;color:#4ade80;font-size:13px;font-weight:600;cursor:pointer;">✓ Izračunaj</button>
-      <button onclick="_clinoReset()" style="padding:10px 14px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer;">↺ Reset</button>
-    </div>
-    <div style="font-size:10px;color:#475569;margin-top:10px;line-height:1.5;">Stani na ravnom, izmjeri/odbroji udaljenost do stabla, upiši je. Nišani vrh telefona prema <b>vrhu</b> stabla pa tapni ①, zatim prema <b>podnožju</b> pa ②. Visina = D · (tan(vrh) − tan(podnožje)).</div>
   </div>
 </div>
 
