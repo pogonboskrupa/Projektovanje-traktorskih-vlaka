@@ -4263,7 +4263,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.17.0';
+const APP_VER = 'v3.18.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5695,6 +5695,8 @@ let kolegeVlakeMap  = {}; // `kid::nm` → { poly } — za brzi patch bez full r
 let _rtVlakeChannel = null;
 let _rtOdjeliChannel= null;
 let _rtSyncTimer    = null;  // throttle za full reload
+let _rtSyncDue      = 0;     // kad throttle tajmer ističe (najraniji rok pobjeđuje)
+let _lastVisKolegeSync = 0;  // zadnji kolege-catchup pri povratku u prvi plan
 let _kolegeActiveSince = {}; // kid → timestamp zadnjeg realtime updejta
 const _LIVE_BADGE_MS = 90000; // 90s — kolega se smatra aktivnim
 
@@ -7114,7 +7116,9 @@ function _updVlakeMapVisibility() {
   }
   vlake.forEach(v => {
     const projHidden = v.projektId && hidden.has(v.projektId);
-    const brHidden = hiddenBrs.has(v.br);
+    // br-podudaranje samo za vlake BEZ projekta (legacy zapisi vezani brojem) —
+    // inače skrivanje projekta A sakrije i istobrojnu vlaku vidljivog projekta B.
+    const brHidden = !v.projektId && hiddenBrs.has(v.br);
     const show = !projHidden && !brHidden;
     const layers = [v.poly, ...(v.wpts || []), v.labelMk, v.lagerMk, ...(v.extraLabels || [])].filter(Boolean);
     layers.forEach(l => {
@@ -7507,21 +7511,29 @@ function _kvcPurgeStale() {
 // ─── KOLEGE VLAKE (read-only prikaz na mapi) ─────────────────────────────────
 async function sbLoadKolegeVlake() {
   if (!sbProfile?.sumarija || !sbUser) return;
-  kolegeVlake.forEach(p => map.removeLayer(p));
-  kolegeLabels.forEach(m => map.removeLayer(m));
-  kolegeVlake = []; kolegeLabels = []; kolegeVlakeMap = {};
-
   const akt = _aktivniProjektId ? _projekti.find(p => p.id === _aktivniProjektId) : null;
+
+  // Brisanje postojećeg prikaza tek kad znamo da imamo čime zamijeniti —
+  // raniji kod je čistio kartu PRIJE guardova/upita pa je tranzijentni mrežni
+  // neuspjeh (ili prazan projekat) "pojeo" već nacrtane vlake kolega.
+  const clearAll = () => {
+    kolegeVlake.forEach(p => { try { map.removeLayer(p); } catch(e) {} });
+    kolegeLabels.forEach(m => { try { map.removeLayer(m); } catch(e) {} });
+    kolegeVlake = []; kolegeLabels = []; kolegeVlakeMap = {};
+  };
+  const rndList = () => { if (typeof rndKolegeVlakeList === 'function') rndKolegeVlakeList(); };
 
   // Admin nadzorni pregled: prikaži SVE vlake aktivnog projekta (svih korisnika)
   if (isAdmin() && akt) {
-    let dbData = [];
+    let dbData = null;
     try {
       const { data } = await sb.from('vlake')
         .select('nm, korisnik_id, pts, boja, kr')
         .eq('projekt_id', akt.id);
-      if (data) dbData = data;
+      dbData = data || [];
     } catch(e) {}
+    if (dbData === null) return; // mrežni neuspjeh — zadrži postojeći prikaz
+    clearAll();
     dbData.forEach(row => {
       if (!row.pts || row.pts.length < 2) return;
       const kid = row.korisnik_id;
@@ -7534,6 +7546,7 @@ async function sbLoadKolegeVlake() {
       kolegeVlake.push(poly);
       kolegeVlakeMap[mapKey] = { poly, pts: row.pts, nm: row.nm, ime: info.ime };
     });
+    rndList();
     return;
   }
 
@@ -7543,9 +7556,9 @@ async function sbLoadKolegeVlake() {
     memberIds = all.filter(id => id !== sbUser.id);
   }
 
-  if (memberIds.length === 0) return;
+  if (memberIds.length === 0) { clearAll(); rndList(); return; }
 
-  let dbData = [];
+  let dbData = null;
   try {
     let q = sb.from('vlake')
       .select('nm, korisnik_id, pts, boja, kr')
@@ -7553,21 +7566,29 @@ async function sbLoadKolegeVlake() {
       .eq('sumarija', sbProfile.sumarija)
       .eq('projekt_id', akt.id);
     const { data } = await q;
-    if (data) dbData = data;
+    dbData = data || [];
   } catch(e) {} // offline — koristimo samo cache
 
+  const cachedAll = _kvcLoad(akt.id);
+  // Offline/neuspjeh BEZ keša — zadrži što je već na karti umjesto brisanja
+  if (dbData === null && cachedAll.length === 0 && kolegeVlake.length > 0) return;
+
   // Sačuvaj svježe podatke u cache (merge — nikad ne brišemo stare)
-  const rowsWithIme = dbData.map(r => ({
-    ...r,
-    ime: (kolegeMap[r.korisnik_id] || {}).ime || null
-  }));
-  _kvcSave(akt.id, rowsWithIme);
+  if (dbData !== null) {
+    const rowsWithIme = dbData.map(r => ({
+      ...r,
+      ime: (kolegeMap[r.korisnik_id] || {}).ime || null
+    }));
+    _kvcSave(akt.id, rowsWithIme);
+  }
 
   // Spoji DB rezultate + cached vlake koje su nestale iz DB-a
-  const dbKeys  = new Set(dbData.map(r => r.korisnik_id + '::' + r.nm));
-  const cached  = _kvcLoad(akt.id).filter(r => !dbKeys.has(r.korisnik_id + '::' + r.nm));
-  const allRows = [...dbData, ...cached];
+  const db      = dbData || [];
+  const dbKeys  = new Set(db.map(r => r.korisnik_id + '::' + r.nm));
+  const cached  = cachedAll.filter(r => !dbKeys.has(r.korisnik_id + '::' + r.nm));
+  const allRows = [...db, ...cached];
 
+  clearAll();
   const seenIds = [];
   allRows.forEach(row => {
     if (!row.pts || row.pts.length < 2) return;
@@ -7590,9 +7611,11 @@ async function sbLoadKolegeVlake() {
       showKolegeVlakaInfo(mapKey, e.latlng);
     });
     kolegeVlake.push(poly);
-    _placeLabelMarkers(row.pts, row.nm, 498).forEach(m => kolegeLabels.push(m));
-    kolegeVlakeMap[mapKey] = { poly, color, ime: info.ime, pts: row.pts || [] };
+    const labels = _placeLabelMarkers(row.pts, row.nm, 498);
+    labels.forEach(m => kolegeLabels.push(m));
+    kolegeVlakeMap[mapKey] = { poly, color, ime: info.ime, pts: row.pts || [], labels };
   });
+  rndList();
 }
 
 // ─── DNEVNI LOG ──────────────────────────────────────────────────────────────
@@ -8754,6 +8777,10 @@ function _sbRemoveRtChannels() {
 function _onRtStatus(status) {
   if (status === 'SUBSCRIBED') {
     _updSyncDot('ok');
+    // Catch-up: realtime NE reproducira događaje propuštene dok je socket bio pao
+    // (pozadina/sleep). Svaki (re)join → povuci svježe vlake kolega da se prikažu
+    // čim ima konekcije, bez čekanja na promjenu projekta.
+    _schedKolegeFullSync(1200);
   } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
     _updSyncDot('err');
     // Auto-reconnect nakon 8s
@@ -8799,20 +8826,34 @@ function _patchKolegaVlaka(row) {
   const key = row.korisnik_id + '::' + row.nm;
   const latLngs = row.pts.map(p => [p.la, p.lo]);
 
-  if (kolegeVlakeMap[key]) {
-    kolegeVlakeMap[key].poly.setLatLngs(latLngs);
-    kolegeVlakeMap[key].pts = row.pts;
-    if (row.boja && row.boja !== kolegeVlakeMap[key].poly.options.color) {
-      kolegeVlakeMap[key].poly.setStyle({ color: row.boja });
+  const e = kolegeVlakeMap[key];
+  if (e) {
+    e.poly.setLatLngs(latLngs);
+    e.pts = row.pts;
+    if (row.boja && row.boja !== e.poly.options.color) {
+      e.poly.setStyle({ color: row.boja });
     }
+    // Premjesti naziv-labelu na novu sredinu (inače ostane na staroj poziciji
+    // dok kolega snima) — samo ako ovaj zapis ima svoje labele (ne-admin prikaz).
+    if (e.labels) {
+      e.labels.forEach(m => { try { map.removeLayer(m); } catch(err) {} });
+      e.labels = _placeLabelMarkers(row.pts, row.nm, 498);
+      e.labels.forEach(m => kolegeLabels.push(m));
+    }
+    if (typeof rndKolegeVlakeList === 'function') rndKolegeVlakeList();
   } else {
     _schedKolegeFullSync(500);
   }
 }
 
 function _schedKolegeFullSync(delay = 4000) {
+  // Najraniji rok pobjeđuje: bujica događaja (kolega aktivno snima) NE smije
+  // unedogled odgađati reload — stari kod je resetovao tajmer pri svakom događaju.
+  const due = Date.now() + delay;
+  if (_rtSyncTimer && _rtSyncDue && _rtSyncDue <= due) return;
   clearTimeout(_rtSyncTimer);
-  _rtSyncTimer = setTimeout(() => sbLoadKolegeVlake(), delay);
+  _rtSyncDue = due;
+  _rtSyncTimer = setTimeout(() => { _rtSyncTimer = null; _rtSyncDue = 0; sbLoadKolegeVlake(); }, delay);
 }
 
 function _updKoleguLiveBar() {
@@ -12230,7 +12271,20 @@ document.addEventListener('visibilitychange', async () => {
     if ((recOn || _dozGpsOn) && !_wakeLock) await _acquireWakeLock();
     _updWakeLockIcon();
     // Povratak u prvi plan — pokušaj sync (online event zna izostati na Androidu)
-    if (navigator.onLine && sbUser) _processOfflineQueue();
+    if (navigator.onLine && sbUser) {
+      _processOfflineQueue();
+      // Vlake kolega ČIM ima konekcije: realtime u pozadini često tiho padne
+      // (Android suspenduje WebSocket) pa su događaji propušteni — po povratku
+      // provjeri kanal i povuci svježe vlake (throttle 15s da ne spamamo).
+      const now = Date.now();
+      if (now - _lastVisKolegeSync > 15000) {
+        _lastVisKolegeSync = now;
+        try {
+          if (!_rtVlakeChannel || _rtVlakeChannel.state !== 'joined') sbStartRealtime();
+          else _schedKolegeFullSync(800);
+        } catch(e) {}
+      }
+    }
   } else {
     // App ide u pozadinu (kamera, drugi app, zaključavanje) — Android može
     // ubiti WebView. Spasi sve lokalno ODMAH, ne čekaj debounce timer.
@@ -12258,6 +12312,11 @@ setInterval(async () => {
   if (q.length) _processOfflineQueue();
   // Flush tragova bez sbId koji su dodani dok smo bili offline
   (_tragRegistry || []).filter(t => !t.sbId && t.pts?.length).forEach(t => sbFlushTrag(t));
+  // Samoizlječenje realtime kanala: ako je socket tiho pao (bez CLOSED eventa),
+  // vlake kolega prestaju stizati — ponovo se pretplati (SUBSCRIBED okida catch-up).
+  try {
+    if (typeof _rtVlakeChannel !== 'undefined' && (!_rtVlakeChannel || _rtVlakeChannel.state !== 'joined')) sbStartRealtime();
+  } catch(e) {}
 }, 60000);
 
 function _updWakeLockIcon() {
@@ -30555,9 +30614,9 @@ if (typeof AndroidDownload !== 'undefined') {
       box-shadow:0 4px 24px rgba(0,0,0,0.12),0 0 0 0.5px rgba(0,0,0,0.04);padding:5px;white-space:nowrap;z-index:9100;min-width:160px;">
       <!-- Tačka -->
       <button onclick="_izmjeriPick('tacka')" style="display:flex;align-items:center;gap:11px;width:100%;
-        background:none;border:none;color:#374151;padding:9px 12px;border-radius:10px;font-size:13px;
-        font-weight:500;cursor:pointer;text-align:left;transition:background .12s;"
-        onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='none'">
+        background:#e8edf4;border:1px solid #d3dce8;color:#1f2937;padding:9px 12px;border-radius:10px;font-size:13px;
+        font-weight:600;cursor:pointer;text-align:left;transition:background .12s;margin-bottom:3px;"
+        onmouseover="this.style.background='#d8e1ec'" onmouseout="this.style.background='#e8edf4'">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M10 2C7.24 2 5 4.24 5 7c0 3.75 5 10 5 10s5-6.25 5-10c0-2.76-2.24-5-5-5z" fill="#60a5fa"/>
           <circle cx="10" cy="7" r="2" fill="#fff"/>
@@ -30566,9 +30625,9 @@ if (typeof AndroidDownload !== 'undefined') {
       </button>
       <!-- Distanca -->
       <button onclick="_izmjeriPick('dist')" style="display:flex;align-items:center;gap:11px;width:100%;
-        background:none;border:none;color:#374151;padding:9px 12px;border-radius:10px;font-size:13px;
-        font-weight:500;cursor:pointer;text-align:left;transition:background .12s;"
-        onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='none'">
+        background:#e8edf4;border:1px solid #d3dce8;color:#1f2937;padding:9px 12px;border-radius:10px;font-size:13px;
+        font-weight:600;cursor:pointer;text-align:left;transition:background .12s;margin-bottom:3px;"
+        onmouseover="this.style.background='#d8e1ec'" onmouseout="this.style.background='#e8edf4'">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
           <line x1="3" y1="10" x2="17" y2="10" stroke="#34d399" stroke-width="2" stroke-linecap="round"/>
           <line x1="3" y1="7" x2="3" y2="13" stroke="#34d399" stroke-width="2" stroke-linecap="round"/>
@@ -30580,9 +30639,9 @@ if (typeof AndroidDownload !== 'undefined') {
       </button>
       <!-- Površina -->
       <button onclick="_izmjeriPick('area')" style="display:flex;align-items:center;gap:11px;width:100%;
-        background:none;border:none;color:#374151;padding:9px 12px;border-radius:10px;font-size:13px;
-        font-weight:500;cursor:pointer;text-align:left;transition:background .12s;"
-        onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='none'">
+        background:#e8edf4;border:1px solid #d3dce8;color:#1f2937;padding:9px 12px;border-radius:10px;font-size:13px;
+        font-weight:600;cursor:pointer;text-align:left;transition:background .12s;margin-bottom:3px;"
+        onmouseover="this.style.background='#d8e1ec'" onmouseout="this.style.background='#e8edf4'">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
           <polygon points="10,3 17,14 3,14" fill="#a78bfa" fill-opacity="0.35" stroke="#a78bfa" stroke-width="1.8" stroke-linejoin="round"/>
           <circle cx="10" cy="3" r="1.8" fill="#a78bfa"/>
@@ -30593,9 +30652,9 @@ if (typeof AndroidDownload !== 'undefined') {
       </button>
       <!-- Nagib -->
       <button onclick="_izmjeriPick('nagib')" style="display:flex;align-items:center;gap:11px;width:100%;
-        background:none;border:none;color:#374151;padding:9px 12px;border-radius:10px;font-size:13px;
-        font-weight:500;cursor:pointer;text-align:left;transition:background .12s;"
-        onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='none'">
+        background:#e8edf4;border:1px solid #d3dce8;color:#1f2937;padding:9px 12px;border-radius:10px;font-size:13px;
+        font-weight:600;cursor:pointer;text-align:left;transition:background .12s;margin-bottom:3px;"
+        onmouseover="this.style.background='#d8e1ec'" onmouseout="this.style.background='#e8edf4'">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M3 15 L15 5" stroke="#fb923c" stroke-width="2" stroke-linecap="round"/>
           <path d="M15 5 L15 15 L3 15" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="2 2" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
@@ -30632,8 +30691,8 @@ if (typeof AndroidDownload !== 'undefined') {
         <span class="gps-switch" id="forest-switch" onclick="_togForestMode()"><span class="gps-switch-knob"></span></span>
       </div>
       <div style="font-size:10px;color:#64748b;margin:-6px 0 10px 0;line-height:1.4;">Strožije filtriranje za bolju preciznost pod krošnjom</div>
-      <button onclick="_locPopupCentriraj()" style="width:100%;padding:9px;background:#f0f9ff;border:1px solid #bae6fd;
-        border-radius:10px;color:#0284c7;font-size:12px;font-weight:600;cursor:pointer;">🎯 Centriraj na moju poziciju</button>
+      <button onclick="_locPopupCentriraj()" style="width:100%;padding:9px;background:#dbeafe;border:1px solid #93c5fd;
+        border-radius:10px;color:#1d4ed8;font-size:12px;font-weight:700;cursor:pointer;">🎯 Centriraj na moju poziciju</button>
     </div>
   </div>
   <button id="ab-kompas" onclick="togCompassCone()" title="Prikaži smjer na karti" style="display:none;">
