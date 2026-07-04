@@ -4178,7 +4178,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.0';
+const APP_VER = 'v3.15.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -18583,11 +18583,21 @@ function _wxSavePlaces() { try { localStorage.setItem(_WX_PLACES_KEY, JSON.strin
 // Zajednički URL za prognozu (7 dana + vjetar za upozorenja)
 function _wxUrl(la, lo) {
   return `https://api.open-meteo.com/v1/forecast?latitude=${la.toFixed(4)}&longitude=${lo.toFixed(4)}`
-    + `&current=temperature_2m,precipitation,weather_code,wind_speed_10m`
+    + `&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m`
     + `&hourly=temperature_2m,precipitation_probability,precipitation,weather_code`
-    + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max`
+    + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset`
     + `&timezone=auto&forecast_days=7`;
 }
+
+// Smjer vjetra (stepeni) → strelica + oznaka
+function _wxWindDir(deg) {
+  if (deg == null) return '';
+  const dirs = ['S','SI','I','JI','J','JZ','Z','SZ'];
+  const arrows = ['↑','↗','→','↘','↓','↙','←','↖'];
+  const i = Math.round(deg / 45) % 8;
+  return `${arrows[i]} ${dirs[i]}`;
+}
+function _wxHM(iso) { try { const d = new Date(iso); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); } catch { return '—'; } }
 
 // Fetch za mjesto (ili {la,lo}) uz po-mjesto keš. Vraća {data, cachedTs}.
 async function _wxFetch(la, lo, cacheKey) {
@@ -18682,39 +18692,69 @@ function _wxRender(body, d, cachedTs) {
     </div>`);
   }
   const dy = d.daily || {};
-  const dayCards = (dy.time || []).map((t, i) => {
+  // Globalni raspon temperatura za trakice (min/max preko 7 dana)
+  const allMax = (dy.temperature_2m_max || []), allMin = (dy.temperature_2m_min || []);
+  const gMax = Math.max(...allMax, 0), gMin = Math.min(...allMin, 0);
+  const gSpan = Math.max(1, gMax - gMin);
+  const dayRows = (dy.time || []).map((t, i) => {
     const dt = new Date(t);
-    const dan = ['ned','pon','uto','sri','čet','pet','sub'][dt.getDay()];
+    const dan = ['NED','PON','UTO','SRI','ČET','PET','SUB'][dt.getDay()];
     const c = _wxCode(dy.weather_code[i]);
-    return `<div style="flex:0 0 auto;min-width:58px;text-align:center;background:#16213e;border:1px solid #1e3a5f;border-radius:10px;padding:8px 4px;">
-      <div style="font-size:11px;color:#94a3b8;font-weight:600;">${i===0?'Danas':dan}</div>
-      <div style="font-size:22px;margin:2px 0;">${c.e}</div>
-      <div style="font-size:12px;color:#e2e8f0;"><b>${Math.round(dy.temperature_2m_max[i])}°</b> <span style="color:#64748b;">${Math.round(dy.temperature_2m_min[i])}°</span></div>
-      <div style="font-size:10px;color:${dy.precipitation_probability_max[i]>=50?'#60a5fa':'#475569'};margin-top:2px;">💧 ${dy.precipitation_probability_max[i]}%</div>
+    const mn = allMin[i], mx = allMax[i];
+    const left = ((mn - gMin) / gSpan) * 100;
+    const w = Math.max(6, ((mx - mn) / gSpan) * 100);
+    const pp = dy.precipitation_probability_max[i];
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid rgba(30,58,95,0.4);">
+      <div style="width:34px;font-size:11px;font-weight:700;color:${i===0?'#60a5fa':'#94a3b8'};">${i===0?'DAN':dan}</div>
+      <div style="width:24px;font-size:18px;text-align:center;">${c.e}</div>
+      <div style="width:38px;font-size:10px;color:${pp>=50?'#60a5fa':'#475569'};">💧${pp}%</div>
+      <div style="width:26px;text-align:right;font-size:12px;color:#64748b;">${Math.round(mn)}°</div>
+      <div style="flex:1;height:6px;background:#1e293b;border-radius:3px;position:relative;">
+        <div style="position:absolute;left:${left}%;width:${w}%;height:100%;border-radius:3px;background:linear-gradient(90deg,#38bdf8,#fbbf24,#f87171);"></div>
+      </div>
+      <div style="width:26px;font-size:12px;font-weight:700;color:#e2e8f0;">${Math.round(mx)}°</div>
     </div>`;
   }).join('');
   const alerts = _wxAlerts(dy);
   const alertBox = alerts.length
-    ? `<div style="background:#1e293b;border:1px solid #3b82f6;border-radius:8px;padding:9px 11px;margin-bottom:10px;">
-        <div style="font-size:11px;color:#93c5fd;font-weight:600;margin-bottom:4px;">⚠ Upozorenja (7 dana)</div>
+    ? `<div style="background:linear-gradient(135deg,#1e3a5f,#1e293b);border:1px solid #3b82f6;border-radius:10px;padding:9px 11px;margin-bottom:12px;">
+        <div style="font-size:11px;color:#93c5fd;font-weight:700;margin-bottom:4px;">⚠ UPOZORENJA (7 DANA)</div>
         ${alerts.map(a => `<div style="font-size:12px;color:#cbd5e1;padding:1px 0;">${a.txt}</div>`).join('')}
       </div>`
     : '';
+  // Sunce (izlazak/zalazak danas) — korisno za planiranje terena
+  const sun = (dy.sunrise && dy.sunset)
+    ? `<div style="display:flex;justify-content:space-around;background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:8px;margin-bottom:12px;">
+        <div style="text-align:center;"><div style="font-size:18px;">🌅</div><div style="font-size:11px;color:#94a3b8;">Izlazak</div><div style="font-size:13px;font-weight:600;color:#fbbf24;">${_wxHM(dy.sunrise[0])}</div></div>
+        <div style="text-align:center;"><div style="font-size:18px;">🌇</div><div style="font-size:11px;color:#94a3b8;">Zalazak</div><div style="font-size:13px;font-weight:600;color:#f97316;">${_wxHM(dy.sunset[0])}</div></div>
+      </div>` : '';
+  // Hero pozadina — dan/noć/oblačno ton
+  const dayNow = new Date();
+  const isNight = (dy.sunrise && dy.sunset) ? (dayNow < new Date(dy.sunrise[0]) || dayNow > new Date(dy.sunset[0])) : (dayNow.getHours() < 6 || dayNow.getHours() > 20);
+  const heroBg = isNight ? 'linear-gradient(135deg,#1e293b,#0f172a)' : 'linear-gradient(135deg,#1e3a5f,#16213e)';
   body.innerHTML = `
     ${cachedTs ? `<div style="font-size:10px;color:#f59e0b;text-align:center;margin-bottom:8px;">📴 Keširano — ${fmtDateShort(new Date(cachedTs).toISOString())} ${new Date(cachedTs).getHours()}:${String(new Date(cachedTs).getMinutes()).padStart(2,'0')}</div>` : ''}
     ${alertBox}
-    <div style="display:flex;align-items:center;gap:14px;background:#16213e;border:1px solid #1e3a5f;border-radius:12px;padding:14px;margin-bottom:12px;">
-      <div style="font-size:44px;line-height:1;">${wc.e}</div>
-      <div style="flex:1;">
-        <div style="font-size:30px;font-weight:700;color:#e2e8f0;">${Math.round(cur.temperature_2m)}°C</div>
-        <div style="font-size:12px;color:#94a3b8;">${wc.t}</div>
-        <div style="font-size:11px;color:#64748b;margin-top:2px;">💨 ${Math.round(cur.wind_speed_10m)} km/h · 💧 ${cur.precipitation||0} mm</div>
+    <div style="background:${heroBg};border:1px solid #1e3a5f;border-radius:14px;padding:16px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="font-size:52px;line-height:1;">${wc.e}</div>
+        <div style="flex:1;">
+          <div style="font-size:34px;font-weight:700;color:#f1f5f9;line-height:1;">${Math.round(cur.temperature_2m)}°C</div>
+          <div style="font-size:13px;color:#cbd5e1;margin-top:2px;">${wc.t}</div>
+          ${cur.apparent_temperature!=null?`<div style="font-size:11px;color:#94a3b8;">osjeća se ${Math.round(cur.apparent_temperature)}°</div>`:''}
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-around;margin-top:12px;padding-top:12px;border-top:1px solid rgba(148,163,184,0.15);">
+        <div style="text-align:center;"><div style="font-size:11px;color:#94a3b8;">💨 Vjetar</div><div style="font-size:13px;font-weight:600;color:#e2e8f0;">${Math.round(cur.wind_speed_10m)}<span style="font-size:10px;color:#64748b;"> km/h</span></div><div style="font-size:10px;color:#64748b;">${_wxWindDir(cur.wind_direction_10m)}</div></div>
+        <div style="text-align:center;"><div style="font-size:11px;color:#94a3b8;">💧 Vlažnost</div><div style="font-size:13px;font-weight:600;color:#e2e8f0;">${cur.relative_humidity_2m!=null?cur.relative_humidity_2m+'%':'—'}</div></div>
+        <div style="text-align:center;"><div style="font-size:11px;color:#94a3b8;">🌧 Padavine</div><div style="font-size:13px;font-weight:600;color:#e2e8f0;">${cur.precipitation||0}<span style="font-size:10px;color:#64748b;"> mm</span></div></div>
       </div>
     </div>
-    <div style="font-size:11px;color:#64748b;font-weight:600;margin-bottom:4px;">SLJEDEĆIH 12 SATI</div>
-    <div style="display:flex;overflow-x:auto;gap:2px;background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:6px 2px;margin-bottom:14px;">${hourCells.join('')}</div>
-    <div style="font-size:11px;color:#64748b;font-weight:600;margin-bottom:4px;">7 DANA</div>
-    <div style="display:flex;overflow-x:auto;gap:6px;padding-bottom:4px;">${dayCards}</div>`;
+    ${sun}
+    <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px;letter-spacing:0.05em;">SLJEDEĆIH 12 SATI</div>
+    <div style="display:flex;overflow-x:auto;gap:2px;background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:8px 2px;margin-bottom:14px;">${hourCells.join('')}</div>
+    <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;letter-spacing:0.05em;">7 DANA</div>
+    <div>${dayRows}</div>`;
 }
 
 function closeWeather() { document.getElementById('weather-modal').style.display = 'none'; }
@@ -18824,18 +18864,9 @@ async function _wxAddArea(ring, cla, clo) {
   const id = 'w' + Date.now().toString(36);
   _wxPlaces.push({ id, name: nm, type: 'area', la: cla, lo: clo, ring: ring.map(p => [p.lat, p.lng]) });
   _wxSavePlaces();
-  _wxDrawAreaOutline(id);
+  // NE ostavljamo obris poligona na karti — područje služi samo za prognozu (centroid).
   showToast('✅ Područje dodano');
   showWeatherPanel();
-}
-
-// Trajni obris područja na karti (lagani, ne-interaktivni)
-function _wxDrawAreaOutline(id) {
-  const pl = _wxPlaces.find(p => p.id === id);
-  if (!pl || !pl.ring || _wxAreaLayers[id]) return;
-  try {
-    _wxAreaLayers[id] = L.polygon(pl.ring, { color: '#38bdf8', weight: 2, dashArray: '6 4', fill: false, interactive: false }).addTo(map);
-  } catch(e) {}
 }
 
 async function _wxDeletePlace(id) {
@@ -18850,10 +18881,9 @@ async function _wxDeletePlace(id) {
   _wxRenderList();
 }
 
-// Restore (showApp) — učitaj mjesta i nacrtaj obrise područja
+// Restore (showApp) — učitaj sačuvana mjesta (bez obrisa na karti)
 function _wxRestore() {
   _wxLoadPlaces();
-  _wxPlaces.forEach(p => { if (p.type === 'area' && p.ring) _wxDrawAreaOutline(p.id); });
 }
 
 // ═══ KLINOMETAR / VISINA STABLA ═══════════════════════════════════════════════
