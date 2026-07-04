@@ -3462,6 +3462,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
         </div>
         <div id="pd-info" style="font-size:12px;color:#94a3b8;margin-bottom:12px;line-height:1.9;background:rgba(15,23,42,0.6);border-radius:6px;padding:9px 11px;border:1px solid #1e3a5f;"></div>
         <div id="pd-dist-warn" style="display:none;margin-bottom:10px;"></div>
+        <button class="btn" id="pd-stats-btn" onclick="_pdToggleStats()" style="width:100%;margin-bottom:6px;background:#0f2940;border:1px solid #1e3a5f;color:#a5b4fc;font-size:13px;padding:8px;border-radius:8px;font-weight:600;">📊 Detaljna statistika</button>
+        <div id="pd-stats-sec" style="display:none;margin-bottom:12px;background:rgba(15,23,42,0.6);border:1px solid #1e3a5f;border-radius:8px;padding:11px;"></div>
         <div style="font-size:11px;font-weight:bold;color:#64748b;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:6px;">👥 Projektanti</div>
         <div id="pd-clanovi" style="margin-bottom:12px;"></div>
         <div id="pd-add-clan-sec">
@@ -4242,7 +4244,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.8';
+const APP_VER = 'v3.16.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -6108,6 +6110,12 @@ function showProjektDetalji(id) {
   // Upozorenje o razmaku vlaka
   _checkProjDistWarn(id);
 
+  // Detaljna statistika — resetuj na sklopljeno (drugi projekat = svježi podaci)
+  const statsSec = document.getElementById('pd-stats-sec');
+  if (statsSec) { statsSec.style.display = 'none'; statsSec.innerHTML = ''; }
+  const statsBtn = document.getElementById('pd-stats-btn');
+  if (statsBtn) statsBtn.textContent = '📊 Detaljna statistika';
+
   // Nacrtaj vlaku dugme — samo za aktivni projekat, ne za read-only naloge
   const drawBtn = document.getElementById('pd-draw-vlaka-btn');
   if (drawBtn) drawBtn.style.display = (isAkt && !isReadOnly()) ? '' : 'none';
@@ -6139,6 +6147,29 @@ function showProjektDetalji(id) {
   } else if (ukBtn) {
     ukBtn.style.display = 'none';
   }
+}
+
+// Detaljna statistika projekta u Projekat tabu — isti prikaz kao admin
+// "Upravljanje projektima" (KPI + tabela vlaka + lageri), iz lokalnih vlaka.
+function _pdToggleStats() {
+  const sec = document.getElementById('pd-stats-sec');
+  const btn = document.getElementById('pd-stats-btn');
+  if (!sec) return;
+  if (sec.style.display !== 'none') {
+    sec.style.display = 'none'; sec.innerHTML = '';
+    if (btn) btn.textContent = '📊 Detaljna statistika';
+    return;
+  }
+  const p = _projekti.find(x => x.id === _pdProjektId);
+  if (!p) return;
+  const rows = vlake
+    .filter(v => v.projektId === _pdProjektId && v.pts.length >= 2)
+    .map(v => ({ nm: v.nm, br: v.br, kr: v.kr, pts: v.pts, lager: v.lager, projektant_ime: v.projektantIme }));
+  sec.innerHTML = rows.length
+    ? _vlakeStatsSecsHtml(parseFloat(p.povrsina) || 0, rows)
+    : '<div style="font-size:12px;color:#64748b;text-align:center;padding:10px 0;">Nema snimljenih vlaka za ovaj projekat na ovom uređaju.</div>';
+  sec.style.display = '';
+  if (btn) btn.textContent = '📊 Sakrij statistiku';
 }
 
 function _odjeliForGj(gj) {
@@ -18955,63 +18986,20 @@ function _wxRestore() {
   _wxLoadPlaces();
 }
 
-function _pmBuildDetail(p, vlakeRows, logRows) {
-  // ── Vlake agregacija ──
-  const valid = vlakeRows.filter(r => (r.pts || []).length >= 2);
+// Zajedničke sekcije statistike vlaka: KPI grid + per-vlaka tabela (krakovi
+// ugniježđeni, lager badge) + tabela lagera. Koriste ih admin "Upravljanje
+// projektima" detalj i Projekat tab "Detaljna statistika".
+// rows: [{nm, br, kr, pts, lager, projektant_ime?, korisnik_id?, _enriched?}]
+function _vlakeStatsSecsHtml(pov, rows) {
+  const valid = rows.filter(r => (r.pts || []).length >= 2);
   const nV = valid.filter(r => (r.kr || 0) === 0).length;
   const nK = valid.filter(r => (r.kr || 0) > 0).length;
   let totalLen = 0, up = 0, down = 0;
   valid.forEach(r => { totalLen += calcL(r.pts); const e = calcElev(r.pts); up += e.up; down += e.down; });
-  const pov = parseFloat(p.povrsina) || 0;
   const gustoca = pov > 0 ? (totalLen / pov) : null; // m/ha
-
-  // ── Projektanti agregacija (dužina iz vlaka, dani/vrijeme iz loga) ──
-  const byP = {};
-  const ens = nm => { if (!byP[nm]) byP[nm] = { name: nm, len: 0, days: new Set(), activeMin: 0 }; return byP[nm]; };
-  valid.forEach(r => { const nm = r.projektant_ime || _pmUserName(r.korisnik_id); ens(nm).len += calcL(r.pts); });
-  logRows.forEach(r => { const nm = r.projektant || 'Nepoznat'; const e = ens(nm); if (r.datum) e.days.add(r.datum); if (r.active_min) e.activeMin += r.active_min; });
-  const projList = Object.values(byP).sort((a, b) => b.len - a.len);
-
-  // ── Vremenski tok ──
-  const logDates = [...new Set(logRows.map(r => r.datum).filter(Boolean))].sort();
-  const firstAct = logDates[0] || null;
-  const lastAct = logDates.length ? logDates[logDates.length - 1] : null;
-  const nDays = logDates.length;
-  const totalMin = logRows.reduce((s, r) => s + (r.active_min || 0), 0);
-  const totalHrs = totalMin ? (totalMin / 60).toFixed(1) + ' h' : '—';
-
-  // ── Dani rada (grupisano po datumu, najnoviji prvo) ──
-  const byDay = {};
-  logRows.forEach(r => {
-    if (!r.datum) return;
-    if (!byDay[r.datum]) byDay[r.datum] = [];
-    byDay[r.datum].push(r);
-  });
-  const dayKeys = Object.keys(byDay).sort((a, b) => b.localeCompare(a));
-
   const kpi = (val, lbl) => `<div class="pm-kpi"><div class="pm-kpi-val">${val}</div><div class="pm-kpi-lbl">${lbl}</div></div>`;
-  const row = (l, v) => `<div class="pm-row"><span class="pm-row-l">${l}</span><span class="pm-row-v">${v}</span></div>`;
-
-  const isAkt = p.id === _aktivniProjektId;
+  const projName = r => r.projektant_ime || (r.korisnik_id ? _pmUserName(r.korisnik_id) : '—');
   let html = '';
-
-  // Akcije
-  html += `<div class="pm-actions">
-    <button class="pm-act-btn" onclick="_pmShowOnMap()">🗺 Prikaži na karti</button>
-    <button class="pm-act-btn ${isAkt ? 'dis' : 'g'}" ${isAkt ? 'disabled' : 'onclick="_pmAktiviraj()"'}>${isAkt ? '✓ Aktivan' : '⚡ Aktiviraj'}</button>
-    <button class="pm-act-btn" onclick="_pmExportReport()">🖨 Izvještaj</button>
-    <button class="pm-act-btn" onclick="_pmNagibAnaliza()" style="background:#7c3aed;">📐 Analiza nagiba</button>
-  </div>`;
-
-  // Osnovno
-  html += `<div class="pm-sec">
-    <div class="pm-sec-t">📋 Osnovni podaci</div>
-    ${row('Gospodarska jedinica', p.gj ? _esc(p.gj) : '—')}
-    ${row('Odjel', _esc(p.odjel || '—'))}
-    ${row('Površina', pov > 0 ? pov.toLocaleString('bs-BA') + ' ha' : '—')}
-    ${row('Vlasnik projekta', _esc(_pmUserName(p.korisnik_id)))}
-    ${row('Datum kreiranja', fmtDate(p.datum))}
-  </div>`;
 
   // Vlake KPI
   html += `<div class="pm-sec">
@@ -19046,7 +19034,6 @@ function _pmBuildDetail(p, vlakeRows, logRows) {
     const vlRow = (r, indent) => {
       const len = calcL(r.pts);
       const el = calcElev(r.pts);
-      const proj = r.projektant_ime || _pmUserName(r.korisnik_id);
       const nm = _esc(r.nm || '?');
       const pre = indent ? '<span style="color:#475569;margin-right:2px;">└</span>' : '';
       const style = indent ? ' style="padding-left:16px;color:#94a3b8;"' : '';
@@ -19057,7 +19044,7 @@ function _pmBuildDetail(p, vlakeRows, logRows) {
         <td class="r">${fmtL(len)}</td>
         <td class="r">${el.up} m</td>
         <td class="r">${el.down} m</td>
-        <td class="r" style="font-size:11px;">${_esc(proj)}</td>
+        <td class="r" style="font-size:11px;">${_esc(projName(r))}</td>
       </tr>`;
     };
 
@@ -19097,11 +19084,69 @@ function _pmBuildDetail(p, vlakeRows, logRows) {
       html += `<tr>
         <td style="color:#fbbf24;font-weight:bold;">${_esc(r.lager)}</td>
         <td>${_esc(r.nm || '?')}</td>
-        <td class="r" style="font-size:11px;">${_esc(r.projektant_ime || _pmUserName(r.korisnik_id))}</td>
+        <td class="r" style="font-size:11px;">${_esc(projName(r))}</td>
       </tr>`;
     });
     html += `</tbody></table></div>`;
   }
+
+  return html;
+}
+
+function _pmBuildDetail(p, vlakeRows, logRows) {
+  // ── Vlake agregacija (za sekciju Projektanti; KPI/tabela/lageri su u helperu) ──
+  const valid = vlakeRows.filter(r => (r.pts || []).length >= 2);
+  const pov = parseFloat(p.povrsina) || 0;
+
+  // ── Projektanti agregacija (dužina iz vlaka, dani/vrijeme iz loga) ──
+  const byP = {};
+  const ens = nm => { if (!byP[nm]) byP[nm] = { name: nm, len: 0, days: new Set(), activeMin: 0 }; return byP[nm]; };
+  valid.forEach(r => { const nm = r.projektant_ime || _pmUserName(r.korisnik_id); ens(nm).len += calcL(r.pts); });
+  logRows.forEach(r => { const nm = r.projektant || 'Nepoznat'; const e = ens(nm); if (r.datum) e.days.add(r.datum); if (r.active_min) e.activeMin += r.active_min; });
+  const projList = Object.values(byP).sort((a, b) => b.len - a.len);
+
+  // ── Vremenski tok ──
+  const logDates = [...new Set(logRows.map(r => r.datum).filter(Boolean))].sort();
+  const firstAct = logDates[0] || null;
+  const lastAct = logDates.length ? logDates[logDates.length - 1] : null;
+  const nDays = logDates.length;
+  const totalMin = logRows.reduce((s, r) => s + (r.active_min || 0), 0);
+  const totalHrs = totalMin ? (totalMin / 60).toFixed(1) + ' h' : '—';
+
+  // ── Dani rada (grupisano po datumu, najnoviji prvo) ──
+  const byDay = {};
+  logRows.forEach(r => {
+    if (!r.datum) return;
+    if (!byDay[r.datum]) byDay[r.datum] = [];
+    byDay[r.datum].push(r);
+  });
+  const dayKeys = Object.keys(byDay).sort((a, b) => b.localeCompare(a));
+
+  const row = (l, v) => `<div class="pm-row"><span class="pm-row-l">${l}</span><span class="pm-row-v">${v}</span></div>`;
+
+  const isAkt = p.id === _aktivniProjektId;
+  let html = '';
+
+  // Akcije
+  html += `<div class="pm-actions">
+    <button class="pm-act-btn" onclick="_pmShowOnMap()">🗺 Prikaži na karti</button>
+    <button class="pm-act-btn ${isAkt ? 'dis' : 'g'}" ${isAkt ? 'disabled' : 'onclick="_pmAktiviraj()"'}>${isAkt ? '✓ Aktivan' : '⚡ Aktiviraj'}</button>
+    <button class="pm-act-btn" onclick="_pmExportReport()">🖨 Izvještaj</button>
+    <button class="pm-act-btn" onclick="_pmNagibAnaliza()" style="background:#7c3aed;">📐 Analiza nagiba</button>
+  </div>`;
+
+  // Osnovno
+  html += `<div class="pm-sec">
+    <div class="pm-sec-t">📋 Osnovni podaci</div>
+    ${row('Gospodarska jedinica', p.gj ? _esc(p.gj) : '—')}
+    ${row('Odjel', _esc(p.odjel || '—'))}
+    ${row('Površina', pov > 0 ? pov.toLocaleString('bs-BA') + ' ha' : '—')}
+    ${row('Vlasnik projekta', _esc(_pmUserName(p.korisnik_id)))}
+    ${row('Datum kreiranja', fmtDate(p.datum))}
+  </div>`;
+
+  // Vlake KPI + per-vlaka tabela + lageri (zajednički renderer s Projekat tabom)
+  html += _vlakeStatsSecsHtml(pov, vlakeRows);
 
   // Vremenski tok
   html += `<div class="pm-sec">
