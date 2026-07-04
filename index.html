@@ -2584,6 +2584,20 @@ table.ttm-tbl thead th.stick { z-index:4; }
 table.ttm-tbl tbody td.stick { background:#0b1220;font-weight:700;color:#f1f5f9; }
 table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 .ttm-foot { flex-shrink:0;padding:9px 16px;border-top:1px solid #14233c;font-size:11px;color:#64748b;background:#0b1220; }
+.ttm-colsbtn { flex-shrink:0;display:flex;align-items:center;gap:6px;background:#14233c;border:1px solid #1e3a5f;border-radius:9px;color:#a5b4fc;font-size:12px;font-weight:600;padding:8px 13px;cursor:pointer; }
+.ttm-colsbtn:active { opacity:0.7; }
+.ttm-tools { position:relative; }
+#ttm-cols-menu { position:absolute;top:calc(100% - 4px);right:14px;z-index:20;width:220px;max-height:52vh;overflow:auto;-webkit-overflow-scrolling:touch;background:#0f172a;border:1px solid #334155;border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,0.7);padding:8px; }
+#ttm-cols-menu .ttm-cm-hd { display:flex;gap:6px;margin-bottom:7px; }
+#ttm-cols-menu .ttm-cm-hd button { flex:1;padding:6px;background:#1e293b;border:1px solid #334155;border-radius:7px;color:#94a3b8;font-size:11px;font-weight:600;cursor:pointer; }
+#ttm-cols-menu .ttm-cm-hd button:active { opacity:0.7; }
+.ttm-col-item { display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px;cursor:pointer;font-size:12.5px;color:#e2e8f0;user-select:none; }
+.ttm-col-item:active { background:rgba(59,130,246,0.15); }
+@media (hover:hover){ .ttm-col-item:hover { background:rgba(59,130,246,0.10); } }
+.ttm-col-item .cb { font-size:15px;flex-shrink:0;width:17px;text-align:center; }
+.ttm-col-item.on .cb { color:#4ade80; }
+.ttm-col-item.off { color:#64748b; }
+.ttm-col-item.off .cb { color:#475569; }
 .tacka-popup-btn, .foto-popup-btn {
   background:#7f1d1d;border:none;color:#fca5a5;border-radius:4px;
   padding:3px 10px;cursor:pointer;font-size:11px;margin-top:6px;
@@ -4228,7 +4242,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.15.4';
+const APP_VER = 'v3.15.5';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -25919,6 +25933,8 @@ function closeTemModal() {
 let _temTblId = null;
 let _temTblSort = { col: null, dir: 1 };
 let _temTblQ = '';
+let _temTblSelById = {};      // id karte → Set izabranih kolona (default = sve)
+let _temTblColsOpen = false;  // da li je birač kolona otvoren
 const _TEM_TBL_MAX = 1200;   // perf kapa; pretraga sužava
 
 // Redoslijed kolona za tabelu: odjel/GJ prve, ostale u redoslijedu prvog pojavljivanja.
@@ -25938,29 +25954,107 @@ function _temTblCols(entry) {
   return { cols: [...head, ...rest], kOdjel, kGj };
 }
 
+// Set izabranih kolona za kartu (init = sve pri prvom otvaranju)
+function _temTblSelSet(entry) {
+  if (!_temTblSelById[entry.id]) _temTblSelById[entry.id] = new Set(_temTblCols(entry).cols);
+  return _temTblSelById[entry.id];
+}
+// Vidljive kolone = sve kolone filtrirane kroz izbor (čuva redoslijed)
+function _temTblVisibleCols(entry) {
+  const sel = _temTblSelSet(entry);
+  return _temTblCols(entry).cols.filter(c => sel.has(c));
+}
+
 function showTemTable(id) {
   const entry = _temById(id);
   if (!entry) return;
   _temTblId = id;
   _temTblSort = { col: null, dir: 1 };
   _temTblQ = '';
+  _temTblColsOpen = false;
   const s = document.getElementById('ttm-search'); if (s) s.value = '';
+  const menu = document.getElementById('ttm-cols-menu'); if (menu) menu.style.display = 'none';
+  _temTblSelSet(entry);   // osiguraj init izbora
   document.getElementById('ttm-name').textContent = entry.name;
   document.getElementById('tem-table-modal').style.display = 'flex';
   _temTblRender();
 }
 function closeTemTable() {
   document.getElementById('tem-table-modal').style.display = 'none';
+  _temTblColsOpen = false;
+  const menu = document.getElementById('ttm-cols-menu'); if (menu) menu.style.display = 'none';
   _temTblId = null;
 }
 
 function _temTblSortBy(ci) {
   const entry = _temById(_temTblId);
   if (!entry) return;
-  const col = _temTblCols(entry).cols[ci];
+  const col = _temTblVisibleCols(entry)[ci];
   if (!col) return;
   if (_temTblSort.col === col) _temTblSort.dir *= -1;
   else _temTblSort = { col, dir: 1 };
+  _temTblRender();
+}
+
+// ── Birač kolona ──────────────────────────────────────────────────────────────
+function _temTblColsMenu() {
+  _temTblColsOpen = !_temTblColsOpen;
+  const menu = document.getElementById('ttm-cols-menu');
+  if (!menu) return;
+  if (_temTblColsOpen) {
+    _temTblColsRenderMenu(); menu.style.display = 'block';
+    setTimeout(() => document.addEventListener('click', _temTblColsOutside), 0);
+  } else {
+    menu.style.display = 'none';
+    document.removeEventListener('click', _temTblColsOutside);
+  }
+}
+function _temTblColsOutside(e) {
+  const menu = document.getElementById('ttm-cols-menu');
+  const btn = document.getElementById('ttm-colsbtn');
+  if (!menu || menu.contains(e.target) || (btn && btn.contains(e.target))) return;
+  _temTblColsOpen = false;
+  menu.style.display = 'none';
+  document.removeEventListener('click', _temTblColsOutside);
+}
+function _temTblColsRenderMenu() {
+  const entry = _temById(_temTblId);
+  const menu = document.getElementById('ttm-cols-menu');
+  if (!entry || !menu) return;
+  const all = _temTblCols(entry).cols;
+  const sel = _temTblSelSet(entry);
+  const items = all.map((c, ci) => {
+    const on = sel.has(c);
+    return `<div class="ttm-col-item ${on ? 'on' : 'off'}" onclick="_temTblColToggle(${ci})">
+      <span class="cb">${on ? '☑' : '☐'}</span><span>${_escHtml(_temColLabel(entry, c))}</span>
+    </div>`;
+  }).join('');
+  menu.innerHTML = `<div class="ttm-cm-hd">
+      <button onclick="_temTblColsAll()">Sve</button>
+      <button onclick="_temTblColsNone()">Ništa</button>
+    </div>${items}`;
+}
+function _temTblColToggle(ci) {
+  const entry = _temById(_temTblId);
+  if (!entry) return;
+  const col = _temTblCols(entry).cols[ci];
+  const sel = _temTblSelSet(entry);
+  if (sel.has(col)) sel.delete(col); else sel.add(col);
+  _temTblColsRenderMenu();
+  _temTblRender();
+}
+function _temTblColsAll() {
+  const entry = _temById(_temTblId);
+  if (!entry) return;
+  _temTblSelById[entry.id] = new Set(_temTblCols(entry).cols);
+  _temTblColsRenderMenu();
+  _temTblRender();
+}
+function _temTblColsNone() {
+  const entry = _temById(_temTblId);
+  if (!entry) return;
+  _temTblSelById[entry.id] = new Set();
+  _temTblColsRenderMenu();
   _temTblRender();
 }
 function _temTblSearch(v) { _temTblQ = (v || '').trim().toLowerCase(); _temTblRender(); }
@@ -25975,9 +26069,21 @@ function _temTblRender() {
   const scroll = document.getElementById('ttm-scroll');
   const foot = document.getElementById('ttm-foot');
   if (!entry || !scroll) return;
-  const { cols, kOdjel } = _temTblCols(entry);
+  const allCols = _temTblCols(entry).cols;
+  const cols = _temTblVisibleCols(entry);   // samo izabrane
   const numSet = new Set(entry.cols);   // numeričke kolone
   const total = entry.features.length;
+
+  // Ažuriraj brojač na dugmetu "⚙ Kolone (N/M)"
+  const cbtn = document.getElementById('ttm-colsbtn');
+  if (cbtn) cbtn.textContent = `⚙ Kolone (${cols.length}/${allCols.length})`;
+
+  if (!cols.length) {
+    scroll.innerHTML = '<div style="padding:26px 18px;text-align:center;color:#64748b;font-size:13px;">Nijedna kolona nije odabrana.<br>Otvori <b style="color:#a5b4fc;">⚙ Kolone</b> i označi atribute.</div>';
+    document.getElementById('ttm-sub').textContent = `0/${allCols.length} kolona`;
+    foot.textContent = `${total} redova`;
+    return;
+  }
 
   // Redovi sa originalnim indeksom (za klik → zoom)
   let rows = entry.features.map((f, i) => ({ i, attrs: f.attrs }));
@@ -26035,7 +26141,7 @@ function _temTblRender() {
 
   scroll.innerHTML = `<table class="ttm-tbl"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
   scroll.scrollTop = 0;
-  document.getElementById('ttm-sub').textContent = `${cols.length} kolona`;
+  document.getElementById('ttm-sub').textContent = `${cols.length}/${allCols.length} kolona`;
   const capNote = rows.length > _TEM_TBL_MAX ? ` · prikazano prvih ${_TEM_TBL_MAX} (suzi pretragom)` : '';
   foot.textContent = `Prikazano ${shown.length} od ${total}${capNote}`;
 }
@@ -26059,7 +26165,8 @@ function _temTblRowClick(i) {
 function _temTblExport() {
   const entry = _temById(_temTblId);
   if (!entry) return;
-  const { cols } = _temTblCols(entry);
+  const cols = _temTblVisibleCols(entry);   // izvozi vidljive (izabrane) kolone
+  if (!cols.length) { showToast('⚠ Nijedna kolona nije odabrana'); return; }
   const esc = v => {
     const s = (v == null) ? '' : (typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(2) : String(v));
     return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -29843,7 +29950,9 @@ if (typeof AndroidDownload !== 'undefined') {
         <span style="color:#475569;font-size:13px;">🔍</span>
         <input id="ttm-search" type="text" placeholder="Pretraži atribute…" oninput="_temTblSearch(this.value)">
       </div>
+      <button class="ttm-colsbtn" id="ttm-colsbtn" onclick="_temTblColsMenu()">⚙ Kolone</button>
       <button class="ttm-csv" onclick="_temTblExport()">⬇ CSV</button>
+      <div id="ttm-cols-menu" style="display:none;"></div>
     </div>
     <div class="ttm-scroll" id="ttm-scroll"></div>
     <div class="ttm-foot" id="ttm-foot"></div>
