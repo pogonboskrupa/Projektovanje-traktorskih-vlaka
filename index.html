@@ -3695,7 +3695,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
             <div style="position:absolute;bottom:3px;left:50%;transform:translateX(-50%);font-size:9px;color:#64748b;">J</div>
             <div style="position:absolute;left:4px;top:50%;transform:translateY(-50%);font-size:9px;color:#64748b;">Z</div>
             <div style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:9px;color:#64748b;">I</div>
-            <div id="trn-compass-needle" style="position:absolute;top:50%;left:50%;width:3px;height:36px;background:linear-gradient(to top,#64748b 50%,#f87171 50%);transform-origin:bottom center;transform:translate(-50%,-100%) rotate(0deg);border-radius:2px;"></div>
+            <div id="trn-compass-needle" style="position:absolute;top:50%;left:50%;width:3px;height:36px;background:linear-gradient(to top,#64748b 50%,#f87171 50%);transform-origin:bottom center;transform:translate(-50%,-100%) rotate(0deg);border-radius:2px;transition:transform 0.18s linear;"></div>
             <div style="position:absolute;top:50%;left:50%;width:7px;height:7px;background:#e2e8f0;border-radius:50%;transform:translate(-50%,-50%);"></div>
           </div>
           <div>
@@ -4262,7 +4262,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.19.3';
+const APP_VER = 'v3.19.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -9418,7 +9418,10 @@ function terenUpdCompass() {
   }
   const h = Math.round(_compassHeading);
   // Igla pokazuje sjever relativno na orijentaciju uređaja
-  if (needle) needle.style.transform = `translate(-50%,-100%) rotate(${-h}deg)`;
+  if (needle) {
+    _compassRotNeedle = _angContinuity(_compassRotNeedle, -h);
+    needle.style.transform = `translate(-50%,-100%) rotate(${_compassRotNeedle}deg)`;
+  }
   if (hv) hv.textContent = h + '°';
   if (hd) hd.textContent = _azimutSmjer(h) + ' · azimut uređaja';
 }
@@ -9856,7 +9859,10 @@ let activeTool = 'select'; // 'select' | 'addline' | 'addpoint' | 'edit' | 'deln
 let editOn=false, mergeMode=false, mergeFirst=null;
 let editNodeMks=[], editMidMks=[], snapRingMk=null, snapTarget=null;
 let wid=null, lastP=null, posMk=null, posCr=null;
-let _compassHeading = null; // trenutni azimut telefona (0-360°, 0=sjever)
+let _compassHeading = null; // trenutni azimut telefona (0-360°, 0=sjever), niskopropusno zaglađen
+let _compassRotCone = 0;    // neomotana (kontinuirana) rotacija kupole na karti — sprječava "odmotavanje" kroz 350° na 359°→0° granici
+let _compassRotNeedle = 0;  // isto, za iglu na terenskom kompasu
+let _compassLastUpdT = 0;   // throttle senzor-eventova
 let kmlLs=[], kmlCI=0, _kmlEditIdx=-1;
 let _ozLocalSearch='', _ozLocalSort='recent';
 const _ozBucketExpanded = new Set();
@@ -13050,6 +13056,14 @@ function stopGPS() {
 // ── KOMPAS / SMJER TELEFONA ──────────────────────────────────────────────────
 let _compassConeOn = false;
 
+// Vrati novu neomotanu rotaciju najbližu prevAccum koja odgovara targetDeg (0-360)
+// — sprječava da CSS tranzicija "odmota" kroz ~350° kad ugao pređe granicu 359°→0°.
+function _angContinuity(prevAccum, targetDeg) {
+  const prevMod = ((prevAccum % 360) + 360) % 360;
+  const diff = ((targetDeg - prevMod + 540) % 360) - 180;
+  return prevAccum + diff;
+}
+
 function _updCompassOnMarker(heading) {
   if (_activeTab === 'teren') terenUpdCompass();
   if (!posMk) return;
@@ -13057,7 +13071,8 @@ function _updCompassOnMarker(heading) {
   if (!el) return;
   const svg = el.querySelector('#loc-svg');
   if (svg) {
-    svg.style.transform = `rotate(${heading}deg)`;
+    _compassRotCone = _angContinuity(_compassRotCone, heading);
+    svg.style.transform = `rotate(${_compassRotCone}deg)`;
     svg.style.transformOrigin = '16px 16px';
   }
   const arrow = el.querySelector('#loc-arrow');
@@ -13089,8 +13104,23 @@ function _onDeviceOrientation(e) {
     heading = (360 - e.alpha) % 360;
   }
   if (heading === null) return;
-  _compassHeading = heading;
-  _updCompassOnMarker(heading);
+
+  // Blagi throttle — senzor zna slati i preko 60 događaja/s, nepotrebno za kompas UI
+  const now = Date.now();
+  if (now - _compassLastUpdT < 60) return;
+  _compassLastUpdT = now;
+
+  // Niskopropusni filter (eksponencijalno zaglađivanje, kružno-svjesno) — sirovi
+  // magnetometar jitteruje +-nekoliko stepeni u mjestu, pa bez ovoga kupola/igla
+  // vidno "trepere". Kraća put (diff) umjesto sirove razlike izbjegava lažni
+  // veliki skok kad heading pređe 359°→0° granicu.
+  if (_compassHeading == null) {
+    _compassHeading = heading;
+  } else {
+    const diff = ((heading - _compassHeading + 540) % 360) - 180;
+    _compassHeading = (_compassHeading + diff * 0.25 + 360) % 360;
+  }
+  _updCompassOnMarker(_compassHeading);
 }
 
 // iOS: deviceorientation s webkitCompassHeading (kompas)
@@ -13309,14 +13339,14 @@ function onP(p) {
   // Marker pozicije (SVG s kompasom)
   if (!posMk) {
     const ico = L.divIcon({className:'', iconSize:[32,32], iconAnchor:[16,16],
-      html:`<svg id="loc-svg" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="-16 -16 32 32" style="overflow:visible;transform-origin:16px 16px;">
+      html:`<svg id="loc-svg" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="-16 -16 32 32" style="overflow:visible;transform-origin:16px 16px;transition:transform 0.18s linear;">
         <defs>
           <radialGradient id="loc-cone-grad" cx="50%" cy="100%" r="100%">
             <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.65"/>
             <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.12"/>
           </radialGradient>
         </defs>
-        <path id="loc-cone" d="M0,0 L-32,-90 A95,95 0 0,1 32,-90 Z" fill="url(#loc-cone-grad)" opacity="0" style="transition:opacity 0.3s;"/>
+        <path id="loc-cone" d="M0,0 L-76,-90 A118,118 0 0,1 76,-90 Z" fill="url(#loc-cone-grad)" opacity="0" style="transition:opacity 0.3s;"/>
         <polygon id="loc-arrow" points="0,-18 -6,-6 6,-6" fill="#3b82f6" opacity="0" style="transition:opacity 0.3s;"/>
         <circle cx="0" cy="0" r="8" fill="#3b82f6" stroke="#fff" stroke-width="2.5" style="filter:drop-shadow(0 0 5px #3b82f6);"/>
         <circle cx="0" cy="0" r="3" fill="#fff"/>
