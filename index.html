@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.21.1';
+const APP_VER = 'v3.21.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -9944,9 +9944,32 @@ function makeCachedTileLayer(cacheName) {
         return canvas;
       }
 
+      // Sinhroni placeholder: odmah nacrtaj zamućenog RODITELJA iz RAM keša.
+      // Tokom zoom in/out nova pločica inače ostane PROVIDNA dok async dohvat ne
+      // završi — Leaflet u međuvremenu ukloni pločice starog zooma pa kroz prazninu
+      // proviri pozadina pane-a ("crni/tamni bljesak"). Ovako je odmah popunjena.
+      let phDrawn = false;
+      for (let dz = 1; dz <= 4 && !phDrawn; dz++) {
+        const pz = coords.z - dz;
+        if (pz < 0) break;
+        const scale = 1 << dz;
+        const px = Math.floor(coords.x / scale), py = Math.floor(coords.y / scale);
+        let purl;
+        try { purl = this.getTileUrl({ x: px, y: py, z: pz }); } catch(e) { break; }
+        const pb = _tileBmpCache.get(purl);
+        if (pb) {
+          const sub = sz.x / scale;
+          ctx.imageSmoothingEnabled = true;
+          ctx.drawImage(pb, (coords.x - px * scale) * sub, (coords.y - py * scale) * sub, sub, sub, 0, 0, sz.x, sz.y);
+          ctx.imageSmoothingEnabled = false;
+          phDrawn = true;
+        }
+      }
+
       const drawBlob = (blob) => {
         if ('createImageBitmap' in window) {
           createImageBitmap(blob).then(bmp => {
+            ctx.clearRect(0, 0, sz.x, sz.y);   // ukloni placeholder prije prave pločice
             ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
             _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();  // D1-7
             done(null, canvas);
@@ -9954,7 +9977,7 @@ function makeCachedTileLayer(cacheName) {
         } else {
           const u = URL.createObjectURL(blob);
           const img = new Image();
-          img.onload = () => { ctx.drawImage(img, 0, 0, sz.x, sz.y); URL.revokeObjectURL(u); done(null, canvas); };
+          img.onload = () => { ctx.clearRect(0, 0, sz.x, sz.y); ctx.drawImage(img, 0, 0, sz.x, sz.y); URL.revokeObjectURL(u); done(null, canvas); };
           img.onerror = () => { URL.revokeObjectURL(u); done(null, canvas); };
           img.src = u;
         }
@@ -22159,9 +22182,11 @@ async function _guideFinish() {
   const profPts = hasElev ? res.pts : route.pts;
   const eta     = _guideEtaHtml(route.distM, route.durS, alts, hasElev, route.osrm);
 
-  // Sačuvaj u spisak ruta (za kasniji pregled/brisanje) — geometrija prorijeđena na ~200 tačaka
-  const step = Math.max(1, Math.ceil(route.pts.length / 200));
-  const savedPts = route.pts.filter((_, i) => i % step === 0 || i === route.pts.length - 1);
+  // Sačuvaj u spisak ruta (za kasniji pregled/brisanje). Douglas-Peucker s malom
+  // tolerancijom (~6 m) čuva OBLIK puta i u serpentinama — ranije uniformno
+  // prorjeđivanje na 200 tačaka je na dugim rutama sjeklo krivine i po 200+ m.
+  let savedPts = _guideSimplify(route.pts, 6);
+  if (savedPts.length > 1500) savedPts = _guideSimplify(route.pts, 15);
   _guideSaveRoute({
     id: 'r' + Date.now().toString(36),
     name: 'Ruta ' + new Date().toLocaleDateString('bs-BA', { day: 'numeric', month: 'numeric' }) + ' ' + new Date().toLocaleTimeString('bs-BA', { hour: '2-digit', minute: '2-digit' }),
@@ -22191,6 +22216,35 @@ function _guideEtaHtml(distM, durS, alts, hasElev, osrm) {
     `<span style="color:#94a3b8">🏁 Dolazak: <b style="color:#a78bfa">${arrTxt}</b></span>` +
     (hasElev ? `<span style="color:#94a3b8">⬆ Uspon: <b style="color:#e2e8f0">${Math.round(ascent)} m</b></span>` : '');
   return { totalMin, durTxt, arrTxt, html };
+}
+
+// Douglas-Peucker pojednostavljenje linije s tolerancijom u METRIMA (ekvirektangularna
+// projekcija oko prve tačke — dovoljno tačno za lokalne rute). Čuva oblik krivina.
+function _guideSimplify(pts, tolM) {
+  if (!pts || pts.length <= 2) return (pts || []).slice();
+  const lat0 = pts[0].la * Math.PI / 180;
+  const mx = 111320 * Math.cos(lat0), my = 110540;
+  const P = pts.map(p => ({ x: p.lo * mx, y: p.la * my }));
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  const tol2 = tolM * tolM;
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    if (b - a < 2) continue;
+    const ax = P[a].x, ay = P[a].y;
+    const dx = P[b].x - ax, dy = P[b].y - ay;
+    const len2 = dx * dx + dy * dy || 1;
+    let maxD = 0, idx = -1;
+    for (let i = a + 1; i < b; i++) {
+      const t = Math.max(0, Math.min(1, ((P[i].x - ax) * dx + (P[i].y - ay) * dy) / len2));
+      const qx = ax + t * dx - P[i].x, qy = ay + t * dy - P[i].y;
+      const d = qx * qx + qy * qy;
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (idx > 0 && maxD > tol2) { keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
 }
 
 // ── Spisak sačuvanih ruta (localStorage, pregled + brisanje) ──────────────────
