@@ -4264,7 +4264,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.19.0';
+const APP_VER = 'v3.19.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -20534,6 +20534,15 @@ function switchTab(tab) {
   // tabova gdje panel prekriva kartu, prikaži čim je karta stvarno na ekranu.
   const temLegendEl = document.getElementById('tem-legend');
   if (temLegendEl) temLegendEl.style.display = _mapFullScreen ? '' : 'none';
+  // Isto za legendu instaliranih overlay-a (ekspozicija padine, nadmorska visina) —
+  // #dem-legend je statičan element pa se ne uklanja iz DOM-a; van Karte/Mjerenja
+  // ga sakrivamo eksplicitno, a pri povratku prepuštamo _demLegendUpdate da odluči
+  // treba li se prikazati (zavisi od toga da li je neki overlay uključen).
+  const demLegendEl = document.getElementById('dem-legend');
+  if (demLegendEl) {
+    if (_mapFullScreen) { if (typeof _demLegendUpdate === 'function') _demLegendUpdate(); }
+    else demLegendEl.style.display = 'none';
+  }
 }
 
 // =====================================================================
