@@ -2186,23 +2186,24 @@ select:focus { outline:none; border-color:#3b82f6; }
 }
 #doz-panel-list, #doz-panel-detail { display:flex; flex-direction:column; flex:1; }
 .doz-odjel-card {
-  background:#0f172a; border:1px solid #1e293b;
-  border-radius:8px; padding:10px 12px; margin-bottom:7px;
-  cursor:pointer; transition:border-color 0.15s;
+  background:linear-gradient(160deg,#111d33,#0d1526); border:1px solid #1e3a5f;
+  border-radius:12px; padding:11px 13px; margin-bottom:8px;
+  cursor:pointer; transition:border-color 0.15s, background 0.15s;
+  border-left:3px solid #1e3a5f;
 }
 .doz-odjel-card:hover { border-color:#4ade80; }
-.doz-odjel-card.selected { border-color:#4ade80; background:rgba(74,222,128,0.06); }
-.doz-odjel-name { font-size:13px; font-weight:700; color:#e2e8f0; margin-bottom:5px; }
+.doz-odjel-card.selected { border-color:#4ade80; border-left-color:#4ade80; background:linear-gradient(160deg,#0f2a1a,#0c1f14); }
+.doz-odjel-name { font-size:13.5px; font-weight:700; color:#e2e8f0; margin-bottom:5px; }
 .doz-odjel-meta { display:flex; gap:8px; align-items:center; font-size:11px; color:#64748b; flex-wrap:wrap; }
-.doz-status-chip { padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600; }
-.doz-status-chip.active    { background:rgba(74,222,128,0.12);  color:#4ade80; }
-.doz-status-chip.completed { background:rgba(96,165,250,0.12);  color:#60a5fa; }
-.doz-status-chip.paused    { background:rgba(251,191,36,0.12);  color:#fbbf24; }
+.doz-status-chip { padding:2px 9px; border-radius:999px; font-size:10px; font-weight:700; letter-spacing:0.3px; }
+.doz-status-chip.active    { background:rgba(74,222,128,0.14);  color:#4ade80; border:1px solid rgba(74,222,128,0.3); }
+.doz-status-chip.completed { background:rgba(96,165,250,0.14);  color:#60a5fa; border:1px solid rgba(96,165,250,0.3); }
+.doz-status-chip.paused    { background:rgba(251,191,36,0.14);  color:#fbbf24; border:1px solid rgba(251,191,36,0.3); }
 .doz-detail-hdr {
-  display:flex; align-items:center; gap:10px; padding:10px 14px;
-  background:#0f172a; border-bottom:2px solid #0f3460; flex-shrink:0;
+  display:flex; align-items:center; gap:10px; padding:11px 14px;
+  background:linear-gradient(135deg,#132a45,#0f172a); border-bottom:2px solid #1e3a5f; flex-shrink:0;
 }
-.doz-detail-hdr h3 { margin:0; font-size:14px; color:#fbbf24; flex:1; word-break:break-word; }
+.doz-detail-hdr h3 { margin:0; font-size:14.5px; color:#fbbf24; flex:1; word-break:break-word; }
 .doz-back-btn { background:none; border:none; color:#4ade80; font-size:22px; cursor:pointer; padding:0; line-height:1; }
 .doz-detail-meta { font-size:11px; color:#64748b; white-space:nowrap; }
 .doz-member-row { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #1e293b; font-size:12px; }
@@ -2213,8 +2214,8 @@ select:focus { outline:none; border-color:#3b82f6; }
 .doz-marking-chip { padding:2px 9px; border-radius:10px; border:1px solid; font-size:11px; font-weight:600; white-space:nowrap; }
 .doz-empty { color:#475569; font-size:12px; text-align:center; padding:16px 0; }
 .doz-zone-row {
-  display:flex; align-items:center; gap:9px; padding:7px 9px; margin-top:5px;
-  background:rgba(15,23,42,0.7); border:1px solid #1e293b; border-radius:7px; cursor:pointer;
+  display:flex; align-items:center; gap:9px; padding:8px 10px; margin-top:6px;
+  background:linear-gradient(160deg,#111d33,#0d1526); border:1px solid #1e3a5f; border-radius:10px; cursor:pointer;
 }
 .doz-zone-row:active { border-color:#4ade80; }
 .doz-zone-emoji { font-size:16px; flex-shrink:0; }
@@ -4263,7 +4264,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.18.0';
+const APP_VER = 'v3.19.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -8781,6 +8782,8 @@ function _onRtStatus(status) {
     // (pozadina/sleep). Svaki (re)join → povuci svježe vlake kolega da se prikažu
     // čim ima konekcije, bez čekanja na promjenu projekta.
     _schedKolegeFullSync(1200);
+    // Isto za doznaku: obnovi per-projekat kanal (ako je mrtav) + povuci pojaseve
+    try { _dozEnsureChannel(); _dozSchedCatchup(1500); } catch(e) {}
   } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
     _updSyncDot('err');
     // Auto-reconnect nakon 8s
@@ -12282,6 +12285,8 @@ document.addEventListener('visibilitychange', async () => {
         try {
           if (!_rtVlakeChannel || _rtVlakeChannel.state !== 'joined') sbStartRealtime();
           else _schedKolegeFullSync(800);
+          // Doznaka: obnovi kanal otvorenog odjela + povuci svježe pojaseve kolega
+          _dozEnsureChannel(); _dozSchedCatchup(1000);
         } catch(e) {}
       }
     }
@@ -12317,6 +12322,8 @@ setInterval(async () => {
   try {
     if (typeof _rtVlakeChannel !== 'undefined' && (!_rtVlakeChannel || _rtVlakeChannel.state !== 'joined')) sbStartRealtime();
   } catch(e) {}
+  // Doznaka per-projekat kanal — isti tretman (SUBSCRIBED okida catch-up pojaseva)
+  try { _dozEnsureChannel(); } catch(e) {}
 }, 60000);
 
 function _updWakeLockIcon() {
@@ -27215,7 +27222,32 @@ function _dozSubProject(projectId) {
         _dozTrackRefreshTimer = setTimeout(() => dozLoadLayers(projectId).then(() => dozRenderDetail()), 5000);
       }
     })
-    .subscribe();
+    .subscribe(status => {
+      // Catch-up po (re)joinu: realtime NE reproducira događaje propuštene dok je
+      // socket bio pao — povuci svježe pojaseve/oznake kolega čim ima konekcije.
+      if (status === 'SUBSCRIBED') _dozSchedCatchup(1200);
+    });
+}
+
+// Throttled reload doznaka slojeva otvorenog odjela (pandan _schedKolegeFullSync za vlake)
+let _dozCatchupTimer = null;
+function _dozSchedCatchup(delay = 1200) {
+  if (!_dozSelId) return;
+  clearTimeout(_dozCatchupTimer);
+  _dozCatchupTimer = setTimeout(() => {
+    _dozCatchupTimer = null;
+    if (!_dozSelId || !navigator.onLine) return;
+    dozLoadLayers(_dozSelId).then(() => { try { dozRenderDetail(); } catch(e) {} }).catch(() => {});
+  }, delay);
+}
+
+// Samoizlječenje per-projekat doznaka kanala: sbStartRealtime ga NE obnavlja
+// (nije u _sbRemoveRtChannels), pa poslije pada socketa može ostati mrtav.
+function _dozEnsureChannel() {
+  if (!_dozSelId) return;
+  try {
+    if (!_dozActiveChannel || _dozActiveChannel.state !== 'joined') _dozSubProject(_dozSelId);
+  } catch(e) {}
 }
 
 // ─── Select Odjel ────────────────────────────────────────────────
@@ -27932,15 +27964,20 @@ function dozRenderDetail() {
     const totalTrackLen = Object.values(_dozTrackLenByUser()).reduce((s, v) => s + v, 0);
     const nPts = _dozTracks.length;
     const created = odjel.created_at ? fmtDateShort(odjel.created_at) : '—';
+    const kpi = (val, lbl, col) => `<div class="pm-kpi"><div class="pm-kpi-val" style="font-size:14px;${col ? 'color:' + col + ';' : ''}">${val}</div><div class="pm-kpi-lbl">${lbl}</div></div>`;
     statsEl.innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;">
-        <span>📐 Površina odjela:</span><b style="color:#e2e8f0;">${(totalHa || bndHa).toFixed(2)} ha</b>
-        <span>🎯 Pojasevi pokrivaju:</span><b style="color:#4ade80;">${bandHa.toFixed(2)} ha (${bandPct}%)</b>
-        <span>🗺 Obilježene zone:</span><b style="color:#e2e8f0;">${_dozMarkings.length} (${markedHa.toFixed(2)} ha)</b>
-        <span>👥 Projektanti:</span><b style="color:#e2e8f0;">${_dozMembers.length}</b>
-        <span>👣 GPS tragovi:</span><b style="color:#e2e8f0;">${fmtL(totalTrackLen)} (${nPts} tač.)</b>
-        <span>📅 Kreiran:</span><b style="color:#e2e8f0;">${created}</b>
-      </div>`;
+      <div class="pm-kpi-grid" style="grid-template-columns:repeat(3,1fr);">
+        ${kpi((totalHa || bndHa).toFixed(1) + ' ha', 'Površina')}
+        ${kpi(bandHa.toFixed(1) + ' ha', 'Pojasevi (' + bandPct + '%)', '#4ade80')}
+        ${kpi(_dozMarkings.length, 'Zone · ' + markedHa.toFixed(1) + ' ha')}
+        ${kpi(_dozMembers.length, 'Projektanata')}
+        ${kpi(fmtL(totalTrackLen), 'GPS trag · ' + nPts + ' tač.')}
+        ${kpi(created, 'Kreiran')}
+      </div>
+      ${bndHa > 0 ? `<div style="margin-top:8px;height:7px;background:#1e293b;border-radius:4px;overflow:hidden;">
+        <div style="height:100%;width:${Math.min(100, bandPct)}%;background:linear-gradient(90deg,#166534,#4ade80);border-radius:4px;transition:width 0.4s;"></div>
+      </div>
+      <div style="font-size:10px;color:#64748b;margin-top:3px;">Pokrivenost odjela pojasevima: ${bandPct}%</div>` : ''}`;
   }
 
   // Members — sa dužinom pređenog GPS traga
@@ -28295,7 +28332,7 @@ function dozStopGPS() {
   if (!recOn) _releaseWakeLock();
   try { localStorage.removeItem(_DOZ_LIVE_KEY); } catch {}
   const btn = document.getElementById('doz-gps-btn');
-  if (btn) { btn.textContent = '📍 Počni GPS snimanje'; btn.style.background=''; btn.style.color=''; btn.style.borderColor=''; }
+  if (btn) { btn.textContent = '📍 Počni GPS'; btn.style.background=''; btn.style.color=''; btn.style.borderColor=''; }
   const pauseBtn = document.getElementById('doz-gps-pause');
   if (pauseBtn) pauseBtn.style.display = 'none';
   document.getElementById('doz-gps-status').style.display = 'none';
@@ -29053,7 +29090,7 @@ function dozBackToList() {
   _dozSubProject(null);
   dozStopGPS();
   dozCancelDraw();
-  if (_dozVlakeVisible) { _dozVlakeVisible = true; dozToggleVlake(); }
+  if (_dozVlakeVisible) dozToggleVlake();   // toggle sam gasi flag i skida slojeve
   dozClearBuf();
   [_dozBoundaryLayer, _dozTracksLayer, _dozMarkingsLayer, _dozBandsLayer, _dozGpsTrackLayer].forEach(l => { if (l) map.removeLayer(l); });
   _dozBoundaryLayer = _dozTracksLayer = _dozMarkingsLayer = _dozBandsLayer = _dozGpsTrackLayer = null;
