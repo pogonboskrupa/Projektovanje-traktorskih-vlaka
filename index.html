@@ -2497,10 +2497,8 @@ select:focus { outline:none; border-color:#3b82f6; }
 #ab-tacka { color: #92400e; }
 #ab-loc   .ab-ico { background: #dbeafe; color: #2563eb; }
 #ab-loc   { color: #1d4ed8; }
-#ab-kompas .ab-ico { background: #fef3c7; color: #d97706; }
-#ab-kompas { color: #92400e; }
-#ab-kompas.active .ab-ico { background: #f59e0b; color: #fff; box-shadow: 0 0 0 3px rgba(245,158,11,0.25); }
-#ab-kompas.active { color: #f59e0b; }
+#ab-centar .ab-ico { background: #d1fae5; color: #059669; }
+#ab-centar { color: #047857; }
 #route-suggest-btn.active { background:#4c1d95 !important; border-color:#7c3aed !important; color:#c4b5fd !important; box-shadow:0 0 0 2px rgba(167,139,250,0.3); }
 #ab-krak-l .ab-ico { background: #cffafe; color: #0891b2; }
 #ab-krak-l { color: #0e7490; }
@@ -4264,7 +4262,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.19.2';
+const APP_VER = 'v3.19.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -13071,8 +13069,6 @@ function _updCompassOnMarker(heading) {
 function togCompassCone() {
   _compassConeOn = !_compassConeOn;
   if (_compassConeOn && !gpsOn) startGPS();
-  const btn = document.getElementById('ab-kompas');
-  if (btn) btn.classList.toggle('active', _compassConeOn);
   if (posMk) {
     const el = posMk.getElement();
     if (el) {
@@ -20391,7 +20387,7 @@ function _updFabVisibility() {
 
   if (!inRec && inTrag) {
     show('brec', false); show('btrag', false); show('btragovi', false); show('ab-izmjeri-wrap', false);
-    show('ab-kompas', false);
+    show('ab-centar', false);
     show('ab-nazad',false); show('ab-krak-l',false); show('ab-krak-d',false);
     show('ab-pauza',false); show('ab-kraj',false);
     show('ab-trag-pauza', true); show('ab-trag-kraj', true); show('ab-trag-stats', true);
@@ -20406,7 +20402,7 @@ function _updFabVisibility() {
       show('brec', false);
            show('btragovi', true);   // terenski profili: "Tragovi" otvara panel sa snimanjem + bazom
       show('ab-izmjeri-wrap', true);
-      show('ab-kompas', true);
+      show('ab-centar', true);
     } else {
       // Sa projektom: Snimi vlaku se pojavi, Snimi trag + Izmjeri nestanu.
       // Bez projekta: Snimi trag + Izmjeri. Tragovi dugme uvijek dostupno.
@@ -20414,7 +20410,7 @@ function _updFabVisibility() {
 
       show('btragovi', !ro);
       show('ab-izmjeri-wrap', !hasProj && !ro);
-      show('ab-kompas', false);
+      show('ab-centar', false);
     }
     show('ab-nazad',false); show('ab-krak-l',false); show('ab-krak-d',false);
     show('ab-pauza',false); show('ab-kraj',  false);
@@ -20423,7 +20419,7 @@ function _updFabVisibility() {
   }
 
   show('brec', false); show('btrag', false); show('btragovi', false); show('ab-izmjeri-wrap', false);
-  show('ab-kompas', false);
+  show('ab-centar', false);
 
   if (isPaused) {
     // Pauzirani mod: [⏹ Završi] [▶ Nastavi] + [↩ Vrati se] ako u kraku
@@ -30746,9 +30742,9 @@ if (typeof AndroidDownload !== 'undefined') {
         border-radius:10px;color:#1d4ed8;font-size:12px;font-weight:700;cursor:pointer;">🎯 Centriraj na moju poziciju</button>
     </div>
   </div>
-  <button id="ab-kompas" onclick="togCompassCone()" title="Prikaži smjer na karti" style="display:none;">
-    <span class="ab-ico">🧭</span>
-    <span>Kompas</span>
+  <button id="ab-centar" onclick="fabLokacija()" title="Centriraj kartu na moju lokaciju" style="display:none;">
+    <span class="ab-ico">🎯</span>
+    <span>Centar</span>
   </button>
   <!-- Trag snimanje kontrole -->
   <button id="ab-trag-pauza" onclick="togTragPause()" title="Pauziraj / Nastavi trag" style="display:none;">
