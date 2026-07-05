@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.20.0';
+const APP_VER = 'v3.21.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5383,6 +5383,7 @@ async function _wipeAllLocalUserData() {
   } catch(e) {}
   localStorage.removeItem(_WX_PLACES_KEY);
   localStorage.removeItem(_WX_CACHE_KEY);
+  localStorage.removeItem(_GUIDE_ROUTES_KEY);  // sačuvane rute "Vodi me do lokacije"
   // Tematske .gpkg karte — lokalni per-korisnik sadržaj (ista klasa kao KML):
   // obriši sve IDB fajlove iz registra + registar + legacy ključeve
   try {
@@ -21986,6 +21987,7 @@ let _guideResultLayer = null; // [line, mStart, mEnd] zadnje izračunate rute �
 
 function showGuideChoice() {
   document.getElementById('guide-choice-modal').style.display = 'flex';
+  _guideRenderRoutes();
 }
 function closeGuideChoice() {
   document.getElementById('guide-choice-modal').style.display = 'none';
@@ -22080,52 +22082,139 @@ function _guideCancel(silent) {
   if (!silent) showToast('✕ Otkazano');
 }
 
-async function _guideFinish() {
-  if (_guidePts.length < 2) { showToast('⚠ Potrebne su bar 2 tačke (start i odredište)'); return; }
-  const pts = _guidePts.slice();
-  const totalD = calcL(pts);
-  showToast('⏳ Računam profil i vrijeme dolaska…');
+// OSRM ruta PUTEM (kombi/auto do terena) kroz tapnute tačke kao waypoint-e.
+// Javni OSRM demo server, driving profil; vraća geometriju puta + dužinu + trajanje vožnje.
+async function _guideOsrmRoute(pts) {
+  try {
+    const coords = pts.map(p => p.lo.toFixed(6) + ',' + p.la.toFixed(6)).join(';');
+    const ctl = new AbortController();
+    const tmo = setTimeout(() => ctl.abort(), 12000);
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`, { signal: ctl.signal });
+    clearTimeout(tmo);
+    if (!r.ok) return null;
+    const d = await r.json();
+    const rt = d.routes && d.routes[0];
+    if (d.code !== 'Ok' || !rt || !rt.geometry?.coordinates?.length) return null;
+    return {
+      pts: rt.geometry.coordinates.map(c => ({ la: c[1], lo: c[0] })),
+      distM: rt.distance, durS: rt.duration, osrm: true
+    };
+  } catch(e) { return null; }
+}
 
-  let res = null;
-  try { res = await _fetchProfileElev(pts); } catch(e) {}
-
-  _guideCancel(true);   // ukloni banner + privremene markere/liniju — rezultat se crta ispod
-
+// Nacrtaj rezultat rute na karti (i za svježe izračunatu i za sačuvanu iz spiska)
+function _guideDrawResult(routePts) {
   _guideClearResult();
-  const ll = pts.map(p => [p.la, p.lo]);
-  const line   = L.polyline(ll, { color: '#a78bfa', weight: 4, opacity: 0.9, dashArray: '8,6' }).addTo(map);
+  const ll = routePts.map(p => [p.la, p.lo]);
+  const line   = L.polyline(ll, { color: '#a78bfa', weight: 4, opacity: 0.9 }).addTo(map);
   const mStart = L.circleMarker(ll[0], { radius: 7, color: '#4ade80', fillColor: '#4ade80', fillOpacity: 1 }).addTo(map).bindTooltip('START', { permanent: true, direction: 'top' });
   const mEnd   = L.circleMarker(ll[ll.length - 1], { radius: 7, color: '#f87171', fillColor: '#f87171', fillOpacity: 1 }).addTo(map).bindTooltip('ODREDIŠTE', { permanent: true, direction: 'top' });
   _guideResultLayer = [line, mStart, mEnd];
   map.fitBounds(line.getBounds(), { padding: [40, 40] });
-
-  const hasElev = !!res;
-  const alts    = hasElev ? res.alts : pts.map(() => 0);
-  const profPts = hasElev ? res.pts : pts;
-  const eta     = _guideEtaEstimate(totalD, alts, hasElev);
-
-  _renderElevProfile('🧭 Vodi me do lokacije', profPts, alts, hasElev ? 'model terena' : 'nedostupno', eta.html);
-  showToast(`✓ Ruta: ${fmtL(totalD)} · ${eta.durTxt}`);
 }
 
-// Procjena vremena hoda: baza 4 km/h (šumski/neravan teren) + Naismith-ovo pravilo
-// za uspon (+10 min po 100 m uspona). Silazak se ne ubrzava (oprez na neravnom terenu).
-function _guideEtaEstimate(distM, alts, hasElev) {
+async function _guideFinish() {
+  if (_guidePts.length < 2) { showToast('⚠ Potrebne su bar 2 tačke (start i odredište)'); return; }
+  const tapped = _guidePts.slice();
+  showToast('⏳ Tražim rutu putem…');
+
+  // Ruta PUTEM preko OSRM-a; bez mreže/rute → zračna linija kroz tapnute tačke
+  let route = navigator.onLine ? await _guideOsrmRoute(tapped) : null;
+  if (!route) {
+    route = { pts: tapped, distM: calcL(tapped), durS: null, osrm: false };
+    showToast('⚠ Ruta putem nedostupna — prikazujem zračnu liniju');
+  }
+
+  _guideCancel(true);   // ukloni banner + privremene markere/liniju — rezultat se crta ispod
+  _guideDrawResult(route.pts);
+
+  let res = null;
+  try { res = await _fetchProfileElev(route.pts); } catch(e) {}
+  const hasElev = !!res;
+  const alts    = hasElev ? res.alts : route.pts.map(() => 0);
+  const profPts = hasElev ? res.pts : route.pts;
+  const eta     = _guideEtaHtml(route.distM, route.durS, alts, hasElev, route.osrm);
+
+  // Sačuvaj u spisak ruta (za kasniji pregled/brisanje) — geometrija prorijeđena na ~200 tačaka
+  const step = Math.max(1, Math.ceil(route.pts.length / 200));
+  const savedPts = route.pts.filter((_, i) => i % step === 0 || i === route.pts.length - 1);
+  _guideSaveRoute({
+    id: 'r' + Date.now().toString(36),
+    name: 'Ruta ' + new Date().toLocaleDateString('bs-BA', { day: 'numeric', month: 'numeric' }) + ' ' + new Date().toLocaleTimeString('bs-BA', { hour: '2-digit', minute: '2-digit' }),
+    ts: Date.now(), pts: savedPts,
+    profPts: hasElev ? profPts : null, alts: hasElev ? alts : null,
+    distM: route.distM, durS: route.durS, osrm: route.osrm
+  });
+
+  _renderElevProfile('🧭 Ruta do lokacije', profPts, alts, hasElev ? 'model terena' : 'nedostupno', eta.html);
+  showToast(`✓ ${route.osrm ? 'Ruta putem' : 'Zračna linija'}: ${fmtL(route.distM)} · ${eta.durTxt}`);
+}
+
+// ETA red za profil-statistiku. OSRM daje trajanje VOŽNJE; bez OSRM-a (zračna linija)
+// gruba procjena na 30 km/h uz napomenu.
+function _guideEtaHtml(distM, durS, alts, hasElev, osrm) {
   let ascent = 0;
   if (hasElev) for (let i = 1; i < alts.length; i++) { const d = alts[i] - alts[i - 1]; if (d > 0) ascent += d; }
-  const baseMin   = (distM / 1000) / 4 * 60;
-  const climbMin  = (ascent / 100) * 10;
-  const totalMin  = Math.max(1, Math.round(baseMin + climbMin));
+  const totalMin = durS != null ? Math.max(1, Math.round(durS / 60))
+                                : Math.max(1, Math.round((distM / 1000) / 30 * 60));
   const h = Math.floor(totalMin / 60), m = totalMin % 60;
   const durTxt  = h > 0 ? `${h} h ${m} min` : `${m} min`;
-  const arrival = new Date(Date.now() + totalMin * 60000);
-  const arrTxt  = arrival.toLocaleTimeString('bs-BA', { hour: '2-digit', minute: '2-digit' });
-  const ascNote = hasElev ? '' : ' <span style="color:#64748b;">(bez podataka o usponu)</span>';
+  const arrTxt  = new Date(Date.now() + totalMin * 60000).toLocaleTimeString('bs-BA', { hour: '2-digit', minute: '2-digit' });
+  const note = osrm ? '' : ' <span style="color:#64748b;">(zračna linija — gruba procjena)</span>';
   const html =
-    `<span style="color:#94a3b8">🕐 Trajanje: <b style="color:#e2e8f0">${durTxt}</b>${ascNote}</span>` +
+    `<span style="color:#94a3b8">📏 Ruta: <b style="color:#e2e8f0">${fmtL(distM)}</b></span>` +
+    `<span style="color:#94a3b8">🚙 Vožnja: <b style="color:#e2e8f0">${durTxt}</b>${note}</span>` +
     `<span style="color:#94a3b8">🏁 Dolazak: <b style="color:#a78bfa">${arrTxt}</b></span>` +
     (hasElev ? `<span style="color:#94a3b8">⬆ Uspon: <b style="color:#e2e8f0">${Math.round(ascent)} m</b></span>` : '');
   return { totalMin, durTxt, arrTxt, html };
+}
+
+// ── Spisak sačuvanih ruta (localStorage, pregled + brisanje) ──────────────────
+const _GUIDE_ROUTES_KEY = 'tvlake_guide_routes';
+function _guideRoutesLoad() {
+  try { return JSON.parse(localStorage.getItem(_GUIDE_ROUTES_KEY) || '[]') || []; } catch { return []; }
+}
+function _guideRoutesStore(arr) {
+  try { localStorage.setItem(_GUIDE_ROUTES_KEY, JSON.stringify(arr)); } catch(e) {}
+}
+function _guideSaveRoute(route) {
+  const arr = _guideRoutesLoad();
+  arr.unshift(route);
+  while (arr.length > 20) arr.pop();   // kapa — najstarije ispadaju
+  _guideRoutesStore(arr);
+}
+function _guideDeleteRoute(id) {
+  _guideRoutesStore(_guideRoutesLoad().filter(r => r.id !== id));
+  _guideRenderRoutes();
+  showToast('🗑 Ruta obrisana');
+}
+function _guideViewRoute(id) {
+  const r = _guideRoutesLoad().find(x => x.id === id);
+  if (!r || !r.pts?.length) return;
+  closeGuideChoice();
+  switchTab('karta');
+  _guideDrawResult(r.pts);
+  const hasElev = !!(r.alts && r.profPts);
+  const eta = _guideEtaHtml(r.distM, r.durS, r.alts || [], hasElev, r.osrm);
+  _renderElevProfile(r.name, hasElev ? r.profPts : r.pts, hasElev ? r.alts : r.pts.map(() => 0), hasElev ? 'model terena' : 'nedostupno', eta.html);
+}
+function _guideRenderRoutes() {
+  const el = document.getElementById('guide-routes-list');
+  if (!el) return;
+  const arr = _guideRoutesLoad();
+  if (!arr.length) { el.innerHTML = '<div style="font-size:11px;color:#475569;text-align:center;padding:8px 0;">Nema sačuvanih ruta.</div>'; return; }
+  el.innerHTML = arr.map(r => {
+    const durMin = r.durS != null ? Math.round(r.durS / 60) : null;
+    const meta = `${fmtL(r.distM || 0)}${durMin != null ? ' · 🚙 ' + (durMin >= 60 ? Math.floor(durMin / 60) + ' h ' + (durMin % 60) + ' min' : durMin + ' min') : ''}${r.osrm ? '' : ' · zračna'}`;
+    return `<div style="display:flex;align-items:center;gap:8px;background:#16213e;border:1px solid #1e3a5f;border-radius:9px;padding:8px 10px;margin-bottom:6px;">
+      <div style="flex:1;min-width:0;cursor:pointer;" onclick="_guideViewRoute('${r.id}')">
+        <div style="font-size:12.5px;font-weight:600;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🧭 ${_escHtml(r.name || 'Ruta')}</div>
+        <div style="font-size:10.5px;color:#64748b;">${meta}</div>
+      </div>
+      <button onclick="_guideViewRoute('${r.id}')" style="flex-shrink:0;background:#14233c;border:1px solid #1e3a5f;border-radius:7px;color:#7dd3fc;font-size:12px;padding:6px 9px;cursor:pointer;">👁</button>
+      <button onclick="_guideDeleteRoute('${r.id}')" style="flex-shrink:0;background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:7px;color:#f87171;font-size:12px;padding:6px 9px;cursor:pointer;">🗑</button>
+    </div>`;
+  }).join('');
 }
 
 // ─── OFFLINE DEM GRID (keširanje visina odjela) ────────────────────────────────
@@ -30699,13 +30788,17 @@ if (typeof AndroidDownload !== 'undefined') {
       <h3 style="margin:0;font-size:15px;color:#a78bfa;">🧭 Vodi me do lokacije</h3>
       <button onclick="closeGuideChoice()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
     </div>
-    <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.5;">Tapkaš tačke na karti — možeš dodati međutačke. Na kraju vidiš dužinu, profil visina, nagib i procjenu vremena dolaska.</div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.5;">Za odlazak kombijem/autom do terena — ruta ide <b style="color:#e2e8f0;">putem</b> (OSRM). Tapni tačke na karti (može i međutačke); dobijaš dužinu, profil, nagib i vrijeme dolaska.</div>
     <button onclick="_guideStart(true)" style="width:100%;padding:13px;margin-bottom:9px;background:linear-gradient(135deg,#1d4ed8,#2563eb);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;text-align:left;display:flex;align-items:center;gap:10px;">
       <span style="font-size:20px;">📍</span><span>Od moje lokacije<br><span style="font-size:11px;font-weight:400;opacity:0.85;">Start = trenutna GPS pozicija</span></span>
     </button>
     <button onclick="_guideStart(false)" style="width:100%;padding:13px;background:linear-gradient(135deg,#059669,#10b981);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;text-align:left;display:flex;align-items:center;gap:10px;">
       <span style="font-size:20px;">📌</span><span>Od tačke do tačke<br><span style="font-size:11px;font-weight:400;opacity:0.85;">Sam biraš početak i kraj</span></span>
     </button>
+    <div style="margin-top:14px;border-top:1px solid #1e3a5f;padding-top:11px;">
+      <div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:0.6px;text-transform:uppercase;margin-bottom:7px;">📋 Sačuvane rute</div>
+      <div id="guide-routes-list" style="max-height:38vh;overflow-y:auto;"></div>
+    </div>
   </div>
 </div>
 
