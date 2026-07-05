@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.21.0';
+const APP_VER = 'v3.21.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -21785,16 +21785,40 @@ function countTiles(bounds, zMin, zMax) {
   return total;
 }
 
+// Popuni {s}/{x}/{y}/{z} u URL šablonu sloja (radi za sve — OSM/Topo {z}/{x}/{y},
+// ArcGIS {z}/{y}/{x}, Google mt{s}.../vt?x=&y=&z=). Zamjena po imenu tokena je
+// neovisna o redoslijedu u šablonu.
+function _tileUrlFromTemplate(tmpl, subs, x, y, z) {
+  const s = (subs && subs.length) ? subs[(x + y) % subs.length] : '';
+  return tmpl.replace('{s}', s).replace('{z}', z).replace('{x}', x).replace('{y}', y);
+}
+
+// Sloj čije se pločice preuzimaju = trenutno AKTIVNI basemap (ne uvijek Topo!).
+// _nagib/_granice koriste Topo kao podlogu; SQLite offline karta nema šta skidati.
+function _dlLayerInfo() {
+  const key = (typeof _activeLayerKey === 'function') ? _activeLayerKey() : '⛰ Topo';
+  if (key && key.startsWith('_sqlite_')) return { layer: null, name: 'Offline karta (već je lokalna)' };
+  let tkey = (key === '_nagib' || key === '_granice' || key == null) ? '⛰ Topo' : key;
+  const layer = TL[tkey] || TL['⛰ Topo'];
+  const names = { '⛰ Topo': 'Topo', '🛰 Satelit': 'Satelit', '🗺 Karta': 'Karta (OSM)', '📡 Google': 'Satelit HD (Google)' };
+  return { layer, name: names[tkey] || tkey };
+}
+
 function buildTileUrls(bounds, zMin, zMax) {
-  const sub = ['a','b','c'];
+  const { layer } = _dlLayerInfo();
+  if (!layer) return [];
+  const tmpl = layer._url;
+  const subs = layer.options.subdomains || 'abc';
+  const maxNZ = (layer.options.maxNativeZoom != null) ? layer.options.maxNativeZoom
+              : (layer.options.maxZoom != null ? layer.options.maxZoom : 19);
   const urls = [];
   for (let z = zMin; z <= zMax; z++) {
+    if (z > maxNZ) continue;   // iznad native zoom-a pločice ne postoje (404) — preskoči
     const sw = lngLatToTile(bounds.getSouth(), bounds.getWest(), z);
     const ne = lngLatToTile(bounds.getNorth(), bounds.getEast(), z);
     for (let x = Math.min(sw.x,ne.x); x <= Math.max(sw.x,ne.x); x++) {
       for (let y = Math.min(sw.y,ne.y); y <= Math.max(sw.y,ne.y); y++) {
-        const s = sub[(x+y)%3];
-        urls.push(`https://${s}.tile.opentopomap.org/${z}/${x}/${y}.png`);
+        urls.push(_tileUrlFromTemplate(tmpl, subs, x, y, z));
       }
     }
   }
@@ -25141,17 +25165,27 @@ function getOfflineBounds() {
 }
 
 function updateOfflineEstimate() {
+  const estEl = document.getElementById('offline-estimate');
+  const btn = document.getElementById('offline-dl-btn');
   const bounds = getOfflineBounds();
   const zMin = +document.getElementById('offline-zmin').value;
   const zMax = +document.getElementById('offline-zmax').value;
-  if (zMin > zMax) { document.getElementById('offline-estimate').textContent = 'Min zoom ne može biti veći od max!'; return; }
-  const n = countTiles(bounds, zMin, zMax);
+  if (zMin > zMax) { estEl.textContent = 'Min zoom ne može biti veći od max!'; return; }
+  const info = _dlLayerInfo();
+  if (!info.layer) {
+    estEl.innerHTML = `<span style="color:#fbbf24;">${info.name} — nema pločica za preuzimanje.</span><br><span style="font-size:11px;color:#475569;">Odaberi Topo / Satelit / Karta / Satelit HD kao aktivnu kartu.</span>`;
+    if (btn) btn.disabled = true;
+    return;
+  }
+  // Stvarni broj = poslije maxNativeZoom clamp-a (npr. Topo staje na z17)
+  const n = buildTileUrls(bounds, zMin, zMax).length;
   const mb = (n * 25 / 1024).toFixed(1); // ~25KB po tile
-  document.getElementById('offline-estimate').innerHTML =
+  estEl.innerHTML =
     `Procjena: <b style="color:#38bdf8">${n.toLocaleString()}</b> tile-ova · ≈ <b style="color:#fbbf24">${mb} MB</b><br>` +
-    `<span style="font-size:11px;color:#475569;">Zoom ${zMin}–${zMax} · Samo TOPO sloj</span>`;
-  document.getElementById('offline-dl-btn').disabled = n > 50000;
-  if (n > 50000) document.getElementById('offline-estimate').innerHTML += `<br><span style="color:#f87171;">Previše tile-ova — smanjite zoom ili područje</span>`;
+    `<span style="font-size:11px;color:#475569;">Zoom ${zMin}–${zMax} · sloj: <b style="color:#94a3b8">${info.name}</b></span>`;
+  if (btn) btn.disabled = n > 50000 || n === 0;
+  if (n > 50000) estEl.innerHTML += `<br><span style="color:#f87171;">Previše tile-ova — smanjite zoom ili područje</span>`;
+  else if (n === 0) estEl.innerHTML += `<br><span style="color:#f87171;">Odabrani zoom je iznad dostupnog za ovaj sloj.</span>`;
 }
 
 const _OFFLINE_DL_INCOMPLETE_KEY = 'tvlake_offline_dl_incomplete';
