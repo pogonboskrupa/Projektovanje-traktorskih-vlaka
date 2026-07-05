@@ -2283,6 +2283,25 @@ select:focus { outline:none; border-color:#3b82f6; }
 .ddb.undo    { background:#150d2e; color:#a78bfa; }
 .ddb.finish  { background:#052e16; color:#4ade80; }
 .ddb.cancel  { background:#2d0a0a; color:#f87171; flex:0 0 auto; }
+/* Vodi me do lokacije — banner za tapkanje tačaka (isti .ddb dugmad, ljubičasta tema) */
+#guide-draw-banner {
+  position:fixed; bottom:0; left:0; right:0;
+  display:none; flex-direction:column;
+  background:rgba(5,20,40,0.98);
+  border-top:2px solid #a78bfa;
+  z-index:1700; font-family:inherit;
+  box-shadow:0 -4px 24px rgba(0,0,0,0.6);
+}
+#guide-draw-row1 {
+  display:flex; align-items:center; gap:8px; padding:7px 14px 5px;
+  border-bottom:1px solid rgba(167,139,250,0.12);
+}
+#guide-draw-label { font-size:13px; font-weight:700; color:#a78bfa; }
+#guide-draw-count { font-size:11px; color:#94a3b8; margin-left:auto; font-variant-numeric:tabular-nums; }
+#guide-draw-row2 {
+  display:flex; align-items:stretch; min-height:52px;
+  padding-bottom:env(safe-area-inset-bottom, 0px);
+}
 /* KML Sel Banner */
 #doz-kmlsel-banner {
   position:fixed; bottom:0; left:0; right:0;
@@ -4262,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.19.4';
+const APP_VER = 'v3.20.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -10903,6 +10922,7 @@ map.on('click', e => {
     _createTacka(e.latlng.lat, e.latlng.lng, nm);
     return;
   }
+  if (_guideOn) { _guideOnMapClick(e.latlng); return; }
   if (_dozDrawType !== null) { if (!_dozDrawEnabled) dozAddDrawPoint(e.latlng); return; }
   if (!_vpJustOpened) closeVlakaPopup();
   if (textToolOn) { openTextDialog(e.latlng.lat, e.latlng.lng, null); return; }
@@ -20395,7 +20415,8 @@ function _updFabVisibility() {
   const onKarta = _activeTab === 'karta';
   const mdpActive = typeof _mdpIdx !== 'undefined' && _mdpIdx !== null; // ručno crtanje u toku
   const edActive  = typeof editOn !== 'undefined' && editOn && activeTool === 'edit'; // edit panel otvoren
-  const hideBars  = mdpActive || edActive;
+  const guideActive = typeof _guideOn !== 'undefined' && _guideOn; // "Vodi me do lokacije" tapkanje u toku
+  const hideBars  = mdpActive || edActive || guideActive;
   const ab = document.getElementById('action-bar');
   if (ab) ab.style.display = (onKarta && !hideBars) ? 'flex' : 'none';
   const cb = document.getElementById('map-ctrl-bar');
@@ -20493,6 +20514,7 @@ function switchTab(tab) {
     dozCancelDraw();
     if (_dozGpsOn) showToast('📍 GPS snimanje nastavlja u pozadini');
   }
+  if (prev === 'karta' && tab !== 'karta' && typeof _guideOn !== 'undefined' && _guideOn) _guideCancel(true);
   const panel    = document.getElementById('panel');
   const pproj    = document.getElementById('proj-panel');
   const pdoz     = document.getElementById('doznaka-panel');
@@ -21865,7 +21887,7 @@ function _resampleLinePts(pts, maxN) {
   return out;
 }
 
-function _renderElevProfile(name, pts, alts, src) {
+function _renderElevProfile(name, pts, alts, src, extraStatsHtml = '') {
   if (pts.length < 2 || alts.length !== pts.length) return;
 
   // Kumulativne distance duž trase
@@ -21940,13 +21962,170 @@ function _renderElevProfile(name, pts, alts, src) {
     `<span style="color:#94a3b8">Max: <b style="color:#e2e8f0">${Math.round(maxAlt)} m</b></span>` +
     `<span style="color:#94a3b8">Razlika: <b style="color:#e2e8f0">${Math.round(maxAlt-minAlt)} m</b></span>` +
     `<span style="color:#94a3b8">Max nagib: <b style="color:${maxSlope>18?'#f87171':maxSlope>12?'#fbbf24':'#4ade80'}">${maxSlope.toFixed(1)}%</b></span>` +
-    `<span style="color:#94a3b8">Prosj. nagib: <b style="color:#e2e8f0">${avgSlope.toFixed(1)}%</b></span>${gapNote}`;
+    `<span style="color:#94a3b8">Prosj. nagib: <b style="color:#e2e8f0">${avgSlope.toFixed(1)}%</b></span>${gapNote}` +
+    extraStatsHtml;
 
   document.getElementById('profil-modal').classList.add('show');
 }
 
 function closeProfilModal() {
   document.getElementById('profil-modal').classList.remove('show');
+}
+
+// ─── VODI ME DO LOKACIJE ────────────────────────────────────────────────────
+// Ručno tapkanje rute na karti (start [+ međutačke] + odredište, ili "od moje
+// lokacije" gdje je start auto-GPS) → dužina + profil visina + nagib + procjena
+// vremena dolaska. Reuse: _fetchProfileElev/_renderElevProfile (isti #profil-modal
+// koji se koristi za profil vlake), calcL za dužinu.
+let _guideOn = false;
+let _guidePts = [];          // {la,lo} tapnute tačke, redom
+let _guideMinPts = 0;        // 1 ako je tačka 0 auto-GPS (undo je ne smije ukloniti)
+let _guideMarkers = [];
+let _guidePreviewLine = null;
+let _guideResultLayer = null; // [line, mStart, mEnd] zadnje izračunate rute — ostaje na karti
+
+function showGuideChoice() {
+  document.getElementById('guide-choice-modal').style.display = 'flex';
+}
+function closeGuideChoice() {
+  document.getElementById('guide-choice-modal').style.display = 'none';
+}
+
+function _guideClearResult() {
+  if (_guideResultLayer) {
+    _guideResultLayer.forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+    _guideResultLayer = null;
+  }
+}
+
+async function _guideStart(fromGps) {
+  closeGuideChoice();
+  switchTab('karta');   // prebaci na kartu PRIJE postavljanja stanja (izbjegava regresiju viđenu kod doznake)
+  _guideClearResult();
+  _guideOn = true;
+  _guidePts = [];
+  _guideMinPts = 0;
+
+  const banner = document.getElementById('guide-draw-banner');
+  if (banner) banner.style.display = 'flex';
+  _updFabVisibility();
+
+  if (fromGps) {
+    const lbl = document.getElementById('guide-draw-label');
+    if (lbl) lbl.textContent = '⏳ Tražim GPS poziciju…';
+    if (!lastP) {
+      startGPS();
+      let tries = 0;
+      while (!lastP && tries < 40 && _guideOn) { await new Promise(r => setTimeout(r, 250)); tries++; }
+    }
+    if (!lastP || !_guideOn) { if (_guideOn) { showToast('⚠ GPS pozicija nedostupna'); _guideCancel(); } return; }
+    _guideMinPts = 1;
+    _guideAddPoint({ lat: lastP.la, lng: lastP.lo }, true);
+  } else {
+    const lbl = document.getElementById('guide-draw-label');
+    if (lbl) lbl.textContent = '📌 Tapni POČETNU tačku';
+  }
+  _guideUpdBanner();
+}
+
+function _guideAddPoint(latlng, isStart) {
+  _guidePts.push({ la: latlng.lat, lo: latlng.lng });
+  const col = isStart ? '#4ade80' : '#a78bfa';
+  const m = L.circleMarker([latlng.lat, latlng.lng], { radius: 6, color: col, fillColor: col, fillOpacity: 1, weight: 2 }).addTo(map);
+  if (isStart) m.bindTooltip('START', { permanent: true, direction: 'top', className: 'leaflet-tooltip' });
+  _guideMarkers.push(m);
+  if (_guidePts.length >= 2) {
+    const ll = _guidePts.map(p => [p.la, p.lo]);
+    if (!_guidePreviewLine) _guidePreviewLine = L.polyline(ll, { color: '#a78bfa', weight: 3, opacity: 0.8, dashArray: '6,5' }).addTo(map);
+    else _guidePreviewLine.setLatLngs(ll);
+  }
+  const lbl = document.getElementById('guide-draw-label');
+  if (lbl && _guidePts.length >= 1) lbl.textContent = '📌 Tapni odredište (ili dodaj međutačke)';
+}
+
+function _guideOnMapClick(latlng) {
+  if (!_guideOn) return;
+  _guideAddPoint(latlng, _guidePts.length === 0);
+  _guideUpdBanner();
+}
+
+function _guideUpdBanner() {
+  const cnt = document.getElementById('guide-draw-count');
+  if (!cnt) return;
+  const d = _guidePts.length >= 2 ? calcL(_guidePts) : 0;
+  cnt.textContent = `${_guidePts.length} tačaka · ${fmtL(d)}`;
+}
+
+function _guideUndo() {
+  if (_guidePts.length <= _guideMinPts) { showToast('⚠ Nema šta poništiti'); return; }
+  _guidePts.pop();
+  const m = _guideMarkers.pop();
+  if (m) { try { map.removeLayer(m); } catch(e) {} }
+  if (_guidePreviewLine) {
+    if (_guidePts.length >= 2) _guidePreviewLine.setLatLngs(_guidePts.map(p => [p.la, p.lo]));
+    else { try { map.removeLayer(_guidePreviewLine); } catch(e) {} _guidePreviewLine = null; }
+  }
+  _guideUpdBanner();
+}
+
+function _guideCancel(silent) {
+  _guideOn = false;
+  _guidePts = []; _guideMinPts = 0;
+  _guideMarkers.forEach(m => { try { map.removeLayer(m); } catch(e) {} });
+  _guideMarkers = [];
+  if (_guidePreviewLine) { try { map.removeLayer(_guidePreviewLine); } catch(e) {} _guidePreviewLine = null; }
+  const b = document.getElementById('guide-draw-banner');
+  if (b) b.style.display = 'none';
+  _updFabVisibility();
+  if (!silent) showToast('✕ Otkazano');
+}
+
+async function _guideFinish() {
+  if (_guidePts.length < 2) { showToast('⚠ Potrebne su bar 2 tačke (start i odredište)'); return; }
+  const pts = _guidePts.slice();
+  const totalD = calcL(pts);
+  showToast('⏳ Računam profil i vrijeme dolaska…');
+
+  let res = null;
+  try { res = await _fetchProfileElev(pts); } catch(e) {}
+
+  _guideCancel(true);   // ukloni banner + privremene markere/liniju — rezultat se crta ispod
+
+  _guideClearResult();
+  const ll = pts.map(p => [p.la, p.lo]);
+  const line   = L.polyline(ll, { color: '#a78bfa', weight: 4, opacity: 0.9, dashArray: '8,6' }).addTo(map);
+  const mStart = L.circleMarker(ll[0], { radius: 7, color: '#4ade80', fillColor: '#4ade80', fillOpacity: 1 }).addTo(map).bindTooltip('START', { permanent: true, direction: 'top' });
+  const mEnd   = L.circleMarker(ll[ll.length - 1], { radius: 7, color: '#f87171', fillColor: '#f87171', fillOpacity: 1 }).addTo(map).bindTooltip('ODREDIŠTE', { permanent: true, direction: 'top' });
+  _guideResultLayer = [line, mStart, mEnd];
+  map.fitBounds(line.getBounds(), { padding: [40, 40] });
+
+  const hasElev = !!res;
+  const alts    = hasElev ? res.alts : pts.map(() => 0);
+  const profPts = hasElev ? res.pts : pts;
+  const eta     = _guideEtaEstimate(totalD, alts, hasElev);
+
+  _renderElevProfile('🧭 Vodi me do lokacije', profPts, alts, hasElev ? 'model terena' : 'nedostupno', eta.html);
+  showToast(`✓ Ruta: ${fmtL(totalD)} · ${eta.durTxt}`);
+}
+
+// Procjena vremena hoda: baza 4 km/h (šumski/neravan teren) + Naismith-ovo pravilo
+// za uspon (+10 min po 100 m uspona). Silazak se ne ubrzava (oprez na neravnom terenu).
+function _guideEtaEstimate(distM, alts, hasElev) {
+  let ascent = 0;
+  if (hasElev) for (let i = 1; i < alts.length; i++) { const d = alts[i] - alts[i - 1]; if (d > 0) ascent += d; }
+  const baseMin   = (distM / 1000) / 4 * 60;
+  const climbMin  = (ascent / 100) * 10;
+  const totalMin  = Math.max(1, Math.round(baseMin + climbMin));
+  const h = Math.floor(totalMin / 60), m = totalMin % 60;
+  const durTxt  = h > 0 ? `${h} h ${m} min` : `${m} min`;
+  const arrival = new Date(Date.now() + totalMin * 60000);
+  const arrTxt  = arrival.toLocaleTimeString('bs-BA', { hour: '2-digit', minute: '2-digit' });
+  const ascNote = hasElev ? '' : ' <span style="color:#64748b;">(bez podataka o usponu)</span>';
+  const html =
+    `<span style="color:#94a3b8">🕐 Trajanje: <b style="color:#e2e8f0">${durTxt}</b>${ascNote}</span>` +
+    `<span style="color:#94a3b8">🏁 Dolazak: <b style="color:#a78bfa">${arrTxt}</b></span>` +
+    (hasElev ? `<span style="color:#94a3b8">⬆ Uspon: <b style="color:#e2e8f0">${Math.round(ascent)} m</b></span>` : '');
+  return { totalMin, durTxt, arrTxt, html };
 }
 
 // ─── OFFLINE DEM GRID (keširanje visina odjela) ────────────────────────────────
@@ -29204,6 +29383,7 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();openGraniceModal()">🗺 Granice Odjela</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();startLocPhoto()">📷 Uslikaj lokaciju</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showShareLocMenu()">📍 Podijeli lokaciju</div>
+  <div class="mdrop-item" style="color:#a78bfa;" onclick="closeMenuDropdown();showGuideChoice()">🧭 Vodi me do lokacije</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showHelp()">📖 Upute za korištenje</div>
   <div class="mdrop-sep"></div>
@@ -30420,6 +30600,25 @@ if (typeof AndroidDownload !== 'undefined') {
   </div>
 </div>
 
+<!-- ═══ VODI ME DO LOKACIJE — BANNER ZA TAPKANJE TAČAKA ═══ -->
+<div id="guide-draw-banner">
+  <div id="guide-draw-row1">
+    <span id="guide-draw-label">📌 Tapni POČETNU tačku</span>
+    <span id="guide-draw-count">0 tačaka · 0 m</span>
+  </div>
+  <div id="guide-draw-row2">
+    <button class="ddb undo" onclick="_guideUndo()">
+      <span class="ddb-ico">↩</span><span class="ddb-lbl">Undo</span>
+    </button>
+    <button class="ddb finish" onclick="_guideFinish()">
+      <span class="ddb-ico">✓</span><span class="ddb-lbl">Završi</span>
+    </button>
+    <button class="ddb cancel" onclick="_guideCancel()">
+      <span class="ddb-ico">✕</span><span class="ddb-lbl">Odustani</span>
+    </button>
+  </div>
+</div>
+
 <!-- ═══ DOZNAKA — KML SEL BANNER (bottom bar) ═══ -->
 <div id="doz-kmlsel-banner">
   <div id="doz-kmlsel-row1">
@@ -30489,6 +30688,24 @@ if (typeof AndroidDownload !== 'undefined') {
       <button class="btn g" style="flex:1;" onclick="dozConfirmSave()">✓ Sačuvaj</button>
       <button class="btn" style="background:#2d0a0a;color:#f87171;border:1px solid #7f1d1d;flex:0 0 auto;" onclick="dozCancelSave()">✕</button>
     </div>
+  </div>
+</div>
+
+<!-- VODI ME DO LOKACIJE — izbor moda -->
+<div id="guide-choice-modal" style="display:none;position:fixed;inset:0;z-index:99030;background:rgba(0,0,0,0.65);align-items:center;justify-content:center;padding:16px;"
+  onclick="if(event.target===this)closeGuideChoice()">
+  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;width:100%;max-width:380px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,0.7);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin:0;font-size:15px;color:#a78bfa;">🧭 Vodi me do lokacije</h3>
+      <button onclick="closeGuideChoice()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
+    </div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.5;">Tapkaš tačke na karti — možeš dodati međutačke. Na kraju vidiš dužinu, profil visina, nagib i procjenu vremena dolaska.</div>
+    <button onclick="_guideStart(true)" style="width:100%;padding:13px;margin-bottom:9px;background:linear-gradient(135deg,#1d4ed8,#2563eb);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;text-align:left;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:20px;">📍</span><span>Od moje lokacije<br><span style="font-size:11px;font-weight:400;opacity:0.85;">Start = trenutna GPS pozicija</span></span>
+    </button>
+    <button onclick="_guideStart(false)" style="width:100%;padding:13px;background:linear-gradient(135deg,#059669,#10b981);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;text-align:left;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:20px;">📌</span><span>Od tačke do tačke<br><span style="font-size:11px;font-weight:400;opacity:0.85;">Sam biraš početak i kraj</span></span>
+    </button>
   </div>
 </div>
 
