@@ -4264,7 +4264,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.19.1';
+const APP_VER = 'v3.19.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5191,6 +5191,11 @@ async function doRegister() {
     showAuthErr(dupNazivErr ? `Korisnik "${ime} ${prezime}" već postoji` : 'Greška pri kreiranju profila: ' + insertErr.message, true);
     return;
   }
+
+  // Zapamti korisnika kao i kod običnog logina (doLogin) — bez ovoga se registrovani
+  // korisnik oslanjao SAMO na Supabase sesiju, pa se login ekran znao ponovo pojaviti
+  // pri sljedećem pokretanju (nema "zapamti me" na formi registracije — uvijek pamti).
+  localStorage.setItem(_SAVED_USER_KEY, JSON.stringify({ ime, prezime, pin }));
 
   sbUser = data.user;
   await sbLoadProfile();
