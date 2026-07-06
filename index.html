@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.22.0';
+const APP_VER = 'v3.22.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -9943,6 +9943,24 @@ function makeCachedTileLayer(cacheName) {
 
       const url = this.getTileUrl(coords);
 
+      // Zombi-zahtjevi: pri agresivnom zoom in/out Leaflet odbaci pločice
+      // međuzoomova, ali njihovi fetch-evi su NASTAVLJALI i zauzimali ograničeni
+      // pool konekcija (6 po hostu) — pločice finalnog zooma su čekale iza njih
+      // ("kao da ne učitava odmah"). Zato: svaki fetch se registruje na pločici,
+      // a na tileunload se svi njeni zahtjevi prekinu i async lanac obustavi.
+      canvas._dead = false;
+      canvas._ctls = new Set();
+      if (!this._tuHooked) {
+        this._tuHooked = true;
+        this.on('tileunload', ev => {
+          const el = ev.tile;
+          if (!el || !el._ctls) return;
+          el._dead = true;
+          el._ctls.forEach(c => { try { c.abort(); } catch(e) {} });
+          el._ctls.clear();
+        });
+      }
+
       // RAM keš — ImageBitmap se crta gotovo instant, bez dekodiranja
       const cachedBmp = _tileBmpCache.get(url);
       if (cachedBmp) {
@@ -10008,6 +10026,7 @@ function makeCachedTileLayer(cacheName) {
           done(null, canvas);
         };
         for (let dz = 1; dz <= 6; dz++) {
+          if (canvas._dead) return true;   // pločica odbačena — prekini, ne troši mrežu
           const pz = coords.z - dz;
           if (pz < 0) break;
           const scale = 1 << dz;
@@ -10046,10 +10065,12 @@ function makeCachedTileLayer(cacheName) {
       };
 
       const fallback = async () => {
+        if (canvas._dead) return;
         // Zakašnjeli pozadinski retry: pločica koja je završila kao zamućeni
         // roditelj (ili prazna) se sama zamijeni pravom kad mreža proradi —
         // bez done() (već pozvan), samo direktno precrtavanje + upis u keš.
         if (navigator.onLine !== false) setTimeout(async () => {
+          if (canvas._dead) return;
           const r = await fetchTile(url, 8000);
           if (r && r.ok) {
             try { const c = await caches.open(cacheName); c.put(url, r.clone()); } catch(e) {}
@@ -10075,25 +10096,31 @@ function makeCachedTileLayer(cacheName) {
       // (mrtva konekcija uz onLine=true) pa se done() nikad ne pozove i pločica
       // ostane trajno prazna. Timeout → resolve(null) → fallback/retry.
       const fetchTile = (u, ms) => new Promise(resolve => {
+        if (canvas._dead) return resolve(null);
         const ctl = new AbortController();
+        canvas._ctls.add(ctl);
         const t = setTimeout(() => ctl.abort(), ms);
         fetch(u, { mode: 'cors', signal: ctl.signal })
-          .then(r => { clearTimeout(t); resolve(r); })
-          .catch(() => { clearTimeout(t); resolve(null); });
+          .then(r => { clearTimeout(t); canvas._ctls.delete(ctl); resolve(r); })
+          .catch(() => { clearTimeout(t); canvas._ctls.delete(ctl); resolve(null); });
       });
 
       if (!('caches' in window)) { fallback(); return canvas; }
 
       caches.open(cacheName).then(async cache => {
         const cached = await cache.match(url);
+        if (canvas._dead) return;
         if (cached) { drawBlob(await cached.blob()); return; }
         let resp = await fetchTile(url, 8000);
+        if (canvas._dead) return;
         if (!resp || !resp.ok) {
           // Kratka pauza pa JEDAN retry — pokriva burst rate-limit (Google 429/403
           // pri učitavanju cijelog ekrana) i tranzijentne prekide konekcije.
           await new Promise(r => setTimeout(r, 1200));
+          if (canvas._dead) return;
           resp = await fetchTile(url, 8000);
         }
+        if (canvas._dead) return;
         if (resp && resp.ok) {
           try { cache.put(url, resp.clone()); } catch(e) {}
           drawBlob(await resp.blob());
@@ -10245,10 +10272,10 @@ map.createPane('putevi');      map.getPane('putevi').style.zIndex      = 390;
 map.createPane('demOverlay'); map.getPane('demOverlay').style.zIndex = 250;
 const _puteviRenderer = L.canvas({ pane: 'putevi', padding: 0.3 });
 const TL = {
-  '⛰ Topo':    new CachedTopo('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxNativeZoom:17,maxZoom:22,subdomains:['a','b','c'],keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
-  '🛰 Satelit': new CachedSat('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
-  '🗺 Karta':   new CachedOsm('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
-  '📡 Google':  new CachedSat('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxNativeZoom:20,maxZoom:22,subdomains:['0','1','2','3'],keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150})
+  '⛰ Topo':    new CachedTopo('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxNativeZoom:17,maxZoom:22,subdomains:['a','b','c'],keepBuffer:4,updateWhenZooming:false,updateWhenIdle:false,updateInterval:100}),
+  '🛰 Satelit': new CachedSat('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:false,updateInterval:100}),
+  '🗺 Karta':   new CachedOsm('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:false,updateInterval:100}),
+  '📡 Google':  new CachedSat('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxNativeZoom:20,maxZoom:22,subdomains:['0','1','2','3'],keepBuffer:4,updateWhenZooming:false,updateWhenIdle:false,updateInterval:100})
 };
 const _ELEV_CACHE  = 'tvlake-elev-v1';
 const _SLOPE_CACHE = 'tvlake-slope-v1';
