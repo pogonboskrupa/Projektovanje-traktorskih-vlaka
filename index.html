@@ -4317,7 +4317,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.25.0';
+const APP_VER = 'v3.25.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -18568,6 +18568,12 @@ async function showProjectManagement() {
       const { data, error } = await sb.rpc(rpcName);
       if (error) throw error;
       _pmAdminRows = data || [];
+      // Vodeći: sigurnosni filter na klijentu — ISKLJUČIVO projekti svoje šumarije.
+      // RPC već filtrira server-side (WHERE p.sumarija = v_sum); ovo je
+      // defense-in-depth da tuđa šumarija nikad ne dospije u prikaz.
+      if (isVodeci() && sbProfile?.sumarija) {
+        _pmAdminRows = _pmAdminRows.filter(r => (r.sumarija || '') === sbProfile.sumarija);
+      }
       // Vodeći: sinhronizuj _projekti iz RPC redova — _pmOpenDetail/_pmShowOnMap
       // rade nad _projekti, a vodeći ih ne učitava klasičnim putem.
       if (isVodeci()) {
@@ -18601,7 +18607,9 @@ function _pmShowList() {
   document.getElementById('pm-back-btn').style.display = 'none';
   document.getElementById('pm-detail').style.display = 'none';
   document.getElementById('pm-list-wrap').style.display = '';
-  document.getElementById('pm-title').textContent = '📊 Upravljanje projektima';
+  document.getElementById('pm-title').textContent = (isVodeci() && sbProfile?.sumarija)
+    ? '📊 Nadzor — ' + sbProfile.sumarija
+    : '📊 Upravljanje projektima';
   document.getElementById('pm-body').scrollTop = 0;
   _pmRenderList();
 }
@@ -18678,7 +18686,9 @@ function _pmRenderList() {
 // Detalj (_pmOpenDetail) radi nepromijenjen — ionako dohvata vlake server-side po projektu.
 function _pmRenderAdminList(el) {
   if (_pmAdminRows === null) {
-    el.innerHTML = '<div class="pm-empty">⏳ Učitavam projekte svih šumarija...</div>';
+    el.innerHTML = sbProfile?.is_admin
+      ? '<div class="pm-empty">⏳ Učitavam projekte svih šumarija...</div>'
+      : '<div class="pm-empty">⏳ Učitavam projekte — ' + _esc(sbProfile?.sumarija || 'moja šumarija') + '...</div>';
     return;
   }
   if (_pmAdminRows._err) {
@@ -18703,7 +18713,7 @@ function _pmRenderAdminList(el) {
   const skpi = (v, l) => `<div class="pm-skpi"><div class="pm-skpi-v">${v}</div><div class="pm-skpi-l">${l}</div></div>`;
   el.innerHTML = `<div class="pm-summary">
     ${skpi(rows.length, 'Projekata')}
-    ${skpi(sums.size, 'Šumarija')}
+    ${sbProfile?.is_admin ? skpi(sums.size, 'Šumarija') : skpi(new Set(rows.map(r => r.korisnik_id).filter(Boolean)).size, 'Projektanata')}
     ${skpi(totMa, 'Vlaka')}
     ${skpi(totKr, 'Krakova')}
     ${skpi((totM / 1000).toFixed(1) + ' km', 'Ukupno vlaka')}
@@ -18717,7 +18727,8 @@ function _pmRenderAdminList(el) {
     const s = r.sumarija || '—';
     if (s !== curSum) {
       curSum = s; curGj = null;
-      html += `<div class="pm-gj-hdr" style="color:#fbbf24;">🏛 ${_esc(s)}</div>`;
+      // Vodeći vidi samo SVOJU šumariju (naziv je već u naslovu modala) — bez 🏛 headera
+      if (sbProfile?.is_admin) html += `<div class="pm-gj-hdr" style="color:#fbbf24;">🏛 ${_esc(s)}</div>`;
     }
     const g = r.gj || '';
     if (g !== curGj) {
@@ -19256,6 +19267,10 @@ const _izvFmtHa = h => Number(h || 0).toFixed(2).replace('.', ',') + ' ha';
 function showIzvjestaji() {
   if (!(sbProfile?.is_admin || isVodeci())) return;
   document.getElementById('izv-modal').classList.add('show');
+  // Naslov jasno kaže opseg: admin = sve šumarije, vodeći = isključivo svoja
+  document.getElementById('izv-title').textContent = sbProfile?.is_admin
+    ? '📅 Izvještaji — sve šumarije'
+    : '📅 Izvještaji — ' + (sbProfile?.sumarija || 'moja šumarija');
   _izvUpdModeButtons();
   _izvFetch();
 }
@@ -19280,6 +19295,10 @@ function _izvNav(dir) {
   _izvAnchor = d;
   _izvFetch();
 }
+function _izvDanas() {
+  _izvAnchor = new Date();
+  _izvFetch();
+}
 async function _izvFetch() {
   const r = _izvRangeOf(_izvMode, _izvAnchor);
   document.getElementById('izv-period-label').textContent = r.label;
@@ -19288,7 +19307,13 @@ async function _izvFetch() {
   try {
     const { data, error } = await sb.rpc('izvjestaj_aktivnost', { p_od: r.od, p_do: r.doo });
     if (error) throw error;
-    _izvRows = data || [];
+    let rows = data || [];
+    // Vodeći: sigurnosni filter na klijentu — isključivo aktivnosti projektanata
+    // SVOJE šumarije (RPC već filtrira server-side; defense-in-depth).
+    if (isVodeci() && sbProfile?.sumarija) {
+      rows = rows.filter(row => (row.sumarija || '') === sbProfile.sumarija);
+    }
+    _izvRows = rows;
   } catch(e) {
     _izvRows = { _err: e };
   }
@@ -19307,21 +19332,35 @@ function _izvRenderBody() {
   }
   const rows = _izvRows;
   if (!rows.length) { el.innerHTML = '<div class="pm-empty">Nema aktivnosti u ovom periodu.</div>'; return; }
+  const isAdm = !!sbProfile?.is_admin;
 
   // Rekap po projektantu
   const byPerson = {};
   rows.forEach(r => {
-    const p = byPerson[r.ime_prezime] || (byPerson[r.ime_prezime] = { vlaka: 0, doznaka: 0 });
+    const p = byPerson[r.ime_prezime] || (byPerson[r.ime_prezime] = { vlaka: 0, doznaka: 0, sum: r.sumarija || '—' });
     if (r.vrsta === 'vlaka') p.vlaka += Number(r.vrijednost || 0);
     else p.doznaka += Number(r.vrijednost || 0);
   });
   const personList = Object.entries(byPerson).sort((a, b) => b[1].vlaka - a[1].vlaka);
+  const totVlaka = rows.filter(r => r.vrsta === 'vlaka').reduce((s, r) => s + Number(r.vrijednost || 0), 0);
+  const totDoz   = rows.filter(r => r.vrsta === 'doznaka').reduce((s, r) => s + Number(r.vrijednost || 0), 0);
+  const nDays    = new Set(rows.map(r => r.datum)).size;
 
-  let html = '<div class="pm-sec"><div class="pm-sec-t">👤 Rekap po projektantu</div>';
-  html += '<table class="pm-tbl"><thead><tr><th>Projektant</th><th class="r">Vlaka</th><th class="r">Doznaka</th></tr></thead><tbody>';
+  // Zbirni KPI red za period
+  const skpi = (v, l) => `<div class="pm-skpi"><div class="pm-skpi-v">${v}</div><div class="pm-skpi-l">${l}</div></div>`;
+  let html = `<div class="pm-summary" style="grid-template-columns:repeat(4,1fr);">
+    ${skpi(totVlaka ? _izvFmtKm(totVlaka) : '—', 'Vlaka')}
+    ${skpi(totDoz ? _izvFmtHa(totDoz) : '—', 'Doznaka')}
+    ${skpi(nDays, 'Radnih dana')}
+    ${skpi(personList.length, 'Projektanata')}
+  </div>`;
+
+  html += '<div class="pm-sec"><div class="pm-sec-t">👤 Rekap po projektantu</div>';
+  html += `<table class="pm-tbl"><thead><tr><th>Projektant</th>${isAdm ? '<th>Šumarija</th>' : ''}<th class="r">Vlaka</th><th class="r">Doznaka</th></tr></thead><tbody>`;
   personList.forEach(([nm, v]) => {
-    html += `<tr><td>${_esc(nm)}</td><td class="r">${v.vlaka ? _izvFmtKm(v.vlaka) : '—'}</td><td class="r">${v.doznaka ? _izvFmtHa(v.doznaka) : '—'}</td></tr>`;
+    html += `<tr><td>${_esc(nm)}</td>${isAdm ? '<td style="color:#94a3b8;">' + _esc(v.sum) + '</td>' : ''}<td class="r">${v.vlaka ? _izvFmtKm(v.vlaka) : '—'}</td><td class="r">${v.doznaka ? _izvFmtHa(v.doznaka) : '—'}</td></tr>`;
   });
+  html += `<tr style="border-top:2px solid #1e3a5f;"><td><b>Ukupno</b></td>${isAdm ? '<td></td>' : ''}<td class="r"><b>${totVlaka ? _izvFmtKm(totVlaka) : '—'}</b></td><td class="r"><b>${totDoz ? _izvFmtHa(totDoz) : '—'}</b></td></tr>`;
   html += '</tbody></table></div>';
 
   // Po danu — hronološki, format "DD.MM.GGGG (dan)  Ime Prezime / X,XX km vlaka"
@@ -19330,12 +19369,16 @@ function _izvRenderBody() {
   const dayKeys = Object.keys(byDay).sort();
   html += '<div class="pm-sec"><div class="pm-sec-t">📅 Po danu</div>';
   dayKeys.forEach(dt => {
+    const dayVl  = byDay[dt].filter(e => e.vrsta === 'vlaka').reduce((s, e) => s + Number(e.vrijednost || 0), 0);
+    const dayDoz = byDay[dt].filter(e => e.vrsta === 'doznaka').reduce((s, e) => s + Number(e.vrijednost || 0), 0);
+    const dayTot = [dayVl ? _izvFmtKm(dayVl) : '', dayDoz ? _izvFmtHa(dayDoz) : ''].filter(Boolean).join(' · ');
     const lines = byDay[dt].map(e => {
       const val = e.vrsta === 'vlaka' ? _izvFmtKm(e.vrijednost) + ' vlaka' : 'doznaka ' + _izvFmtHa(e.vrijednost);
-      const odj = e.odjel ? ' <span style="color:#64748b;">(' + _esc(e.odjel) + ')</span>' : '';
+      const extra = [e.odjel, isAdm ? e.sumarija : null].filter(Boolean).map(_esc).join(' · ');
+      const odj = extra ? ' <span style="color:#64748b;">(' + extra + ')</span>' : '';
       return `<div class="pm-day-line"><b>${_esc(e.ime_prezime)}</b> / ${val}${odj}</div>`;
     }).join('');
-    html += `<div class="pm-day"><div class="pm-day-hdr"><span class="pm-day-date">${_izvDanPuni(dt)}</span></div>${lines}</div>`;
+    html += `<div class="pm-day"><div class="pm-day-hdr"><span class="pm-day-date">${_izvDanPuni(dt)}</span><span class="pm-day-tot">${dayTot}</span></div>${lines}</div>`;
   });
   html += '</div>';
   el.innerHTML = html;
@@ -19345,14 +19388,19 @@ function _izvExport() {
   const r = _izvRangeOf(_izvMode, _izvAnchor);
   const rows = _izvRows;
 
+  const isAdm = !!sbProfile?.is_admin;
+  const nCols = isAdm ? 4 : 3;
   const byPerson = {};
   rows.forEach(row => {
-    const p = byPerson[row.ime_prezime] || (byPerson[row.ime_prezime] = { vlaka: 0, doznaka: 0 });
+    const p = byPerson[row.ime_prezime] || (byPerson[row.ime_prezime] = { vlaka: 0, doznaka: 0, sum: row.sumarija || '—' });
     if (row.vrsta === 'vlaka') p.vlaka += Number(row.vrijednost || 0);
     else p.doznaka += Number(row.vrijednost || 0);
   });
+  const totVlaka = rows.filter(r => r.vrsta === 'vlaka').reduce((s, r) => s + Number(r.vrijednost || 0), 0);
+  const totDoz   = rows.filter(r => r.vrsta === 'doznaka').reduce((s, r) => s + Number(r.vrijednost || 0), 0);
   const personRows = Object.entries(byPerson).sort((a, b) => b[1].vlaka - a[1].vlaka)
-    .map(([nm, v]) => `<tr><td>${_esc(nm)}</td><td class="r">${v.vlaka ? _izvFmtKm(v.vlaka) : '—'}</td><td class="r">${v.doznaka ? _izvFmtHa(v.doznaka) : '—'}</td></tr>`).join('');
+    .map(([nm, v]) => `<tr><td>${_esc(nm)}</td>${isAdm ? '<td>' + _esc(v.sum) + '</td>' : ''}<td class="r">${v.vlaka ? _izvFmtKm(v.vlaka) : '—'}</td><td class="r">${v.doznaka ? _izvFmtHa(v.doznaka) : '—'}</td></tr>`).join('')
+    + `<tr class="tot"><td>Ukupno</td>${isAdm ? '<td></td>' : ''}<td class="r">${totVlaka ? _izvFmtKm(totVlaka) : '—'}</td><td class="r">${totDoz ? _izvFmtHa(totDoz) : '—'}</td></tr>`;
 
   const byDay = {};
   rows.forEach(row => { (byDay[row.datum] = byDay[row.datum] || []).push(row); });
@@ -19360,13 +19408,10 @@ function _izvExport() {
   const dayHtml = dayKeys.map(dt => {
     const lines = byDay[dt].map(e => {
       const val = e.vrsta === 'vlaka' ? _izvFmtKm(e.vrijednost) + ' vlaka' : 'doznaka ' + _izvFmtHa(e.vrijednost);
-      return `<tr><td>${_esc(e.ime_prezime)}</td><td>${val}</td><td>${_esc(e.odjel || '—')}</td></tr>`;
+      return `<tr><td>${_esc(e.ime_prezime)}</td><td>${val}</td><td>${_esc(e.odjel || '—')}</td>${isAdm ? '<td>' + _esc(e.sumarija || '—') + '</td>' : ''}</tr>`;
     }).join('');
-    return `<tr><td colspan="3" style="background:#eef2ff;font-weight:bold;padding-top:10px;">${_izvDanPuni(dt)}</td></tr>${lines}`;
+    return `<tr><td colspan="${nCols}" style="background:#eef2ff;font-weight:bold;padding-top:10px;">${_izvDanPuni(dt)}</td></tr>${lines}`;
   }).join('');
-
-  const totVlaka = rows.filter(r => r.vrsta === 'vlaka').reduce((s, r) => s + Number(r.vrijednost || 0), 0);
-  const totDoz   = rows.filter(r => r.vrsta === 'doznaka').reduce((s, r) => s + Number(r.vrijednost || 0), 0);
   const now = new Date().toLocaleString('hr', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
   const sumLabel = (sbProfile?.is_admin) ? 'Sve šumarije' : (sbProfile?.sumarija || '—');
 
@@ -19386,6 +19431,7 @@ thead th.r{text-align:right}
 tbody td{padding:4px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top}
 tbody td.r{text-align:right}
 tbody tr:nth-child(even) td{background:#f9fafb}
+.tot td{font-weight:bold;border-top:2px solid #1e3a5f;background:#eef2ff!important}
 @media print{body{padding:8mm 10mm}@page{margin:8mm}}
 </style></head><body>
 <h1>ŠPD Unsko-sanske šume — Izvještaj aktivnosti</h1>
@@ -19397,11 +19443,11 @@ tbody tr:nth-child(even) td{background:#f9fafb}
   <div><div class="il">Ukupno doznaka</div><div class="iv">${_izvFmtHa(totDoz)}</div></div>
 </div>
 <h2>Rekap po projektantu</h2>
-<table><thead><tr><th>Projektant</th><th class="r">Vlaka</th><th class="r">Doznaka</th></tr></thead>
-<tbody>${personRows || '<tr><td colspan="3" style="font-style:italic;color:#777">Nema podataka.</td></tr>'}</tbody></table>
+<table><thead><tr><th>Projektant</th>${isAdm ? '<th>Šumarija</th>' : ''}<th class="r">Vlaka</th><th class="r">Doznaka</th></tr></thead>
+<tbody>${personRows}</tbody></table>
 <h2>Po danu</h2>
-<table><thead><tr><th>Projektant</th><th>Aktivnost</th><th>Odjel/projekat</th></tr></thead>
-<tbody>${dayHtml || '<tr><td colspan="3" style="font-style:italic;color:#777">Nema aktivnosti.</td></tr>'}</tbody></table>
+<table><thead><tr><th>Projektant</th><th>Aktivnost</th><th>Odjel/projekat</th>${isAdm ? '<th>Šumarija</th>' : ''}</tr></thead>
+<tbody>${dayHtml || '<tr><td colspan="' + nCols + '" style="font-style:italic;color:#777">Nema aktivnosti.</td></tr>'}</tbody></table>
 <div class="footer" style="margin-top:22px;font-size:8.5pt;color:#888;border-top:1px solid #d1d5db;padding-top:7px;display:flex;justify-content:space-between">
   <span>ŠPD Unsko-sanske šume d.o.o. Bihać — Traktorske vlake</span><span>${_esc(sumLabel)} · ${_esc(r.label)}</span>
 </div>
@@ -30071,7 +30117,7 @@ if (typeof AndroidDownload !== 'undefined') {
 <div id="izv-modal" onclick="if(event.target===this)closeIzvjestaji()">
   <div id="izv-box">
     <div id="izv-hdr">
-      <h3>📅 Sedmični / mjesečni izvještaji</h3>
+      <h3 id="izv-title">📅 Sedmični / mjesečni izvještaji</h3>
       <button id="izv-close-btn" onclick="closeIzvjestaji()">✕</button>
     </div>
     <div id="izv-toolbar">
@@ -30083,6 +30129,7 @@ if (typeof AndroidDownload !== 'undefined') {
         <button class="izv-nav-btn" onclick="_izvNav(-1)">◀</button>
         <span id="izv-period-label">—</span>
         <button class="izv-nav-btn" onclick="_izvNav(1)">▶</button>
+        <button class="izv-nav-btn" onclick="_izvDanas()" title="Vrati na tekući period">Danas</button>
       </div>
     </div>
     <div id="izv-body"></div>
