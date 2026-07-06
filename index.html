@@ -4317,7 +4317,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.25.1';
+const APP_VER = 'v3.25.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -27002,7 +27002,7 @@ async function _temRenameCol(id) {
   _temModalRender();
   _temLegendUpd();
   if (typeof _lsRenderTem === 'function') _lsRenderTem();
-  showToast('✅ Naziv promijenjen');
+  showToast('💾 Naziv zapisan — ostaje sačuvan i poslije odjave');
 }
 
 // Ukloni JEDNU kartu (trajno — briše i IDB i registar)
@@ -27411,7 +27411,8 @@ function _temEdToggle(id) {
 // klase N+1) da nema rupa/preklapanja — polja "od"/"do" su dva odvojena inputa nad
 // ISTOM granicom, uživo sinhronizovana (_temEdSyncEdge). Izvor istine dok je editor
 // otvoren je _temEdDraft[m.id] — ➕/✕ mutiraju ga i ponovo renderuju editor; sve se
-// trajno sačuva (localStorage + IndexedDB) tek na "✓ Primijeni".
+// trajno sačuva (localStorage + IndexedDB) tek na "💾 Zapiši" — do tada su izmjene
+// samo u memoriji i gube se zatvaranjem editora bez klika na dugme.
 const _TEM_MAX_CLASSES = 20;
 function _temClassEdHtml(m) {
   const d = _temEdDraft[m.id];
@@ -27446,8 +27447,8 @@ function _temClassEdHtml(m) {
     ${rows}
     ${addBtn}
     <div style="display:flex;gap:6px;margin-top:4px;">
-      <button onclick="_temClassEdApply('${m.id}')"
-        style="flex:1;padding:8px;background:#166534;border:1px solid #4ade80;border-radius:8px;color:#4ade80;font-size:12px;font-weight:600;cursor:pointer;">✓ Primijeni</button>
+      <button onclick="_temClassEdApply('${m.id}')" title="Trajno čuva nazive/opsege/boje — ostaju i poslije odjave"
+        style="flex:1;padding:8px;background:#166534;border:1px solid #4ade80;border-radius:8px;color:#4ade80;font-size:12px;font-weight:600;cursor:pointer;">💾 Zapiši</button>
       <button onclick="_temClassEdReset('${m.id}')"
         style="flex:1;padding:8px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:12px;cursor:pointer;">↺ Automatski (5 klasa)</button>
     </div>
@@ -27514,7 +27515,7 @@ function _temClassEdApply(id) {
   _temApplyTheme(id, entry.theme);   // ponovo boji poligone + _temRegSave() (trajno pamćenje)
   _temEdDraft[id] = { colors: colors.slice(), edges: edges.slice() };
   _temModalRender();
-  showToast('✅ Klase i boje primijenjene (' + n + ' klasa)');
+  showToast('💾 Zapisano (' + n + ' klasa) — ostaje sačuvano i poslije odjave');
 }
 
 function _temClassEdReset(id) {
