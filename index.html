@@ -3230,6 +3230,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
     <button class="tab-btn" id="admin-tab-btn" style="display:none;color:#fbbf24;" onclick="switchTab('admin')">👥 Korisnici<span class="tab-notif" id="notif-admin"></span></button>
     <button class="tab-btn" id="postavke-tab-btn" style="display:none;color:#a78bfa;" onclick="switchTab('postavke')">⚙ Postavke</button>
     <button class="tab-btn" id="teren-tab-btn" style="display:none;color:#34d399;" onclick="switchTab('teren')">🧭 Teren</button>
+    <span id="vodeci-badge" onclick="closeMenuDropdown();showProjectManagement()" title="Nadzorni nalog — pregled rada svih projektanata šumarije" style="display:none;background:#0e7490;color:#fff;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:auto;flex-shrink:0;align-self:center;cursor:pointer;user-select:none;">👔 VODEĆI PROJEKTANT</span>
     <span id="offline-badge" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:auto;flex-shrink:0;align-self:center;">📴 OFFLINE</span>
     <span id="sync-badge" onclick="openSyncQueuePanel()" style="display:none;background:#f59e0b;color:#000;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:4px;flex-shrink:0;align-self:center;cursor:pointer;user-select:none;" title="Pending operacije čekaju sync">⟳ <span id="sync-badge-cnt">0</span></span>
   </div>
@@ -4281,7 +4282,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.24.0';
+const APP_VER = 'v3.24.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4956,6 +4957,8 @@ async function sbLoadProfile() {
   if (data.sumarija) document.getElementById('p-sumarija').value = data.sumarija;
   const lbl = document.getElementById('menu-user-label');
   if (lbl) lbl.textContent = (data.is_admin ? '★ ' : '👤 ') + fullName;
+  const vodeciBadge = document.getElementById('vodeci-badge');
+  if (vodeciBadge) vodeciBadge.style.display = isVodeci() ? '' : 'none';
   const verEl = document.getElementById('menu-app-ver');
   if (verEl) verEl.textContent = APP_VER;
   // ── Vidljivost UI po ulozi — DETERMINISTIČKI za sve uloge ──────────────────
