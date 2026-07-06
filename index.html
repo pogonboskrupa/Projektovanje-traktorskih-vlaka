@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.21.3';
+const APP_VER = 'v3.22.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5040,6 +5040,14 @@ async function showApp() {
     _kmlcInit(); // load IDB key list for offline badge rendering
     _temRestore(); // tematska .gpkg karta iz IDB (async, ne blokira)
     _wxRestore();  // prognoza — sačuvane lokacije/područja + obrisi na karti
+    // Trajna pohrana: bez persist() browser pod pritiskom diska smije obrisati
+    // CIJELI Cache Storage/IDB (sve offline pločice i karte odjednom). Uz persist()
+    // pregledano/preuzeto ostaje dok korisnik sam ne obriše.
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist(); });
+      }
+    } catch(e) {}
   }, 80);
 }
 
@@ -9966,6 +9974,9 @@ function makeCachedTileLayer(cacheName) {
         }
       }
 
+      // Pokvaren keš zapis (odsječen download na lošoj mreži) se ne može dekodirati —
+      // bez ovoga bi se TRAJNO servirao i pločica bi zauvijek ostala prazna.
+      const dropBadCache = () => { try { caches.open(cacheName).then(c => c.delete(url)); } catch(e) {} };
       const drawBlob = (blob) => {
         if ('createImageBitmap' in window) {
           createImageBitmap(blob).then(bmp => {
@@ -9973,12 +9984,12 @@ function makeCachedTileLayer(cacheName) {
             ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
             _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();  // D1-7
             done(null, canvas);
-          }).catch(() => done(null, canvas));
+          }).catch(() => { dropBadCache(); fallback(); });
         } else {
           const u = URL.createObjectURL(blob);
           const img = new Image();
           img.onload = () => { ctx.clearRect(0, 0, sz.x, sz.y); ctx.drawImage(img, 0, 0, sz.x, sz.y); URL.revokeObjectURL(u); done(null, canvas); };
-          img.onerror = () => { URL.revokeObjectURL(u); done(null, canvas); };
+          img.onerror = () => { URL.revokeObjectURL(u); dropBadCache(); fallback(); };
           img.src = u;
         }
       };

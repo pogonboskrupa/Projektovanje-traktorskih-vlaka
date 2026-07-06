@@ -2,7 +2,7 @@
 // Service Worker — ŠPD Unsko-sanske šume
 // Promijeni APP_VERSION pri svakom deploymentu → okida update
 // =====================================================================
-const APP_VERSION = '3.21.3';
+const APP_VERSION = '3.22.0';
 const APP_CACHE   = 'tvlake-app-v' + APP_VERSION;
 const TILE_CACHE  = 'tvlake-tiles-v1';
 const LIB_CACHE   = 'tvlake-lib-v1';
@@ -56,19 +56,10 @@ self.addEventListener('activate', event => {
 // ─── FETCH ───────────────────────────────────────────────────────────
 
 // Helper — cache-then-fetch pattern for tile caches
-// OS-S5: tile keš bez limita raste cijelu sezonu; kad origin dostigne kvotu browser
-// može evict-ovati CIJELI Cache Storage (sve offline pločice odjednom). Zato FIFO
-// trim: povremeno (1 od 50 upisa) ako je keš iznad limita, obriši najstarije unose.
-const TILE_CACHE_MAX = 12000;   // ~pločica po kešu (tile/elev/slope/terr zasebno)
-let _tilePutCount = 0;
-async function _trimTileCache(cache) {
-  try {
-    const keys = await cache.keys();
-    if (keys.length <= TILE_CACHE_MAX) return;
-    const drop = keys.slice(0, keys.length - TILE_CACHE_MAX + 1000); // spusti ispod limita
-    for (const k of drop) await cache.delete(k);
-  } catch (e) {}
-}
+// Pregledane pločice se čuvaju TRAJNO (bez FIFO trima) — korisnik ih briše sam
+// kroz "Offline podaci po karti". Protiv browser evikcije pri punom disku se
+// štitimo sa navigator.storage.persist() (traži se iz aplikacije pri startu);
+// na stvarno punom disku cache.put baci QuotaExceededError i tiho se preskoči.
 function _tileRespond(event, cacheName) {
   event.respondWith(
     caches.open(cacheName).then(async cache => {
@@ -77,10 +68,7 @@ function _tileRespond(event, cacheName) {
       try {
         const resp = await fetch(event.request);
         if (resp.ok) {
-          try {
-            cache.put(event.request, resp.clone());
-            if ((++_tilePutCount % 50) === 0) _trimTileCache(cache); // fire-and-forget
-          } catch(e) {}
+          try { cache.put(event.request, resp.clone()); } catch(e) {}
         }
         return resp;
       } catch {
