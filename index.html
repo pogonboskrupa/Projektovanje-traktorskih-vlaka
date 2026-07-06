@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.21.2';
+const APP_VER = 'v3.21.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -10019,10 +10019,10 @@ function makeCachedTileLayer(cacheName) {
               drawBmp(bmp, sx, sy, sub); return true;
             }
             // Nije u kešu — dohvati roditelja s mreže (samo bliski roditelji, da se
-            // ne kaskadira previše zahtjeva po pločici).
+            // ne kaskadira previše zahtjeva po pločici). Timeout kao i glavni fetch.
             if (dz <= 3 && navigator.onLine !== false) {
-              const pr = await fetch(purl, { mode: 'cors' });
-              if (pr.ok) {
+              const pr = await fetchTile(purl, 6000);
+              if (pr && pr.ok) {
                 try { c.put(purl, pr.clone()); } catch(e) {}
                 const bmp = await createImageBitmap(await pr.blob());
                 _bmpCacheSet(_tileBmpCache, purl, bmp); _tileBmpEvict();
@@ -10035,6 +10035,22 @@ function makeCachedTileLayer(cacheName) {
       };
 
       const fallback = async () => {
+        // Zakašnjeli pozadinski retry: pločica koja je završila kao zamućeni
+        // roditelj (ili prazna) se sama zamijeni pravom kad mreža proradi —
+        // bez done() (već pozvan), samo direktno precrtavanje + upis u keš.
+        if (navigator.onLine !== false) setTimeout(async () => {
+          const r = await fetchTile(url, 8000);
+          if (r && r.ok) {
+            try { const c = await caches.open(cacheName); c.put(url, r.clone()); } catch(e) {}
+            try {
+              const bmp = await createImageBitmap(await r.blob());
+              ctx.clearRect(0, 0, sz.x, sz.y);
+              ctx.imageSmoothingEnabled = false;
+              ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
+              _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();
+            } catch(e) {}
+          }
+        }, 6000);
         if (await drawParentFallback()) return;   // roditelj iz keša → nema prazno
         // zadnji pokušaj: <img> s crossOrigin (može proći kad fetch padne zbog CORS-a, online)
         const img = new Image();
@@ -10044,16 +10060,33 @@ function makeCachedTileLayer(cacheName) {
         img.src = url;
       };
 
+      // Fetch s TIMEOUTOM — na terenskoj mreži zahtjev zna visiti beskonačno
+      // (mrtva konekcija uz onLine=true) pa se done() nikad ne pozove i pločica
+      // ostane trajno prazna. Timeout → resolve(null) → fallback/retry.
+      const fetchTile = (u, ms) => new Promise(resolve => {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), ms);
+        fetch(u, { mode: 'cors', signal: ctl.signal })
+          .then(r => { clearTimeout(t); resolve(r); })
+          .catch(() => { clearTimeout(t); resolve(null); });
+      });
+
       if (!('caches' in window)) { fallback(); return canvas; }
 
       caches.open(cacheName).then(async cache => {
         const cached = await cache.match(url);
         if (cached) { drawBlob(await cached.blob()); return; }
-        try {
-          const resp = await fetch(url, { mode: 'cors' });
-          if (resp.ok) { cache.put(url, resp.clone()); drawBlob(await resp.blob()); }
-          else fallback();
-        } catch { fallback(); }
+        let resp = await fetchTile(url, 8000);
+        if (!resp || !resp.ok) {
+          // Kratka pauza pa JEDAN retry — pokriva burst rate-limit (Google 429/403
+          // pri učitavanju cijelog ekrana) i tranzijentne prekide konekcije.
+          await new Promise(r => setTimeout(r, 1200));
+          resp = await fetchTile(url, 8000);
+        }
+        if (resp && resp.ok) {
+          try { cache.put(url, resp.clone()); } catch(e) {}
+          drawBlob(await resp.blob());
+        } else fallback();
       }).catch(fallback);
 
       return canvas;
