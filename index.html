@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.22.1';
+const APP_VER = 'v3.22.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -9935,6 +9935,10 @@ function makeCachedTileLayer(cacheName) {
       const sz = this.getTileSize();
       const canvas = document.createElement('canvas');
       canvas.width = sz.x; canvas.height = sz.y;
+      // Označi pločicu kao NACRTANU pri svakom done() — _abortLoading po tome
+      // razlikuje gotove (zadrži kao retained) od nedovršenih (ukloni).
+      const _ldone = done;
+      done = (e, c) => { canvas._done = true; _ldone(e, c); };
       // D1-4: providan canvas, bez neprozirne ispune — providni dijelovi propuštaju
       // Leaflet-ove zadržane pločice susjednog zoom nivoa (gladak zoom-out) i pozadinu
       // pane-a (#2d3a2e); pri gubitku GPU backing-a pokaže zelenu pozadinu, ne crno.
@@ -10128,6 +10132,31 @@ function makeCachedTileLayer(cacheName) {
       }).catch(fallback);
 
       return canvas;
+    },
+
+    // KLJUČNO za zoom in/out prazninu: Leaflet-ov TileLayer._abortLoading pri
+    // promjeni zooma radi "if (!tile.complete) remove" — a CANVAS nema .complete
+    // (uvijek undefined) pa je brisao SVAKU pločicu starog zooma, čak i potpuno
+    // nacrtane: (1) ubija retained-tile glatki prelaz → bljesak/praznina, posebno
+    // zoom in pa zoom out; (2) briše direktno (bez _removeTile) pa tileunload NE
+    // okine i zombi fetch-evi prežive baš na zoom promjeni. Override:
+    // nedovršene ukloni + prekini im zahtjeve; NACRTANE ostavi — GridLayer ih
+    // prune-uje tek kad pločice novog zooma budu spremne.
+    _abortLoading: function () {
+      for (const key in this._tiles) {
+        const t = this._tiles[key];
+        if (!t || t.coords.z === this._tileZoom) continue;
+        const el = t.el;
+        if (el && el._ctls) {
+          el._dead = true;
+          el._ctls.forEach(c => { try { c.abort(); } catch(e) {} });
+          el._ctls.clear();
+        }
+        if (el && !el._done) {
+          try { L.DomUtil.remove(el); } catch(e) {}
+          delete this._tiles[key];
+        }
+      }
     }
   });
 }
