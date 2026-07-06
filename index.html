@@ -1875,6 +1875,41 @@ select:focus { outline:none; border-color:#3b82f6; }
 .pm-day-line b { color:#cbd5e1; }
 .pm-empty { color:#475569; font-size:12px; text-align:center; padding:18px; }
 
+/* Izvještaji (sedmični/mjesečni) — dijeli .pm-* klase za sadržaj */
+#izv-modal {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.85); z-index:9999;
+  align-items:center; justify-content:center;
+}
+#izv-modal.show { display:flex; }
+#izv-box {
+  background:#0f172a; border:1px solid #1e3a5f;
+  border-radius:12px; padding:0;
+  width:680px; max-width:96vw; max-height:92vh;
+  display:flex; flex-direction:column;
+  box-shadow:0 12px 40px rgba(0,0,0,0.8);
+}
+#izv-hdr { display:flex; align-items:center; gap:10px;
+  padding:14px 18px; border-bottom:1px solid #1e293b; flex-shrink:0; }
+#izv-hdr h3 { font-size:15px; color:#60a5fa; margin:0; flex:1; }
+#izv-close-btn { background:transparent; border:none; color:#64748b;
+  font-size:22px; cursor:pointer; line-height:1; padding:0 4px; }
+#izv-close-btn:hover { color:#f87171; }
+#izv-toolbar { display:flex; align-items:center; justify-content:space-between;
+  gap:10px; padding:10px 18px; border-bottom:1px solid #1e293b; flex-wrap:wrap; }
+.izv-mode-grp { display:flex; gap:3px; background:#16213e; border:1px solid #1e3a5f;
+  border-radius:8px; padding:3px; }
+.izv-mode-btn { background:transparent; border:none; color:#94a3b8; font-size:12px;
+  font-weight:600; padding:6px 12px; border-radius:6px; cursor:pointer; }
+.izv-mode-btn.active { background:#1e3a5f; color:#e2e8f0; }
+.izv-nav { display:flex; align-items:center; gap:8px; font-size:12.5px;
+  color:#cbd5e1; font-weight:600; white-space:nowrap; }
+.izv-nav-btn { background:#16213e; border:1px solid #334155; color:#94a3b8;
+  border-radius:6px; padding:4px 10px; font-size:13px; cursor:pointer; }
+.izv-nav-btn:hover { color:#fff; border-color:#475569; }
+#izv-body { padding:14px 18px; overflow-y:auto; flex:1; }
+#izv-foot { padding:10px 18px 16px; border-top:1px solid #1e293b; flex-shrink:0; }
+
 /* Offline modal */
 /* Nagib analiza panel */
 #nagib-panel {
@@ -4282,7 +4317,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.24.1';
+const APP_VER = 'v3.25.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4991,6 +5026,9 @@ async function sbLoadProfile() {
   if (adminItem) adminItem.style.display = isAdm ? 'block' : 'none';
   const postavkeItem = document.getElementById('menu-postavke-item');
   if (postavkeItem) postavkeItem.style.display = isAdm ? 'block' : 'none';
+  // Izvještaji (sedmični/mjesečni po projektantu): nadzorni prikaz — admin + vodeći
+  const izvItem = document.getElementById('mdrop-izvjestaji');
+  if (izvItem) izvItem.style.display = (isAdm || isVod) ? 'block' : 'none';
 
   // Projektantski alati (admin nadzorni nalog ih nema)
   const noviBtn = document.querySelector('#proj-list-sec .btn.b[onclick="showNovProjektForm()"]');
@@ -19181,6 +19219,197 @@ function _openOrDownloadReport(html, baseName) {
   }
 }
 
+// ═══ IZVJEŠTAJI — sedmični/mjesečni pregled aktivnosti (vlaka + doznaka) ═════
+// Nadzorni prikaz (admin: sve šumarije; vodeći: svoja šumarija) preko RPC-a
+// izvjestaj_aktivnost — podaci se čitaju direktno iz trajno pohranjenih
+// dnevni_log/doz_area_markings zapisa, pa je "cijela godina" samo pitanje
+// proširenja p_od/p_do raspona (bez posebnog lokalnog keširanja).
+let _izvMode   = 'sedmica';   // 'sedmica' | 'mjesec'
+let _izvAnchor = new Date();  // dan unutar trenutno prikazanog perioda
+let _izvRows   = null;        // rezultat RPC-a (niz) ili {_err}
+
+const _DANI_PUNI = ['nedjelja','ponedjeljak','utorak','srijeda','četvrtak','petak','subota'];
+function _izvDanPuni(dateStr) {
+  const d = new Date(String(dateStr).length <= 10 ? dateStr + 'T12:00:00' : dateStr);
+  return fmtDateShort(dateStr) + ' (' + _DANI_PUNI[d.getDay()] + ')';
+}
+function _izvIso(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function _izvRangeOf(mode, anchor) {
+  const d = new Date(anchor);
+  if (mode === 'sedmica') {
+    const dow = (d.getDay() + 6) % 7; // 0=pon .. 6=ned
+    const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dow);
+    const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
+    const od = _izvIso(mon), doo = _izvIso(sun);
+    return { od, doo, label: 'Sedmica ' + fmtDateShort(od) + ' – ' + fmtDateShort(doo) };
+  }
+  const first = new Date(d.getFullYear(), d.getMonth(), 1);
+  const last  = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  const MJESECI = ['Januar','Februar','Mart','April','Maj','Juni','Juli','Avgust','Septembar','Oktobar','Novembar','Decembar'];
+  return { od: _izvIso(first), doo: _izvIso(last), label: MJESECI[d.getMonth()] + ' ' + d.getFullYear() + '.' };
+}
+const _izvFmtKm = m => (Number(m || 0) / 1000).toFixed(2).replace('.', ',') + ' km';
+const _izvFmtHa = h => Number(h || 0).toFixed(2).replace('.', ',') + ' ha';
+
+function showIzvjestaji() {
+  if (!(sbProfile?.is_admin || isVodeci())) return;
+  document.getElementById('izv-modal').classList.add('show');
+  _izvUpdModeButtons();
+  _izvFetch();
+}
+function closeIzvjestaji() {
+  document.getElementById('izv-modal').classList.remove('show');
+}
+function _izvUpdModeButtons() {
+  document.getElementById('izv-mode-sedmica').classList.toggle('active', _izvMode === 'sedmica');
+  document.getElementById('izv-mode-mjesec').classList.toggle('active', _izvMode === 'mjesec');
+}
+function _izvSetMode(mode) {
+  if (_izvMode === mode) return;
+  _izvMode = mode;
+  _izvAnchor = new Date();
+  _izvUpdModeButtons();
+  _izvFetch();
+}
+function _izvNav(dir) {
+  const d = new Date(_izvAnchor);
+  if (_izvMode === 'sedmica') d.setDate(d.getDate() + dir * 7);
+  else d.setMonth(d.getMonth() + dir);
+  _izvAnchor = d;
+  _izvFetch();
+}
+async function _izvFetch() {
+  const r = _izvRangeOf(_izvMode, _izvAnchor);
+  document.getElementById('izv-period-label').textContent = r.label;
+  _izvRows = null;
+  _izvRenderBody();
+  try {
+    const { data, error } = await sb.rpc('izvjestaj_aktivnost', { p_od: r.od, p_do: r.doo });
+    if (error) throw error;
+    _izvRows = data || [];
+  } catch(e) {
+    _izvRows = { _err: e };
+  }
+  _izvRenderBody();
+}
+function _izvRenderBody() {
+  const el = document.getElementById('izv-body');
+  if (_izvRows === null) { el.innerHTML = '<div class="pm-empty">⏳ Učitavam izvještaj...</div>'; return; }
+  if (_izvRows._err) {
+    const e = _izvRows._err;
+    const missing = /function .*does not exist|schema cache|PGRST202/i.test(e.message || '') || e.code === 'PGRST202';
+    el.innerHTML = `<div class="pm-empty">${missing
+      ? '⚠ Primijeni migraciju 20260707 na Supabase (izvjestaj_aktivnost ne postoji)'
+      : 'Greška: ' + _esc(e.message || '?')}</div>`;
+    return;
+  }
+  const rows = _izvRows;
+  if (!rows.length) { el.innerHTML = '<div class="pm-empty">Nema aktivnosti u ovom periodu.</div>'; return; }
+
+  // Rekap po projektantu
+  const byPerson = {};
+  rows.forEach(r => {
+    const p = byPerson[r.ime_prezime] || (byPerson[r.ime_prezime] = { vlaka: 0, doznaka: 0 });
+    if (r.vrsta === 'vlaka') p.vlaka += Number(r.vrijednost || 0);
+    else p.doznaka += Number(r.vrijednost || 0);
+  });
+  const personList = Object.entries(byPerson).sort((a, b) => b[1].vlaka - a[1].vlaka);
+
+  let html = '<div class="pm-sec"><div class="pm-sec-t">👤 Rekap po projektantu</div>';
+  html += '<table class="pm-tbl"><thead><tr><th>Projektant</th><th class="r">Vlaka</th><th class="r">Doznaka</th></tr></thead><tbody>';
+  personList.forEach(([nm, v]) => {
+    html += `<tr><td>${_esc(nm)}</td><td class="r">${v.vlaka ? _izvFmtKm(v.vlaka) : '—'}</td><td class="r">${v.doznaka ? _izvFmtHa(v.doznaka) : '—'}</td></tr>`;
+  });
+  html += '</tbody></table></div>';
+
+  // Po danu — hronološki, format "DD.MM.GGGG (dan)  Ime Prezime / X,XX km vlaka"
+  const byDay = {};
+  rows.forEach(r => { (byDay[r.datum] = byDay[r.datum] || []).push(r); });
+  const dayKeys = Object.keys(byDay).sort();
+  html += '<div class="pm-sec"><div class="pm-sec-t">📅 Po danu</div>';
+  dayKeys.forEach(dt => {
+    const lines = byDay[dt].map(e => {
+      const val = e.vrsta === 'vlaka' ? _izvFmtKm(e.vrijednost) + ' vlaka' : 'doznaka ' + _izvFmtHa(e.vrijednost);
+      const odj = e.odjel ? ' <span style="color:#64748b;">(' + _esc(e.odjel) + ')</span>' : '';
+      return `<div class="pm-day-line"><b>${_esc(e.ime_prezime)}</b> / ${val}${odj}</div>`;
+    }).join('');
+    html += `<div class="pm-day"><div class="pm-day-hdr"><span class="pm-day-date">${_izvDanPuni(dt)}</span></div>${lines}</div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+function _izvExport() {
+  if (!_izvRows || _izvRows._err || !_izvRows.length) { showToast('Nema podataka za izvještaj'); return; }
+  const r = _izvRangeOf(_izvMode, _izvAnchor);
+  const rows = _izvRows;
+
+  const byPerson = {};
+  rows.forEach(row => {
+    const p = byPerson[row.ime_prezime] || (byPerson[row.ime_prezime] = { vlaka: 0, doznaka: 0 });
+    if (row.vrsta === 'vlaka') p.vlaka += Number(row.vrijednost || 0);
+    else p.doznaka += Number(row.vrijednost || 0);
+  });
+  const personRows = Object.entries(byPerson).sort((a, b) => b[1].vlaka - a[1].vlaka)
+    .map(([nm, v]) => `<tr><td>${_esc(nm)}</td><td class="r">${v.vlaka ? _izvFmtKm(v.vlaka) : '—'}</td><td class="r">${v.doznaka ? _izvFmtHa(v.doznaka) : '—'}</td></tr>`).join('');
+
+  const byDay = {};
+  rows.forEach(row => { (byDay[row.datum] = byDay[row.datum] || []).push(row); });
+  const dayKeys = Object.keys(byDay).sort();
+  const dayHtml = dayKeys.map(dt => {
+    const lines = byDay[dt].map(e => {
+      const val = e.vrsta === 'vlaka' ? _izvFmtKm(e.vrijednost) + ' vlaka' : 'doznaka ' + _izvFmtHa(e.vrijednost);
+      return `<tr><td>${_esc(e.ime_prezime)}</td><td>${val}</td><td>${_esc(e.odjel || '—')}</td></tr>`;
+    }).join('');
+    return `<tr><td colspan="3" style="background:#eef2ff;font-weight:bold;padding-top:10px;">${_izvDanPuni(dt)}</td></tr>${lines}`;
+  }).join('');
+
+  const totVlaka = rows.filter(r => r.vrsta === 'vlaka').reduce((s, r) => s + Number(r.vrijednost || 0), 0);
+  const totDoz   = rows.filter(r => r.vrsta === 'doznaka').reduce((s, r) => s + Number(r.vrijednost || 0), 0);
+  const now = new Date().toLocaleString('hr', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const sumLabel = (sbProfile?.is_admin) ? 'Sve šumarije' : (sbProfile?.sumarija || '—');
+
+  const html = `<!DOCTYPE html><html lang="bs"><head><meta charset="UTF-8">
+<title>Izvještaj — ${_esc(r.label)}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#111;background:#fff;padding:14mm 16mm}
+h1{font-size:15pt;margin-bottom:2px}
+.sub{font-size:9.5pt;color:#555;margin-bottom:14px}
+h2{font-size:11.5pt;margin:18px 0 6px;padding-bottom:3px;border-bottom:2px solid #1e3a5f;color:#1e3a5f}
+.info{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px 24px;margin-bottom:16px;background:#f5f7fa;border-radius:6px;padding:10px 14px}
+.il{font-size:9pt;color:#555}.iv{font-weight:bold;font-size:10.5pt}
+table{width:100%;border-collapse:collapse;font-size:9.5pt;margin-bottom:8px}
+thead th{background:#1e3a5f;color:#fff;padding:5px 8px;text-align:left;font-weight:600}
+thead th.r{text-align:right}
+tbody td{padding:4px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top}
+tbody td.r{text-align:right}
+tbody tr:nth-child(even) td{background:#f9fafb}
+@media print{body{padding:8mm 10mm}@page{margin:8mm}}
+</style></head><body>
+<h1>ŠPD Unsko-sanske šume — Izvještaj aktivnosti</h1>
+<div class="sub">Generiran: ${now}</div>
+<div class="info">
+  <div><div class="il">Period</div><div class="iv">${_esc(r.label)}</div></div>
+  <div><div class="il">Šumarija</div><div class="iv">${_esc(sumLabel)}</div></div>
+  <div><div class="il">Ukupno vlaka</div><div class="iv">${_izvFmtKm(totVlaka)}</div></div>
+  <div><div class="il">Ukupno doznaka</div><div class="iv">${_izvFmtHa(totDoz)}</div></div>
+</div>
+<h2>Rekap po projektantu</h2>
+<table><thead><tr><th>Projektant</th><th class="r">Vlaka</th><th class="r">Doznaka</th></tr></thead>
+<tbody>${personRows || '<tr><td colspan="3" style="font-style:italic;color:#777">Nema podataka.</td></tr>'}</tbody></table>
+<h2>Po danu</h2>
+<table><thead><tr><th>Projektant</th><th>Aktivnost</th><th>Odjel/projekat</th></tr></thead>
+<tbody>${dayHtml || '<tr><td colspan="3" style="font-style:italic;color:#777">Nema aktivnosti.</td></tr>'}</tbody></table>
+<div class="footer" style="margin-top:22px;font-size:8.5pt;color:#888;border-top:1px solid #d1d5db;padding-top:7px;display:flex;justify-content:space-between">
+  <span>ŠPD Unsko-sanske šume d.o.o. Bihać — Traktorske vlake</span><span>${_esc(sumLabel)} · ${_esc(r.label)}</span>
+</div>
+</body></html>`;
+
+  _openOrDownloadReport(html, 'Izvjestaj_' + _izvMode + '_' + r.od);
+}
+
 // ═══ VREMENSKA PROGNOZA (Open-Meteo — ista usluga kao za visine) ═════════════
 const _WX_CACHE_KEY   = 'tvlake_weather_cache';      // legacy (Moja lokacija)
 const _WX_PLACES_KEY  = 'tvlake_wx_places';          // sačuvane lokacije/područja
@@ -29805,6 +30034,7 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();showTemModal()">📊 Tematska karta</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" id="mdrop-upravljanje" onclick="closeMenuDropdown();showProjectManagement()">📊 Upravljanje projektima</div>
+  <div class="mdrop-item" id="mdrop-izvjestaji" style="display:none;" onclick="closeMenuDropdown();showIzvjestaji()">📅 Sedmični / mjesečni izvještaji</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();toggleMjtrgDropdown()">📏 Mjerenja &amp; Tragovi</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();openGraniceModal()">🗺 Granice Odjela</div>
@@ -29833,6 +30063,31 @@ if (typeof AndroidDownload !== 'undefined') {
     <div id="pm-body">
       <div id="pm-list-wrap"><div id="pm-list"></div></div>
       <div id="pm-detail" style="display:none;"><div id="pm-detail-body"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── IZVJEŠTAJI — sedmični/mjesečni pregled aktivnosti ────────────────── -->
+<div id="izv-modal" onclick="if(event.target===this)closeIzvjestaji()">
+  <div id="izv-box">
+    <div id="izv-hdr">
+      <h3>📅 Sedmični / mjesečni izvještaji</h3>
+      <button id="izv-close-btn" onclick="closeIzvjestaji()">✕</button>
+    </div>
+    <div id="izv-toolbar">
+      <div class="izv-mode-grp">
+        <button class="izv-mode-btn" id="izv-mode-sedmica" onclick="_izvSetMode('sedmica')">Sedmica</button>
+        <button class="izv-mode-btn" id="izv-mode-mjesec" onclick="_izvSetMode('mjesec')">Mjesec</button>
+      </div>
+      <div class="izv-nav">
+        <button class="izv-nav-btn" onclick="_izvNav(-1)">◀</button>
+        <span id="izv-period-label">—</span>
+        <button class="izv-nav-btn" onclick="_izvNav(1)">▶</button>
+      </div>
+    </div>
+    <div id="izv-body"></div>
+    <div id="izv-foot">
+      <button class="pm-act-btn g" onclick="_izvExport()">🖨 Izvještaj</button>
     </div>
   </div>
 </div>
