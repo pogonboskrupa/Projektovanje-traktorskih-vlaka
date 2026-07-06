@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.22.2';
+const APP_VER = 'v3.23.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -26244,6 +26244,22 @@ const _TEM_RAMP      = ['#1a9641','#a6d96a','#ffffbf','#fdae61','#d7191c'];
 let _temMaps     = [];
 let _temRenderer = null;   // L.canvas — hiljade poligona, SVG bi gušio
 let _temEdOpenId = null;   // karta čiji je editor klasa otvoren u modalu
+let _temEdDraft  = {};     // { [mapId]: {colors:[...], edges:[...]} } — nesačuvano stanje editora dok je otvoren
+
+// Boje za proizvoljan broj klasa (n≥2) — interpolacija duž 5 sidrenih boja _TEM_RAMP-a.
+function _temRampFor(n) {
+  if (n <= 1) return [_TEM_RAMP[0]];
+  const hexToRgb = h => [1,3,5].map(i => parseInt(h.slice(i,i+2),16));
+  const rgbToHex = rgb => '#' + rgb.map(v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const pos = (i / (n - 1)) * (_TEM_RAMP.length - 1);
+    const i0 = Math.floor(pos), i1 = Math.min(_TEM_RAMP.length - 1, i0 + 1), f = pos - i0;
+    const c0 = hexToRgb(_TEM_RAMP[i0]), c1 = hexToRgb(_TEM_RAMP[i1]);
+    out.push(rgbToHex([c0[0]+(c1[0]-c0[0])*f, c0[1]+(c1[1]-c0[1])*f, c0[2]+(c1[2]-c0[2])*f]));
+  }
+  return out;
+}
 
 function _temRegSave() {
   try {
@@ -26491,11 +26507,11 @@ function _temPopupHtml(entry, f) {
   </div>`;
 }
 
-// Automatske kvantilne granice (5 klasa → 4 granice, deduplikovano)
-function _temQuantiles(vals) {
+// Automatske kvantilne granice (n klasa → n-1 granica, deduplikovano)
+function _temQuantiles(vals, n = 5) {
   const breaks = [];
-  for (let k = 1; k < 5; k++) {
-    const b = vals[Math.min(vals.length - 1, Math.floor(vals.length * k / 5))];
+  for (let k = 1; k < n; k++) {
+    const b = vals[Math.min(vals.length - 1, Math.floor(vals.length * k / n))];
     if (!breaks.length || b > breaks[breaks.length - 1]) breaks.push(b);
   }
   return breaks;
@@ -26510,14 +26526,17 @@ function _temApplyTheme(id, col) {
     entry.features.forEach(f => f.polys.forEach(p =>
       p.setStyle({ color: '#94a3b8', fillColor: '#94a3b8', fillOpacity: 0.08, weight: 1 })));
     entry._cls = null;
+    if (_temEdOpenId === id) { _temEdOpenId = null; delete _temEdDraft[id]; }   // editor bez teme nema šta prikazati
     _temRegSave(); _temLegendUpd();
     return;
   }
   const vals = entry.features.map(f => Number(f.attrs[col])).filter(Number.isFinite).sort((a, b) => a - b);
   if (vals.length < 2) { showToast('⚠ Premalo vrijednosti za temu "' + col + '"'); return; }
   const ov = entry.styles?.[col];
-  const breaks = (ov?.breaks?.length ? ov.breaks.slice().sort((a, b) => a - b) : _temQuantiles(vals));
-  const colors = (ov?.colors?.length === 5 ? ov.colors : _TEM_RAMP);
+  // Broj klasa = proizvoljan (ručno podešen preko editora); default 5 kad nema override-a.
+  const nDefault = 5;
+  const breaks = (ov?.breaks?.length ? ov.breaks.slice().sort((a, b) => a - b) : _temQuantiles(vals, nDefault));
+  const colors = (ov?.colors?.length >= 2 ? ov.colors : _temRampFor(nDefault));
   const classOf = v => { let c = 0; for (const b of breaks) { if (v >= b) c++; else break; } return c; };
   const fo = Number.isFinite(entry.opacity) ? entry.opacity : 0.55;
   entry.features.forEach(f => {
@@ -26534,6 +26553,9 @@ function _temApplyTheme(id, col) {
   const lo = Number.isFinite(ov?.lo) ? ov.lo : vals[0];
   const hi = Number.isFinite(ov?.hi) ? ov.hi : vals[vals.length - 1];
   entry._cls = { col, breaks, colors, min: lo, max: hi };
+  // Editor otvoren za ovu kartu (npr. promjena teme iz dropdowna dok je editor
+  // otvoren) — draft mora pratiti NOVU temu, inače ostaje na starim klasama.
+  if (_temEdOpenId === id) _temEdDraft[id] = { colors: colors.slice(), edges: [lo, ...breaks, hi] };
   _temRegSave(); _temLegendUpd();
 }
 
@@ -26631,6 +26653,7 @@ async function _temRemoveMap(id) {
   try { map.removeLayer(entry.grp); } catch(e) {}
   _temMaps = _temMaps.filter(m => m.id !== id);
   if (_temEdOpenId === id) _temEdOpenId = null;
+  delete _temEdDraft[id];
   _kmlcDelete(_TEM_IDB_PFX + id).catch(() => {});
   _temRegSave(); _temLegendUpd(); _temModalRender();
   if (typeof _lsRenderTem === 'function') _lsRenderTem();
@@ -27015,50 +27038,64 @@ function _temModalRender() {
 }
 
 function _temEdToggle(id) {
-  _temEdOpenId = _temEdOpenId === id ? null : id;
+  if (_temEdOpenId === id) { _temEdOpenId = null; delete _temEdDraft[id]; _temModalRender(); return; }
+  _temEdOpenId = id;
+  const entry = _temById(id);
+  const cls = entry?._cls;
+  if (cls) _temEdDraft[id] = { colors: (cls.colors || _TEM_RAMP).slice(), edges: [cls.min, ...cls.breaks, cls.max] };
   _temModalRender();
 }
 
-// Editor klasa/boja za aktivnu temu karte: 5 boja + OD/DO za svaku klasu.
-// Susjedne klase dijele granicu (do klase N = od klase N+1) da nema rupa/preklapanja —
-// polja "od"/"do" su dva odvojena inputa nad ISTOM granicom, uživo sinhronizovana
-// (_temEdSyncEdge), pa korisnik može mijenjati donju granicu direktno iz svog reda
-// umjesto da mora ići u red iznad.
+// Editor klasa/boja za aktivnu temu karte: proizvoljan broj klasa (min 2, max 20),
+// svaka sa svojom bojom + OD/DO. Susjedne klase dijele granicu (do klase N = od
+// klase N+1) da nema rupa/preklapanja — polja "od"/"do" su dva odvojena inputa nad
+// ISTOM granicom, uživo sinhronizovana (_temEdSyncEdge). Izvor istine dok je editor
+// otvoren je _temEdDraft[m.id] — ➕/✕ mutiraju ga i ponovo renderuju editor; sve se
+// trajno sačuva (localStorage + IndexedDB) tek na "✓ Primijeni".
+const _TEM_MAX_CLASSES = 20;
 function _temClassEdHtml(m) {
-  const cls = m._cls || {};
-  const colors = (cls.colors || _TEM_RAMP).slice(0, 5);
-  const breaks = (cls.breaks || []).slice(0, 4);
+  const d = _temEdDraft[m.id];
+  if (!d) return '';
+  const colors = d.colors, edges = d.edges, n = colors.length;
   const fmtN = v => (v == null || !Number.isFinite(v)) ? '' : (+(+v).toFixed(2));
-  // edges[0]=lo (od 1. klase), edges[1..4]=unutrašnje granice, edges[5]=hi (do 5. klase)
-  const edges = [cls.min, ...breaks, cls.max];
   const numIn = (val, extraAttrs) => `<input type="number" step="any" value="${fmtN(val)}" ${extraAttrs}
     style="flex:1;min-width:0;padding:6px 7px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:12px;text-align:center;">`;
   const rows = colors.map((c, i) => {
     const loId = `tem-ed-lo-${i}`, hiId = `tem-ed-hi-${i}`;
+    const delBtn = n > 2
+      ? `<button onclick="_temEdRemoveClass('${m.id}',${i})" title="Ukloni klasu"
+           style="background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:6px;color:#f87171;font-size:13px;width:26px;height:28px;flex-shrink:0;cursor:pointer;">✕</button>`
+      : `<span style="width:26px;flex-shrink:0;"></span>`;
     return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
       <input type="color" id="tem-ed-c-${i}" value="${c}"
         style="width:30px;height:28px;padding:0;border:1px solid #334155;border-radius:6px;background:none;cursor:pointer;flex-shrink:0;">
-      <span style="font-size:10px;color:#64748b;width:14px;flex-shrink:0;">${i + 1}.</span>
+      <span style="font-size:10px;color:#64748b;width:16px;flex-shrink:0;">${i + 1}.</span>
       ${numIn(edges[i], `id="${loId}" onchange="_temEdSyncEdge(${i},this.value)"`)}
       <span style="font-size:11px;color:#64748b;flex-shrink:0;">–</span>
       ${numIn(edges[i + 1], `id="${hiId}" onchange="_temEdSyncEdge(${i + 1},this.value)"`)}
+      ${delBtn}
     </div>`;
   }).join('');
+  const addBtn = n < _TEM_MAX_CLASSES
+    ? `<button onclick="_temEdAddClass('${m.id}')"
+         style="width:100%;padding:7px;margin-bottom:8px;background:#0f2940;border:1px dashed #38bdf8;border-radius:8px;color:#7dd3fc;font-size:12px;font-weight:600;cursor:pointer;">➕ Dodaj klasu</button>`
+    : `<div style="font-size:10px;color:#64748b;margin-bottom:8px;text-align:center;">Maksimalno ${_TEM_MAX_CLASSES} klasa</div>`;
   return `
   <div style="margin-top:10px;border-top:1px solid #1e3a5f;padding-top:10px;">
-    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">🎨 <b>${_escHtml(_temColLabel(m, m.theme))}</b> — od/do svake klase i boje:</div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">🎨 <b>${_escHtml(_temColLabel(m, m.theme))}</b> — od/do svake klase i boje (${n} klasa):</div>
     ${rows}
+    ${addBtn}
     <div style="display:flex;gap:6px;margin-top:4px;">
       <button onclick="_temClassEdApply('${m.id}')"
         style="flex:1;padding:8px;background:#166534;border:1px solid #4ade80;border-radius:8px;color:#4ade80;font-size:12px;font-weight:600;cursor:pointer;">✓ Primijeni</button>
       <button onclick="_temClassEdReset('${m.id}')"
-        style="flex:1;padding:8px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:12px;cursor:pointer;">↺ Automatski (kvantili)</button>
+        style="flex:1;padding:8px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:12px;cursor:pointer;">↺ Automatski (5 klasa)</button>
     </div>
   </div>`;
 }
 
-// Granica sa indeksom `edge` (0=lo, 1-4=unutrašnje, 5=hi) postoji u DOM-u na dva mjesta
-// (kao "do" reda edge-1 i kao "od" reda edge) — kad se jedno promijeni, uskladi drugo.
+// Granica sa indeksom `edge` (0=lo, 1..n-1=unutrašnje, n=hi) postoji u DOM-u na dva
+// mjesta (kao "do" reda edge-1 i kao "od" reda edge) — kad se jedno promijeni, uskladi drugo.
 function _temEdSyncEdge(edge, val) {
   const lo = document.getElementById('tem-ed-lo-' + edge);       // "od" reda `edge`
   const hi = document.getElementById('tem-ed-hi-' + (edge - 1));  // "do" reda `edge-1`
@@ -27066,41 +27103,69 @@ function _temEdSyncEdge(edge, val) {
   if (hi && hi.value !== val) hi.value = val;
 }
 
+// Pročita trenutno stanje n redova iz DOM-a (boje + n+1 granica) — koristi ga i
+// "Primijeni" i ➕/✕ (da se ne izgube ručne izmjene korisnika prije mutacije).
+function _temEdScrapeDom(n) {
+  const colors = [];
+  for (let i = 0; i < n; i++) colors.push(document.getElementById('tem-ed-c-' + i)?.value || _TEM_RAMP[i % _TEM_RAMP.length]);
+  const lo0 = parseFloat(document.getElementById('tem-ed-lo-0')?.value);
+  const edges = [lo0];
+  for (let i = 0; i < n; i++) edges.push(parseFloat(document.getElementById('tem-ed-hi-' + i)?.value));
+  return { colors, edges };
+}
+
+function _temEdAddClass(id) {
+  const d = _temEdDraft[id];
+  if (!d) return;
+  if (d.colors.length >= _TEM_MAX_CLASSES) { showToast('⚠ Maksimalno ' + _TEM_MAX_CLASSES + ' klasa'); return; }
+  Object.assign(d, _temEdScrapeDom(d.colors.length));   // povuci trenutne DOM izmjene prije mutacije
+  const n = d.colors.length;
+  const last2 = d.edges[n - 1], lastHi = d.edges[n];
+  const mid = Number.isFinite(last2) && Number.isFinite(lastHi) ? (last2 + lastHi) / 2 : lastHi;
+  d.edges.splice(n, 0, mid);   // nova granica dijeli POSLJEDNJU klasu na dvije
+  d.colors.push(KORISNIK_PAL[n % KORISNIK_PAL.length] || '#94a3b8');
+  _temModalRender();
+}
+
+function _temEdRemoveClass(id, idx) {
+  const d = _temEdDraft[id];
+  if (!d) return;
+  if (d.colors.length <= 2) { showToast('⚠ Minimalno 2 klase'); return; }
+  Object.assign(d, _temEdScrapeDom(d.colors.length));
+  const n = d.colors.length;
+  d.colors.splice(idx, 1);
+  if (idx < n - 1) d.edges.splice(idx + 1, 1); else d.edges.splice(idx, 1);
+  _temModalRender();
+}
+
 function _temClassEdApply(id) {
   const entry = _temById(id);
   if (!entry || !entry.theme) return;
-  const colors = [];
-  for (let i = 0; i < 5; i++) {
-    const c = document.getElementById('tem-ed-c-' + i);
-    colors.push(c ? c.value : _TEM_RAMP[i]);
-  }
-  // Pročitaj svih 6 granica (lo, 4×unutrašnja, hi) — "do" polje reda i JEST edge i+1,
-  // pa je dovoljno čitati samo "hi" inpute (0..4) da se pokupi cio niz edges[0..5]
-  // preko lo-0 (edge 0) + hi-0..hi-4 (edge 1..5).
-  const lo0 = parseFloat(document.getElementById('tem-ed-lo-0')?.value);
-  const edges = [lo0];
-  for (let i = 0; i < 5; i++) {
-    const v = parseFloat(document.getElementById('tem-ed-hi-' + i)?.value);
-    edges.push(v);
-  }
+  const d = _temEdDraft[id];
+  if (!d) return;
+  const n = d.colors.length;
+  const { colors, edges } = _temEdScrapeDom(n);
   if (edges.some(v => !Number.isFinite(v))) { showToast('⚠ Sva polja moraju biti brojevi'); return; }
   for (let i = 1; i < edges.length; i++) {
     if (edges[i] <= edges[i - 1]) { showToast('⚠ Vrijednosti moraju rastuće (svaka "do" > prethodne "od")'); return; }
   }
   entry.styles = entry.styles || {};
-  entry.styles[entry.theme] = { breaks: edges.slice(1, 5), colors, lo: edges[0], hi: edges[5] };
-  _temApplyTheme(id, entry.theme);
+  entry.styles[entry.theme] = { breaks: edges.slice(1, -1), colors, lo: edges[0], hi: edges[edges.length - 1] };
+  _temApplyTheme(id, entry.theme);   // ponovo boji poligone + _temRegSave() (trajno pamćenje)
+  _temEdDraft[id] = { colors: colors.slice(), edges: edges.slice() };
   _temModalRender();
-  showToast('✅ Klase i boje primijenjene');
+  showToast('✅ Klase i boje primijenjene (' + n + ' klasa)');
 }
 
 function _temClassEdReset(id) {
   const entry = _temById(id);
   if (!entry || !entry.theme) return;
   if (entry.styles) delete entry.styles[entry.theme];
-  _temApplyTheme(id, entry.theme);
+  _temApplyTheme(id, entry.theme);   // rekomputira entry._cls sa default 5 kvantilnih klasa
+  const cls = entry._cls;
+  if (cls) _temEdDraft[id] = { colors: (cls.colors || _TEM_RAMP).slice(), edges: [cls.min, ...cls.breaks, cls.max] };
   _temModalRender();
-  showToast('↺ Vraćeno na automatske kvantile');
+  showToast('↺ Vraćeno na automatske kvantile (5 klasa)');
 }
 
 // ── Rekurzivno listanje Supabase bucketa (root + svi podfolderi) ──────────────
