@@ -4281,7 +4281,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.23.0';
+const APP_VER = 'v3.24.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4965,6 +4965,7 @@ async function sbLoadProfile() {
   // ŠPD-terenskog naloga na istom uređaju ostane bez Projekat/Vlake/Doznaka tabova.
   const isAdm = !!data.is_admin;   // admin: nadzor, bez praktičnih alata
   const isFld = isSpdField();      // ŠPD terenski: samo navigacija/orijentacija
+  const isVod = isVodeci();        // vodeći projektant: read-only nadzor svoje šumarije
 
   // Tabovi
   const adminTabBtn    = document.getElementById('admin-tab-btn');
@@ -4976,10 +4977,11 @@ async function sbLoadProfile() {
   if (adminTabBtn)    adminTabBtn.style.display    = isAdm ? '' : 'none';
   if (postavkeTabBtn) postavkeTabBtn.style.display = isAdm ? '' : 'none';
   if (terenBtn)    terenBtn.style.display    = isFld ? '' : 'none';
-  if (projBtn)     projBtn.style.display     = isFld ? 'none' : '';
-  if (vlkBtn)      vlkBtn.style.display      = isFld ? 'none' : '';
-  // Doznaka: vide šumarijski nalozi — nema je admin (nadzor) ni ŠPD terenski
-  if (dozTab)      dozTab.style.display      = (isAdm || isFld) ? 'none' : '';
+  // Vodeći projektant: samo Karta + Meni (nadzor kroz "Upravljanje projektima")
+  if (projBtn)     projBtn.style.display     = (isFld || isVod) ? 'none' : '';
+  if (vlkBtn)      vlkBtn.style.display      = (isFld || isVod) ? 'none' : '';
+  // Doznaka: vide šumarijski nalozi — nema je admin (nadzor), ŠPD terenski ni vodeći
+  if (dozTab)      dozTab.style.display      = (isAdm || isFld || isVod) ? 'none' : '';
 
   // Meni stavke
   const adminItem = document.getElementById('menu-admin-item');
@@ -5048,6 +5050,8 @@ async function showApp() {
         navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist(); });
       }
     } catch(e) {}
+    // Vodeći projektant: nalog služi isključivo nadzoru — odmah otvori pregled
+    if (isVodeci() && navigator.onLine) showProjectManagement();
   }, 80);
 }
 
@@ -5790,6 +5794,26 @@ async function sbLoadProjekti() {
   if (!sbUser) return;
   // ŠPD terenski korisnik nema projekte — preskoči učitavanje
   if (isSpdField()) { _projekti = []; rndProjektiList(); return; }
+  // Vodeći projektant: SVI projekti njegove šumarije preko SECURITY DEFINER RPC-a
+  // (RLS običnom korisniku ne garantuje SELECT tuđih projekata). Minimalni objekti
+  // su dovoljni za "Upravljanje projektima" detalj i prikaz na karti.
+  if (isVodeci()) {
+    try {
+      const { data, error } = await sb.rpc('vodeci_projekti_pregled');
+      if (error) throw error;
+      _projekti = (data || []).map(r => ({
+        id: r.id, sumarija: r.sumarija, gj: r.gj, odjel: r.odjel, datum: r.datum,
+        povrsina: r.povrsina, korisnik_id: r.korisnik_id || null, clanovi: []
+      }));
+      _OL.save(_OL.PROJEKTI, _projekti);
+    } catch(e) {
+      const cached = _OL.load(_OL.PROJEKTI);
+      if (cached) _projekti = cached;
+    }
+    if (_aktivniProjektId && !_projekti.find(p => p.id === _aktivniProjektId)) _aktivniProjektId = null;
+    rndProjektiList();
+    return;
+  }
   const myGen = ++_projLoadGen;
   try {
     // Admin (SPD USSUME) — nadzorni pregled: vidi SVE projekte (read-only)
@@ -7555,8 +7579,8 @@ async function sbLoadKolegeVlake() {
   };
   const rndList = () => { if (typeof rndKolegeVlakeList === 'function') rndKolegeVlakeList(); };
 
-  // Admin nadzorni pregled: prikaži SVE vlake aktivnog projekta (svih korisnika)
-  if (isAdmin() && akt) {
+  // Admin/vodeći nadzorni pregled: prikaži SVE vlake aktivnog projekta (svih korisnika)
+  if ((isAdmin() || isVodeci()) && akt) {
     let dbData = null;
     try {
       const { data } = await sb.from('vlake')
@@ -9298,8 +9322,18 @@ function isSpd() { return sbProfile?.sumarija === 'ŠPD US ŠUME'; }
 function isAdmin() { return !!sbProfile?.is_admin; }
 // ŠPD US ŠUME terenski korisnik (nije admin): samo navigacija/orijentacija, bez projekata
 function isSpdField() { return isSpd() && !isAdmin(); }
+
+// "Vodeći projektant" — po jedan nalog po šumariji (ime = "Vodeći Projektant",
+// prezime = naziv šumarije, npr. "Vodeći Projektant Bihać"). Registruje se kroz
+// normalnu registraciju; admin mu resetuje PIN kroz Admin panel. Nalog je ČISTO
+// nadzorni: read-only pregled rada svih projektanata SVOJE šumarije (vlake +
+// doznaka + statistike) kroz "Upravljanje projektima".
+function isVodeci() {
+  if (!sbProfile || sbProfile.is_admin) return false;
+  return /^vode[cć]i\s+projektant$/i.test((sbProfile.ime || '').trim());
+}
 // Bilo koji nalog koji ne smije uređivati projekte/vlake
-function isReadOnly() { return isSpd() || isAdmin(); }
+function isReadOnly() { return isSpd() || isAdmin() || isVodeci(); }
 
 function wgsToMGI(lat, lon) {
   try {
@@ -18478,21 +18512,39 @@ function _pmUserName(id) {
   return (kolegeMap[id] && kolegeMap[id].ime) || 'Nepoznat';
 }
 
-let _pmAdminRows = null; // admin: agregati svih projekata svih šumarija (RPC), {_err} na grešku
+let _pmAdminRows = null; // admin/vodeći: agregati projekata (RPC), {_err} na grešku
+let _pmDozRows   = null; // vodeći: doznaka odjeli šumarije (RPC)
 
 async function showProjectManagement() {
   document.getElementById('pm-modal').classList.add('show');
-  if (sbProfile?.is_admin) {
-    // Admin nadzor: in-memory `vlake` je prazan (read-only nalog) pa se brojevi po
-    // projektu računaju na serveru — admin_projekti_pregled (sve šumarije odjednom)
-    _pmAdminRows = null;
+  if (sbProfile?.is_admin || isVodeci()) {
+    // Nadzor: in-memory `vlake` je prazan (read-only nalog) pa se brojevi po
+    // projektu računaju na serveru. Admin = sve šumarije; vodeći = SVOJA šumarija.
+    _pmAdminRows = null; _pmDozRows = null;
     _pmShowList(); // prikaže "učitavam" kroz admin granu _pmRenderList
+    const rpcName = sbProfile?.is_admin ? 'admin_projekti_pregled' : 'vodeci_projekti_pregled';
     try {
-      const { data, error } = await sb.rpc('admin_projekti_pregled');
+      const { data, error } = await sb.rpc(rpcName);
       if (error) throw error;
       _pmAdminRows = data || [];
+      // Vodeći: sinhronizuj _projekti iz RPC redova — _pmOpenDetail/_pmShowOnMap
+      // rade nad _projekti, a vodeći ih ne učitava klasičnim putem.
+      if (isVodeci()) {
+        _projekti = _pmAdminRows.map(r => ({
+          id: r.id, sumarija: r.sumarija, gj: r.gj, odjel: r.odjel, datum: r.datum,
+          povrsina: r.povrsina, korisnik_id: r.korisnik_id || null, clanovi: []
+        }));
+      }
     } catch(e) {
       _pmAdminRows = { _err: e };
+    }
+    // Vodeći: doznaka pregled šumarije (zasebna sekcija ispod projekata)
+    if (isVodeci()) {
+      try {
+        const { data, error } = await sb.rpc('vodeci_doznaka_pregled');
+        if (error) throw error;
+        _pmDozRows = data || [];
+      } catch(e) { _pmDozRows = []; }
     }
     if (_pmDetailId === null) _pmRenderList(); // ne pregazi detalj ako je u međuvremenu otvoren
     return;
@@ -18515,7 +18567,7 @@ function _pmShowList() {
 
 function _pmRenderList() {
   let el = document.getElementById('pm-list');
-  if (sbProfile?.is_admin) { _pmRenderAdminList(el); return; }
+  if (sbProfile?.is_admin || isVodeci()) { _pmRenderAdminList(el); return; }
   if (!_projekti.length) {
     el.innerHTML = '<div class="pm-empty">Nema projekata.</div>';
     return;
@@ -18592,12 +18644,14 @@ function _pmRenderAdminList(el) {
     const e = _pmAdminRows._err;
     const missing = /function .*does not exist|schema cache|PGRST202/i.test(e.message || '') || e.code === 'PGRST202';
     el.innerHTML = `<div class="pm-empty">${missing
-      ? '⚠ Primijeni migraciju 20260703 na Supabase (admin_projekti_pregled ne postoji)'
+      ? (sbProfile?.is_admin
+          ? '⚠ Primijeni migraciju 20260703 na Supabase (admin_projekti_pregled ne postoji)'
+          : '⚠ Primijeni migraciju 20260706 na Supabase (vodeci_projekti_pregled ne postoji)')
       : 'Greška: ' + _esc(e.message || '?')}</div>`;
     return;
   }
   const rows = _pmAdminRows;
-  if (!rows.length) { el.innerHTML = '<div class="pm-empty">Nema projekata.</div>'; return; }
+  if (!rows.length && !(_pmDozRows || []).length) { el.innerHTML = '<div class="pm-empty">Nema projekata.</div>'; return; }
 
   const sums = new Set(rows.map(r => r.sumarija || '—'));
   let totMa = 0, totKr = 0, totM = 0, totPov = 0;
@@ -18642,6 +18696,34 @@ function _pmRenderAdminList(el) {
           ${r.zadnja_izmjena ? '<span>✏ ' + fmtDateShort(r.zadnja_izmjena) + '</span>' : ''}
         </div>
       </div>`;
+  }
+
+  // Vodeći: sekcija doznake šumarije (read-only pregled sa statistikama)
+  if (isVodeci() && Array.isArray(_pmDozRows) && _pmDozRows.length) {
+    const stChip = s => {
+      const map = { active: ['U toku', '#4ade80'], completed: ['Završen', '#60a5fa'], paused: ['Pauziran', '#fbbf24'] };
+      const [txt, col] = map[s] || [s || '—', '#94a3b8'];
+      return `<span style="padding:1px 8px;border-radius:999px;font-size:10px;font-weight:700;color:${col};background:${col}22;border:1px solid ${col}55;">${_esc(txt)}</span>`;
+    };
+    html += `<div class="pm-gj-hdr" style="color:#4ade80;margin-top:14px;">🌲 DOZNAKA — odjeli šumarije</div>`;
+    for (const d of _pmDozRows) {
+      const pokr = Number(d.known_area_ha) > 0 && Number(d.zona_ha) > 0
+        ? ' (' + Math.round(Number(d.zona_ha) / Number(d.known_area_ha) * 100) + '%)' : '';
+      html += `
+      <div class="pm-card" style="cursor:default;">
+        <div class="pm-card-top">
+          <span class="pm-card-odjel">${_esc(d.name || '—')}</span>
+          ${stChip(d.status)}
+        </div>
+        <div class="pm-card-meta">
+          <span>📐 <b>${Number(d.known_area_ha || 0).toFixed(1)}</b> ha</span>
+          <span>🗺 <b>${d.zona_n}</b> zona · ${Number(d.zona_ha || 0).toFixed(1)} ha${pokr}</span>
+          <span>👣 <b>${Number(d.tacaka || 0).toLocaleString('bs')}</b> tač.</span>
+          <span>👥 <b>${d.clanova}</b></span>
+          <span>✍ ${_esc(d.kreirao || '—')}</span>
+        </div>
+      </div>`;
+    }
   }
   el.innerHTML = html;
 }
