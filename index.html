@@ -4317,7 +4317,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.25.2';
+const APP_VER = 'v3.25.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -10028,6 +10028,7 @@ function makeCachedTileLayer(cacheName) {
       // ("kao da ne učitava odmah"). Zato: svaki fetch se registruje na pločici,
       // a na tileunload se svi njeni zahtjevi prekinu i async lanac obustavi.
       canvas._dead = false;
+      canvas._real = false;   // true tek kad je nacrtan PRAVI sadržaj pločice (ne roditelj-fallback)
       canvas._ctls = new Set();
       if (!this._tuHooked) {
         this._tuHooked = true;
@@ -10038,12 +10039,18 @@ function makeCachedTileLayer(cacheName) {
           el._ctls.forEach(c => { try { c.abort(); } catch(e) {} });
           el._ctls.clear();
         });
+        // Heal: zoom in pa zoom out UBIJE zakašnjeli retry (pločica se označi _dead),
+        // a Leaflet po povratku na isti zoom PONOVO ISKORISTI zadržanu pločicu bez novog
+        // createTile poziva — zamućeni roditelj/prazna pločica bi ostala TRAJNO. Zato
+        // poslije svake promjene pogleda ponovo dohvati ne-prave pločice tekućeg zooma.
+        if (this._map) this._map.on('zoomend moveend', () => this._healTiles());
       }
 
       // RAM keš — ImageBitmap se crta gotovo instant, bez dekodiranja
       const cachedBmp = _tileBmpCache.get(url);
       if (cachedBmp) {
         ctx.drawImage(cachedBmp, 0, 0, sz.x, sz.y);
+        canvas._real = true;
         _tileBmpCache.delete(url); _tileBmpCache.set(url, cachedBmp);  // D1-6: osvježi LRU poziciju
         done(null, canvas);
         return canvas;
@@ -10079,13 +10086,14 @@ function makeCachedTileLayer(cacheName) {
           createImageBitmap(blob).then(bmp => {
             ctx.clearRect(0, 0, sz.x, sz.y);   // ukloni placeholder prije prave pločice
             ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
+            canvas._real = true;
             _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();  // D1-7
             done(null, canvas);
           }).catch(() => { dropBadCache(); fallback(); });
         } else {
           const u = URL.createObjectURL(blob);
           const img = new Image();
-          img.onload = () => { ctx.clearRect(0, 0, sz.x, sz.y); ctx.drawImage(img, 0, 0, sz.x, sz.y); URL.revokeObjectURL(u); done(null, canvas); };
+          img.onload = () => { ctx.clearRect(0, 0, sz.x, sz.y); ctx.drawImage(img, 0, 0, sz.x, sz.y); canvas._real = true; URL.revokeObjectURL(u); done(null, canvas); };
           img.onerror = () => { URL.revokeObjectURL(u); dropBadCache(); fallback(); };
           img.src = u;
         }
@@ -10158,6 +10166,7 @@ function makeCachedTileLayer(cacheName) {
               ctx.clearRect(0, 0, sz.x, sz.y);
               ctx.imageSmoothingEnabled = false;
               ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
+              canvas._real = true;
               _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();
             } catch(e) {}
           }
@@ -10166,7 +10175,7 @@ function makeCachedTileLayer(cacheName) {
         // zadnji pokušaj: <img> s crossOrigin (može proći kad fetch padne zbog CORS-a, online)
         const img = new Image();
         img.crossOrigin = '';
-        img.onload = () => { ctx.drawImage(img, 0, 0, sz.x, sz.y); done(null, canvas); };
+        img.onload = () => { ctx.drawImage(img, 0, 0, sz.x, sz.y); canvas._real = true; done(null, canvas); };
         img.onerror = () => done(null, canvas);
         img.src = url;
       };
@@ -10232,6 +10241,53 @@ function makeCachedTileLayer(cacheName) {
           delete this._tiles[key];
         }
       }
+    },
+
+    // Poslije svake promjene pogleda: pločice TEKUĆEG zooma koje nisu pravi sadržaj
+    // (zamućeni roditelj / prazne — done() pozvan, ali _real=false) ponovo dohvati i
+    // precrtaj. Bez ovoga zoom in/out trajno "zaključa" fallback prikaz: _abortLoading
+    // im ubije zakašnjeli retry (_dead), a Leaflet ih po povratku reuse-a bez novog
+    // createTile poziva. Max 2 pokušaja po pločici (404 na visokom zoomu legitimno
+    // nema sadržaj — roditelj-fallback tada i treba ostati).
+    _healTiles: function () {
+      if (this._healT) clearTimeout(this._healT);
+      this._healT = setTimeout(async () => {
+        if (!this._map || navigator.onLine === false) return;
+        const sz = this.getTileSize();
+        for (const key in this._tiles) {
+          const t = this._tiles[key];
+          const el = t && t.el;
+          if (!el || !el._done || el._real || el._healing) continue;
+          if (t.coords.z !== this._tileZoom) continue;
+          if ((el._healN || 0) >= 2) continue;
+          el._healing = true; el._healN = (el._healN || 0) + 1; el._dead = false;
+          let url;
+          try { url = this.getTileUrl(t.coords); } catch(e) { el._healing = false; continue; }
+          try {
+            const c = await caches.open(cacheName);
+            let r = await c.match(url);
+            if (!r) {
+              const ctl = new AbortController();
+              if (el._ctls) el._ctls.add(ctl);
+              const to = setTimeout(() => ctl.abort(), 8000);
+              r = await fetch(url, { mode: 'cors', signal: ctl.signal }).catch(() => null);
+              clearTimeout(to);
+              if (el._ctls) el._ctls.delete(ctl);
+              if (r && r.ok) { try { c.put(url, r.clone()); } catch(e) {} }
+            }
+            if (r && r.ok && !el._dead) {
+              const bmp = await createImageBitmap(await r.blob());
+              const ctx = el.getContext('2d');
+              ctx.clearRect(0, 0, sz.x, sz.y);
+              ctx.imageSmoothingEnabled = false;
+              ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
+              _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();
+              el._real = true;
+            }
+          } catch(e) {}
+          el._healing = false;
+        }
+      }, 350);
     }
   });
 }
