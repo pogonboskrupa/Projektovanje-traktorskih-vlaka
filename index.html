@@ -4317,7 +4317,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.25.3';
+const APP_VER = 'v3.26.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -9980,314 +9980,168 @@ let editingLabelId = null;
 // === OFFLINE TILE CACHE ===
 const TILE_CACHE_NAME = 'tvlake-tiles-v1';
 
-// Cache-backed tile layer — tiles se automatski čuvaju za offline
-const _tileBmpCache = new Map();
-const _TILE_BMP_MAX = 350;
-
-function _tileBmpEvict() {
-  if (_tileBmpCache.size <= _TILE_BMP_MAX) return;
-  const it = _tileBmpCache.keys();
-  while (_tileBmpCache.size > _TILE_BMP_MAX * 0.7) {
-    const k = it.next().value;
-    if (k === undefined) break;
-    // D1-16: ne zatvaramo (može se crtati u drugom createTile pozivu) — GC oslobađa.
-    _tileBmpCache.delete(k);
-  }
-}
-
-// D1-16: upiši bitmapu u cache. NE zatvaramo prethodnu eksplicitno — pri zoom in/out
-// ima puno createTile churn-a pa drugi poziv može upravo CRTATI staru bitmapu iz cache-a;
-// zatvaranje usred crtanja daje praznu pločicu (use-after-close). GC oslobađa staru
-// bitmapu kad nema referenci. Bitmape su male (256px) pa je memorija ograničena.
-function _bmpCacheSet(cache, key, bmp) {
-  cache.set(key, bmp);
-}
-
+// Cache-backed tile layer za ONLINE basemape (Topo/OSM/ArcGIS/Google) + Elev/Slope.
+// D2-7 pristup (isti kao offline SQLite/MBTiles slojevi): createTile vraća <img>
+// (objectURL bloba) umjesto async-crtanog <canvas>-a. Android WebView async-nacrtan
+// canvas NE re-komponuje pouzdano (D1-20/29/30) i canvas nema .complete pa je Leaflet
+// upravljanje pločicama bilo pogrešno — otud "nestale/mutne pločice na zoom in/out"
+// uprkos svim zakrpama (placeholder, parent-cascade, _real+heal...). <img> se
+// komponuje nativno, a kasno postavljanje img.src se UVIJEK prikaže (za razliku od
+// canvas precrtavanja) pa je i naknadni retry praznih pločica pouzdan.
+// Keš ostaje page-side Cache Storage — u APK-u service worker NE radi
+// (WebViewAssetLoader bez ServiceWorkerControllerCompat) pa je ovo jedini offline put.
+// _abortLoading: NE zovemo TileLayer default (img bez src ima .complete=true pa bi
+// default zadržavao/uklanjao pogrešno) — kao offline GridLayer slojevi, pločice ostaju
+// do prune-a, samo im prekidamo mrežne zahtjeve; oporavak radi _retryEmpty.
 function makeCachedTileLayer(cacheName) {
   cacheName = cacheName || TILE_CACHE_NAME;
   return L.TileLayer.extend({
     createTile(coords, done) {
-      const sz = this.getTileSize();
-      const canvas = document.createElement('canvas');
-      canvas.width = sz.x; canvas.height = sz.y;
-      // Označi pločicu kao NACRTANU pri svakom done() — _abortLoading po tome
-      // razlikuje gotove (zadrži kao retained) od nedovršenih (ukloni).
-      const _ldone = done;
-      done = (e, c) => { canvas._done = true; _ldone(e, c); };
-      // D1-4: providan canvas, bez neprozirne ispune — providni dijelovi propuštaju
-      // Leaflet-ove zadržane pločice susjednog zoom nivoa (gladak zoom-out) i pozadinu
-      // pane-a (#2d3a2e); pri gubitku GPU backing-a pokaže zelenu pozadinu, ne crno.
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingEnabled = false;
-
+      const img = document.createElement('img');
+      img.alt = '';
       const url = this.getTileUrl(coords);
+      img._ctls = new Set();   // AbortController-i u letu — prekidaju se na tileunload
 
-      // Zombi-zahtjevi: pri agresivnom zoom in/out Leaflet odbaci pločice
-      // međuzoomova, ali njihovi fetch-evi su NASTAVLJALI i zauzimali ograničeni
-      // pool konekcija (6 po hostu) — pločice finalnog zooma su čekale iza njih
-      // ("kao da ne učitava odmah"). Zato: svaki fetch se registruje na pločici,
-      // a na tileunload se svi njeni zahtjevi prekinu i async lanac obustavi.
-      canvas._dead = false;
-      canvas._real = false;   // true tek kad je nacrtan PRAVI sadržaj pločice (ne roditelj-fallback)
-      canvas._ctls = new Set();
-      if (!this._tuHooked) {
-        this._tuHooked = true;
+      if (!this._hooked) {
+        this._hooked = true;
+        // Zombi-zahtjevi: pri pan/zoom Leaflet odbaci pločicu → prekini njene fetch-eve
+        // da ne zauzimaju pool konekcija ispred pločica finalnog zooma.
         this.on('tileunload', ev => {
           const el = ev.tile;
-          if (!el || !el._ctls) return;
-          el._dead = true;
-          el._ctls.forEach(c => { try { c.abort(); } catch(e) {} });
-          el._ctls.clear();
+          if (el && el._ctls) { el._ctls.forEach(c => { try { c.abort(); } catch(e) {} }); el._ctls.clear(); }
         });
-        // Heal: zoom in pa zoom out UBIJE zakašnjeli retry (pločica se označi _dead),
-        // a Leaflet po povratku na isti zoom PONOVO ISKORISTI zadržanu pločicu bez novog
-        // createTile poziva — zamućeni roditelj/prazna pločica bi ostala TRAJNO. Zato
-        // poslije svake promjene pogleda ponovo dohvati ne-prave pločice tekućeg zooma.
-        if (this._map) this._map.on('zoomend moveend', () => this._healTiles());
+        // Pločice bez pravog sadržaja (mreža pala / rate-limit / prekinut zoom):
+        // ponovi dohvat kad se pogled smiri. Radi i za pločice koje Leaflet REUSE-a
+        // bez novog createTile poziva (zoom in pa out) — ključni scenario.
+        if (this._map) this._map.on('zoomend moveend', () => this._retryEmpty());
       }
 
-      // RAM keš — ImageBitmap se crta gotovo instant, bez dekodiranja
-      const cachedBmp = _tileBmpCache.get(url);
-      if (cachedBmp) {
-        ctx.drawImage(cachedBmp, 0, 0, sz.x, sz.y);
-        canvas._real = true;
-        _tileBmpCache.delete(url); _tileBmpCache.set(url, cachedBmp);  // D1-6: osvježi LRU poziciju
-        done(null, canvas);
-        return canvas;
-      }
+      // Dohvat s TIMEOUTOM — na terenskoj mreži zahtjev zna visiti beskonačno
+      // (mrtva konekcija uz onLine=true); abort → resolve(null) → retry/fallback.
+      const fetchTile = (u, ms) => new Promise(resolve => {
+        const ctl = new AbortController();
+        img._ctls.add(ctl);
+        const t = setTimeout(() => ctl.abort(), ms);
+        fetch(u, { mode: 'cors', signal: ctl.signal })
+          .then(r => { clearTimeout(t); img._ctls.delete(ctl); resolve(r); })
+          .catch(() => { clearTimeout(t); img._ctls.delete(ctl); resolve(null); });
+      });
 
-      // Sinhroni placeholder: odmah nacrtaj zamućenog RODITELJA iz RAM keša.
-      // Tokom zoom in/out nova pločica inače ostane PROVIDNA dok async dohvat ne
-      // završi — Leaflet u međuvremenu ukloni pločice starog zooma pa kroz prazninu
-      // proviri pozadina pane-a ("crni/tamni bljesak"). Ovako je odmah popunjena.
-      let phDrawn = false;
-      for (let dz = 1; dz <= 4 && !phDrawn; dz++) {
-        const pz = coords.z - dz;
-        if (pz < 0) break;
-        const scale = 1 << dz;
-        const px = Math.floor(coords.x / scale), py = Math.floor(coords.y / scale);
-        let purl;
-        try { purl = this.getTileUrl({ x: px, y: py, z: pz }); } catch(e) { break; }
-        const pb = _tileBmpCache.get(purl);
-        if (pb) {
-          const sub = sz.x / scale;
-          ctx.imageSmoothingEnabled = true;
-          ctx.drawImage(pb, (coords.x - px * scale) * sub, (coords.y - py * scale) * sub, sub, sub, 0, 0, sz.x, sz.y);
-          ctx.imageSmoothingEnabled = false;
-          phDrawn = true;
-        }
-      }
-
-      // Pokvaren keš zapis (odsječen download na lošoj mreži) se ne može dekodirati —
-      // bez ovoga bi se TRAJNO servirao i pločica bi zauvijek ostala prazna.
-      const dropBadCache = () => { try { caches.open(cacheName).then(c => c.delete(url)); } catch(e) {} };
-      const drawBlob = (blob) => {
-        if ('createImageBitmap' in window) {
-          createImageBitmap(blob).then(bmp => {
-            ctx.clearRect(0, 0, sz.x, sz.y);   // ukloni placeholder prije prave pločice
-            ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
-            canvas._real = true;
-            _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();  // D1-7
-            done(null, canvas);
-          }).catch(() => { dropBadCache(); fallback(); });
-        } else {
-          const u = URL.createObjectURL(blob);
-          const img = new Image();
-          img.onload = () => { ctx.clearRect(0, 0, sz.x, sz.y); ctx.drawImage(img, 0, 0, sz.x, sz.y); canvas._real = true; URL.revokeObjectURL(u); done(null, canvas); };
-          img.onerror = () => { URL.revokeObjectURL(u); dropBadCache(); fallback(); };
-          img.src = u;
-        }
-      };
-
-      // D1-online: umjesto PRAZNE pločice (offline miss / nedostupan server / 404 na
-      // visokom zoomu gdje snimka ne postoji — Google/ArcGIS u ruralnim područjima),
-      // nacrtaj najbližu RODITELJSKU pločicu (niži zoom, rastegnuta) → zamućeno umjesto
-      // prazno. Roditelj je (z-dz, x>>dz, y>>dz); dijete je jedan pod-kvadrat roditelja.
-      // Roditelja tražimo: RAM → Cache Storage → (dz<=3) MREŽA. Mrežni pokušaj je ključan
-      // za svježa područja: bez njega roditelj koji nikad nije gledan nije u kešu i
-      // pločica ostane prazna ("nestane").
-      const drawParentFallback = async () => {
-        const drawBmp = (bmp, sx, sy, sub) => {
-          ctx.imageSmoothingEnabled = true;
-          ctx.drawImage(bmp, sx, sy, sub, sub, 0, 0, sz.x, sz.y);
-          done(null, canvas);
-        };
-        for (let dz = 1; dz <= 6; dz++) {
-          if (canvas._dead) return true;   // pločica odbačena — prekini, ne troši mrežu
-          const pz = coords.z - dz;
-          if (pz < 0) break;
-          const scale = 1 << dz;
-          const px = Math.floor(coords.x / scale);
-          const py = Math.floor(coords.y / scale);
-          let purl;
-          try { purl = this.getTileUrl({ x: px, y: py, z: pz }); } catch(e) { continue; }
-          const sub = sz.x / scale;                       // veličina pod-kvadrata na roditelju
-          const sx  = (coords.x - px * scale) * sub;
-          const sy  = (coords.y - py * scale) * sub;
-          const rbmp = _tileBmpCache.get(purl);
-          if (rbmp) { drawBmp(rbmp, sx, sy, sub); return true; }
-          if (!('caches' in window)) continue;
-          try {
-            const c = await caches.open(cacheName);
+      // Zamućeni RODITELJ iz keša (offline promašaj / 404 na visokom zoomu gdje snimka
+      // ne postoji) — offscreen canvas je samo rasterizator, u DOM ide <img>.
+      // Ostaje _empty=true → kandidat za _retryEmpty zamjenu pravom pločicom.
+      const parentFallback = async () => {
+        if (!('caches' in window)) return false;
+        try {
+          const c = await caches.open(cacheName);
+          const sz = this.getTileSize();
+          for (let dz = 1; dz <= 4; dz++) {
+            const pz = coords.z - dz;
+            if (pz < 0) break;
+            const scale = 1 << dz;
+            const px = Math.floor(coords.x / scale), py = Math.floor(coords.y / scale);
+            let purl;
+            try { purl = this.getTileUrl({ x: px, y: py, z: pz }); } catch(e) { continue; }
             const m = await c.match(purl);
-            if (m) {
-              const bmp = await createImageBitmap(await m.blob());
-              _bmpCacheSet(_tileBmpCache, purl, bmp); _tileBmpEvict();
-              drawBmp(bmp, sx, sy, sub); return true;
-            }
-            // Nije u kešu — dohvati roditelja s mreže (samo bliski roditelji, da se
-            // ne kaskadira previše zahtjeva po pločici). Timeout kao i glavni fetch.
-            if (dz <= 3 && navigator.onLine !== false) {
-              const pr = await fetchTile(purl, 6000);
-              if (pr && pr.ok) {
-                try { c.put(purl, pr.clone()); } catch(e) {}
-                const bmp = await createImageBitmap(await pr.blob());
-                _bmpCacheSet(_tileBmpCache, purl, bmp); _tileBmpEvict();
-                drawBmp(bmp, sx, sy, sub); return true;
-              }
-            }
-          } catch(e) {}
-        }
+            if (!m) continue;
+            const bmp = await createImageBitmap(await m.blob());
+            const cv = document.createElement('canvas');
+            cv.width = sz.x; cv.height = sz.y;
+            const cx = cv.getContext('2d');
+            cx.imageSmoothingEnabled = true;
+            const sub = sz.x / scale;
+            cx.drawImage(bmp, (coords.x - px * scale) * sub, (coords.y - py * scale) * sub, sub, sub, 0, 0, sz.x, sz.y);
+            const blob = await new Promise(res => cv.toBlob(res));
+            if (!blob) continue;
+            const u = URL.createObjectURL(blob);
+            img.onload = () => { URL.revokeObjectURL(u); done(null, img); };
+            img.onerror = () => { URL.revokeObjectURL(u); done(null, img); };
+            img._empty = true;
+            img.src = u;
+            return true;
+          }
+        } catch(e) {}
         return false;
       };
 
-      const fallback = async () => {
-        if (canvas._dead) return;
-        // Zakašnjeli pozadinski retry: pločica koja je završila kao zamućeni
-        // roditelj (ili prazna) se sama zamijeni pravom kad mreža proradi —
-        // bez done() (već pozvan), samo direktno precrtavanje + upis u keš.
-        if (navigator.onLine !== false) setTimeout(async () => {
-          if (canvas._dead) return;
-          const r = await fetchTile(url, 8000);
-          if (r && r.ok) {
-            try { const c = await caches.open(cacheName); c.put(url, r.clone()); } catch(e) {}
-            try {
-              const bmp = await createImageBitmap(await r.blob());
-              ctx.clearRect(0, 0, sz.x, sz.y);
-              ctx.imageSmoothingEnabled = false;
-              ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
-              canvas._real = true;
-              _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();
-            } catch(e) {}
-          }
-        }, 6000);
-        if (await drawParentFallback()) return;   // roditelj iz keša → nema prazno
-        // zadnji pokušaj: <img> s crossOrigin (može proći kad fetch padne zbog CORS-a, online)
-        const img = new Image();
-        img.crossOrigin = '';
-        img.onload = () => { ctx.drawImage(img, 0, 0, sz.x, sz.y); canvas._real = true; done(null, canvas); };
-        img.onerror = () => done(null, canvas);
-        img.src = url;
+      // isRetry: naknadni pokušaj nad već završenom pločicom (_retryEmpty) —
+      // done() se tada NE zove ponovo, samo se img.src zamijeni pravim sadržajem.
+      const fromNet = async (isRetry) => {
+        let r = await fetchTile(url, 8000);
+        if (!r || !r.ok) {
+          // Kratka pauza pa JEDAN ponovni pokušaj — burst rate-limit (Google 429/403
+          // pri učitavanju cijelog ekrana) i tranzijentni prekidi konekcije.
+          await new Promise(rs => setTimeout(rs, 1200));
+          r = await fetchTile(url, 8000);
+        }
+        if (r && r.ok) {
+          try { const c = await caches.open(cacheName); c.put(url, r.clone()); } catch(e) {}
+          const u = URL.createObjectURL(await r.blob());
+          img.onload = () => { URL.revokeObjectURL(u); img._empty = false; if (!isRetry) done(null, img); };
+          img.onerror = () => { URL.revokeObjectURL(u); if (!isRetry) done(null, img); };
+          img.src = u;
+          return;
+        }
+        if (isRetry) return;                 // tihi pokušaj — bez fallbacka i bez done
+        if (await parentFallback()) return;
+        img._empty = true;
+        done(null, img);                     // prazna providna — _retryEmpty pokušava ponovo
       };
 
-      // Fetch s TIMEOUTOM — na terenskoj mreži zahtjev zna visiti beskonačno
-      // (mrtva konekcija uz onLine=true) pa se done() nikad ne pozove i pločica
-      // ostane trajno prazna. Timeout → resolve(null) → fallback/retry.
-      const fetchTile = (u, ms) => new Promise(resolve => {
-        if (canvas._dead) return resolve(null);
-        const ctl = new AbortController();
-        canvas._ctls.add(ctl);
-        const t = setTimeout(() => ctl.abort(), ms);
-        fetch(u, { mode: 'cors', signal: ctl.signal })
-          .then(r => { clearTimeout(t); canvas._ctls.delete(ctl); resolve(r); })
-          .catch(() => { clearTimeout(t); canvas._ctls.delete(ctl); resolve(null); });
-      });
-
-      if (!('caches' in window)) { fallback(); return canvas; }
-
-      caches.open(cacheName).then(async cache => {
-        const cached = await cache.match(url);
-        if (canvas._dead) return;
-        if (cached) { drawBlob(await cached.blob()); return; }
-        let resp = await fetchTile(url, 8000);
-        if (canvas._dead) return;
-        if (!resp || !resp.ok) {
-          // Kratka pauza pa JEDAN retry — pokriva burst rate-limit (Google 429/403
-          // pri učitavanju cijelog ekrana) i tranzijentne prekide konekcije.
-          await new Promise(r => setTimeout(r, 1200));
-          if (canvas._dead) return;
-          resp = await fetchTile(url, 8000);
-        }
-        if (canvas._dead) return;
-        if (resp && resp.ok) {
-          try { cache.put(url, resp.clone()); } catch(e) {}
-          drawBlob(await resp.blob());
-        } else fallback();
-      }).catch(fallback);
-
-      return canvas;
+      const load = async (isRetry) => {
+        try {
+          if ('caches' in window) {
+            const c = await caches.open(cacheName);
+            const m = await c.match(url);
+            if (m) {
+              const u = URL.createObjectURL(await m.blob());
+              img.onload = () => { URL.revokeObjectURL(u); img._empty = false; if (!isRetry) done(null, img); };
+              // Pokvaren keš zapis (odsječen download na lošoj mreži) se ne može
+              // dekodirati — obriši ga pa probaj mrežu, inače bi se TRAJNO servirao.
+              img.onerror = () => { URL.revokeObjectURL(u); try { c.delete(url); } catch(e) {} fromNet(isRetry); };
+              img.src = u;
+              return;
+            }
+          }
+          await fromNet(isRetry);
+        } catch(e) { fromNet(isRetry); }
+      };
+      img._load = load;   // koristi ga _retryEmpty
+      load(false);
+      return img;
     },
 
-    // KLJUČNO za zoom in/out prazninu: Leaflet-ov TileLayer._abortLoading pri
-    // promjeni zooma radi "if (!tile.complete) remove" — a CANVAS nema .complete
-    // (uvijek undefined) pa je brisao SVAKU pločicu starog zooma, čak i potpuno
-    // nacrtane: (1) ubija retained-tile glatki prelaz → bljesak/praznina, posebno
-    // zoom in pa zoom out; (2) briše direktno (bez _removeTile) pa tileunload NE
-    // okine i zombi fetch-evi prežive baš na zoom promjeni. Override:
-    // nedovršene ukloni + prekini im zahtjeve; NACRTANE ostavi — GridLayer ih
-    // prune-uje tek kad pločice novog zooma budu spremne.
-    _abortLoading: function () {
-      for (const key in this._tiles) {
-        const t = this._tiles[key];
-        if (!t || t.coords.z === this._tileZoom) continue;
-        const el = t.el;
-        if (el && el._ctls) {
-          el._dead = true;
-          el._ctls.forEach(c => { try { c.abort(); } catch(e) {} });
-          el._ctls.clear();
-        }
-        if (el && !el._done) {
-          try { L.DomUtil.remove(el); } catch(e) {}
-          delete this._tiles[key];
-        }
-      }
-    },
-
-    // Poslije svake promjene pogleda: pločice TEKUĆEG zooma koje nisu pravi sadržaj
-    // (zamućeni roditelj / prazne — done() pozvan, ali _real=false) ponovo dohvati i
-    // precrtaj. Bez ovoga zoom in/out trajno "zaključa" fallback prikaz: _abortLoading
-    // im ubije zakašnjeli retry (_dead), a Leaflet ih po povratku reuse-a bez novog
-    // createTile poziva. Max 2 pokušaja po pločici (404 na visokom zoomu legitimno
-    // nema sadržaj — roditelj-fallback tada i treba ostati).
-    _healTiles: function () {
-      if (this._healT) clearTimeout(this._healT);
-      this._healT = setTimeout(async () => {
+    // Pločice TEKUĆEG zooma bez pravog sadržaja (prazne / roditelj-fallback) — ponovi
+    // dohvat poslije smirivanja pogleda, max 3 pokušaja po pločici (legitiman 404 na
+    // visokom zoomu zadržava roditelj-fallback, bez beskonačnog gađanja servera).
+    _retryEmpty() {
+      if (this._retryT) clearTimeout(this._retryT);
+      this._retryT = setTimeout(() => {
         if (!this._map || navigator.onLine === false) return;
-        const sz = this.getTileSize();
         for (const key in this._tiles) {
           const t = this._tiles[key];
           const el = t && t.el;
-          if (!el || !el._done || el._real || el._healing) continue;
+          if (!el || !el._empty || !el._load) continue;
           if (t.coords.z !== this._tileZoom) continue;
-          if ((el._healN || 0) >= 2) continue;
-          el._healing = true; el._healN = (el._healN || 0) + 1; el._dead = false;
-          let url;
-          try { url = this.getTileUrl(t.coords); } catch(e) { el._healing = false; continue; }
-          try {
-            const c = await caches.open(cacheName);
-            let r = await c.match(url);
-            if (!r) {
-              const ctl = new AbortController();
-              if (el._ctls) el._ctls.add(ctl);
-              const to = setTimeout(() => ctl.abort(), 8000);
-              r = await fetch(url, { mode: 'cors', signal: ctl.signal }).catch(() => null);
-              clearTimeout(to);
-              if (el._ctls) el._ctls.delete(ctl);
-              if (r && r.ok) { try { c.put(url, r.clone()); } catch(e) {} }
-            }
-            if (r && r.ok && !el._dead) {
-              const bmp = await createImageBitmap(await r.blob());
-              const ctx = el.getContext('2d');
-              ctx.clearRect(0, 0, sz.x, sz.y);
-              ctx.imageSmoothingEnabled = false;
-              ctx.drawImage(bmp, 0, 0, sz.x, sz.y);
-              _bmpCacheSet(_tileBmpCache, url, bmp); _tileBmpEvict();
-              el._real = true;
-            }
-          } catch(e) {}
-          el._healing = false;
+          el._retryN = (el._retryN || 0) + 1;
+          if (el._retryN > 3) continue;
+          el._load(true);
         }
-      }, 350);
+      }, 400);
+    },
+
+    // NE zovemo L.TileLayer default: img bez src-a ima .complete === true pa bi
+    // default zadržao pločice koje još čekaju blob, a naš async lanac im je prekinut
+    // → trajno prazne. Kao offline GridLayer slojevi: pločice ostaju do prune-a,
+    // samo prekini njihove mrežne zahtjeve; sadržaj ionako liječi _retryEmpty.
+    _abortLoading() {
+      for (const key in this._tiles) {
+        const t = this._tiles[key];
+        if (t && t.coords.z !== this._tileZoom && t.el && t.el._ctls) {
+          t.el._ctls.forEach(c => { try { c.abort(); } catch(e) {} });
+          t.el._ctls.clear();
+        }
+      }
     }
   });
 }
@@ -10432,10 +10286,10 @@ map.createPane('putevi');      map.getPane('putevi').style.zIndex      = 390;
 map.createPane('demOverlay'); map.getPane('demOverlay').style.zIndex = 250;
 const _puteviRenderer = L.canvas({ pane: 'putevi', padding: 0.3 });
 const TL = {
-  '⛰ Topo':    new CachedTopo('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxNativeZoom:17,maxZoom:22,subdomains:['a','b','c'],keepBuffer:4,updateWhenZooming:false,updateWhenIdle:false,updateInterval:100}),
-  '🛰 Satelit': new CachedSat('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:false,updateInterval:100}),
-  '🗺 Karta':   new CachedOsm('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:false,updateInterval:100}),
-  '📡 Google':  new CachedSat('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxNativeZoom:20,maxZoom:22,subdomains:['0','1','2','3'],keepBuffer:4,updateWhenZooming:false,updateWhenIdle:false,updateInterval:100})
+  '⛰ Topo':    new CachedTopo('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxNativeZoom:17,maxZoom:22,subdomains:['a','b','c'],keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
+  '🛰 Satelit': new CachedSat('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22,keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
+  '🗺 Karta':   new CachedOsm('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
+  '📡 Google':  new CachedSat('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxNativeZoom:20,maxZoom:22,subdomains:['0','1','2','3'],keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150})
 };
 const _ELEV_CACHE  = 'tvlake-elev-v1';
 const _SLOPE_CACHE = 'tvlake-slope-v1';
@@ -10898,7 +10752,6 @@ async function _cacheMgrDelete(id) {
     } else {
       await caches.delete(row.cache);
     }
-    _tileBmpCache.clear();
     showToast(`🗑 ${row.name}: offline pločice obrisane`);
   } catch(err) {
     showToast('⚠ Brisanje nije uspjelo: ' + (err.message || 'nepoznato'));
@@ -10913,7 +10766,6 @@ async function _cacheMgrDeleteAll() {
   try {
     const names = await caches.keys();
     for (const n of names) { if (/^tvlake-(tiles|elev|slope|terr|nv)/.test(n)) await caches.delete(n); }
-    _tileBmpCache.clear();
     showToast('🗑 Sve offline pločice obrisane');
   } catch(err) {
     showToast('⚠ Brisanje nije uspjelo: ' + (err.message || 'nepoznato'));
@@ -24164,7 +24016,7 @@ async function sqlmapDebugPro() {
   let t = `=== DEBUG PRO ${APP_VER} ===\n`;
   t += `Karta: ${name} (${sl.fmt}, OPFS:${sl.opfs?'da':'ne'}, eng:${useMain?'main':'worker'})\n`;
   t += `Zoom: ${z} | meta zoom: ${sl.meta?.minzoom}-${sl.meta?.maxzoom}\n`;
-  t += `Cache: sql=${_sqlTileBmpCache.size}/${_SQL_TILE_BMP_MAX} online=${_tileBmpCache.size}\n`;
+  t += `Cache: sql=${_sqlTileBmpCache.size}/${_SQL_TILE_BMP_MAX}\n`;
   t += `Throttle: wActive=${_wTileActive} wStack=${_wTileStack.length} | mainActive=${_mainTileActive} mainQueue=${_mainTileQueue.length}\n`;
 
   const tiles = layer && layer._tiles ? Object.keys(layer._tiles) : [];
@@ -24689,6 +24541,12 @@ async function sqlmapRestoreAll() {
 // Detektuj MIME iz magic bytes — Android WebView traži ispravan tip na blobu
 const _sqlTileBmpCache = new Map();
 const _SQL_TILE_BMP_MAX = 300;
+// D1-16: upiši bitmapu/canvas u keš. NE zatvaramo prethodnu eksplicitno — pri zoom
+// in/out ima puno createTile churn-a pa drugi poziv može upravo CRTATI staru bitmapu
+// iz keša; zatvaranje usred crtanja daje praznu pločicu (use-after-close). GC oslobađa.
+function _bmpCacheSet(cache, key, bmp) {
+  cache.set(key, bmp);
+}
 const _SQL_OVERVIEW_Z = 13;   // tile-ovi z<=13 su placeholder piramida za zoom-out
 function _sqlTileBmpEvict() {
   if (_sqlTileBmpCache.size <= _SQL_TILE_BMP_MAX) return;
@@ -25788,7 +25646,6 @@ async function clearTileCache(e) {
   const keys = await caches.keys();
   const mapCaches = keys.filter(k => /^tvlake-(tiles|elev|slope|terr|nv)/.test(k));
   await Promise.all(mapCaches.map(k => caches.delete(k)));
-  _tileBmpCache.clear();  // i RAM keš
   localStorage.removeItem(_OFFLINE_DL_INCOMPLETE_KEY);
   showToast('🗑 Memorija karata obrisana');
   if (typeof _lsRenderCache === 'function') _lsRenderCache();
