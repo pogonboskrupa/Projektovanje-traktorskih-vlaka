@@ -4317,7 +4317,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.0';
+const APP_VER = 'v3.27.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -8917,7 +8917,23 @@ function _onRtStatus(status) {
 
 function _onVlakaRtEvent(payload) {
   const changedBy = payload.new?.korisnik_id || payload.old?.korisnik_id;
-  if (!changedBy || changedBy === sbUser?.id) return;
+  if (!changedBy) return;
+
+  // Isti nalog na DRUGOM uređaju (npr. APK na terenu + Chrome u kancelariji) — echo s
+  // VLASTITOG korisnik_id se ranije potpuno ignorisao (pretpostavka: "uređaj koji je upravo
+  // pisao već ima ovo lokalno"), što vrijedi samo za taj jedan uređaj/sesiju. Drugi uređaj
+  // pod istim nalogom inače nikad ne sazna za promjenu do sljedećeg punog reloada/re-logina.
+  if (changedBy === sbUser?.id) {
+    if (payload.eventType === 'DELETE') { sbLoadVlake(); return; }
+    const row = payload.new;
+    if (!row?.id) return;
+    const ex = vlake.find(v => v.sbId === row.id);
+    // Već imamo TAČNO ovaj red (echo vlastitog upisa s OVOG uređaja) — preskoči, ne troši
+    // re-render (updateVlakaLabel za sve vlake) na svaki debounced flush tokom snimanja.
+    if (ex && ex.updatedAt && row.updated_at && row.updated_at <= ex.updatedAt) return;
+    _applyVlakeRows([row]);   // nov/noviji red s DRUGOG uređaja — primijeni odmah
+    return;
+  }
 
   // Tuđi događaji se obrađuju SAMO ako je autor član mog aktivnog projekta
   const akt = _aktivniProjektId ? _projekti.find(p => p.id === _aktivniProjektId) : null;
