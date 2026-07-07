@@ -4317,7 +4317,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.26.1';
+const APP_VER = 'v3.26.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5125,15 +5125,25 @@ function authShowPending() {
   if (p) p.style.display = 'block';
 }
 // Nakon što admin odobri — korisnik klikne "Provjeri ponovo" i uđe bez ponovne prijave.
+// Ne oslanja se na navigator.onLine (zna lagati — vidi OS-S4 komentar u initAuth) i
+// PRIKAZUJE stvarnu grešku (umjesto tihog gutanja) — ako i poslije ovoga korisnik
+// ostane na "Čeka se odobrenje", toast otkriva PRAVI uzrok (mrežna greška, RLS
+// odbijanje pristupa, ili server stvarno još vraća odobren:false).
 async function _authRecheck() {
-  if (sbUser && navigator.onLine) {
-    try { await sbLoadProfile(); } catch(e) {}
-    showApp();  // gate ponovo provjerava sbProfile.odobren
-  } else if (sbUser) {
-    showApp();
-  } else {
-    authShowLogin();
+  if (!sbUser) { authShowLogin(); return; }
+  if (sb) {
+    try {
+      const _tmo = new Promise((_, rej) => setTimeout(() => rej(new Error('nema odgovora servera (5s)')), 5000));
+      const { data, error } = await Promise.race([
+        sb.from('korisnici').select('*').eq('id', sbUser.id).single(), _tmo
+      ]);
+      if (error) throw error;
+      if (data) { sbProfile = data; _OL.save(_OL.PROFILE, data); }
+    } catch(e) {
+      showToast('⚠ Provjera nije uspjela: ' + (e.message || e.code || 'nepoznata greška'));
+    }
   }
+  showApp();  // gate ponovo provjerava sbProfile.odobren
 }
 // Zaboravljen PIN — neautentifikovan korisnik se ne može dokazati, pa upućujemo na admina.
 function _zaboravljenPin(e) {
