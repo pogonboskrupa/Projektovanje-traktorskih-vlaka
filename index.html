@@ -4317,7 +4317,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.26.2';
+const APP_VER = 'v3.27.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -12788,10 +12788,9 @@ function noviKrakStrana(strana, overrideNm) {
     actI = krakIdx;
     // Kalman/medijana ostaju TOPLI dok se aktivno snima — fizička pozicija je ista
     // (stojiš na spoju), a hladni restart bi progutao prvih ~5 fixeva pa bi početak
-    // kraka iza spojne tačke bio prava linija od više metara. Reset samo iz pauze
-    // (stanje je staro — hodalo se bez ažuriranja filtera).
-    if (recPaused) _kfReset();
-    _lastRecTime = 0;
+    // kraka iza spojne tačke bio prava linija od više metara. _kfSoftReset() briše
+    // samo "momentum" starog pravca (reset samo iz pauze — stanje je staro).
+    _kfSoftReset();
     selI(krakIdx);
     _updBanner();
   } else {
@@ -12851,8 +12850,7 @@ function odaberiKrak(krakIdx) {
   actI = krakIdx;
   if (recOn) {
     // Isti princip kao noviKrakStrana: topli filter dok se aktivno snima
-    if (recPaused) _kfReset();
-    _lastRecTime = 0;
+    _kfSoftReset();
     selI(krakIdx);
     _updBanner();
     showToast('↪ Nastavak snimanja ' + vlake[krakIdx].nm);
@@ -13330,6 +13328,11 @@ function _gpsKfNoise() { return _forestMode ? 0.5 : 1.0; }
 
 // ─── KALMAN FILTER ───────────────────────────────────────────────────────────────────
 const KF_MIN_R     = 2.5;
+// Vremenska konstanta prilagođavanja brzine/pravca (_kf.vla/_kf.vlo) novom mjerenju.
+// Manje = brže "zaboravi" stari pravac kod skretanja/kraka (manje vučenja/isprekidanosti),
+// veće = glađe ali sporije reaguje. Skraćeno s 3.0 na 1.2 — I dalje ublažava GPS šum, ali
+// bez višesekundnog kašnjenja pri promjeni pravca.
+const KF_VEL_TAU   = 1.2;
 const MPDEG        = 111320; // ≈ metri po stepenu geografske širine
 
 let _kf          = null;   // Kalman state: {la,lo,vla,vlo,Pla,Plo,t}
@@ -13355,6 +13358,17 @@ function _gpsMedianPt(la, lo, ac) {
 }
 
 function _kfReset() { _kf = null; _gpsBuf = []; _altEma = null; }
+
+// Krak/nastavak dok se aktivno snima: ukloni SAMO "momentum" (brzinu/pravac) starog
+// segmenta — pozicija/kovarijansa ostaju tople (bez cold-start gubitka prvih fixeva iz
+// median-buffera). Bez ovoga Kalman-predikcija nastavlja vući u stari pravac dok se
+// _kf.vla/_kf.vlo alpha-prilagode (do KF_VEL_TAU sekundi), pa početak kraka ispadne
+// pomjeren, a backstop (predDistM) usput odbaci nekoliko fixeva → isprekidana linija.
+function _kfSoftReset() {
+  if (recPaused) _kfReset();
+  else if (_kf) { _kf.vla = 0; _kf.vlo = 0; }
+  _lastRecTime = 0;
+}
 
 // ─── LIVE PREVIEW TRAGA ─────────────────────────────────────────────────────
 // Upisane tačke po dizajnu kasne za stvarnom pozicijom (medijana + Kalman + min-razmak
@@ -13419,7 +13433,7 @@ function _kfStep(la, lo, ac, tMs) {
   const newLa = predLa + Kla * (la - predLa);
   const newLo = predLo + Klo * (lo - predLo);
 
-  const alpha = Math.min(1, dt / 3.0);
+  const alpha = Math.min(1, dt / KF_VEL_TAU);
   _kf.vla = (1 - alpha) * _kf.vla + alpha * (newLa - _kf.la) / dt;
   _kf.vlo = (1 - alpha) * _kf.vlo + alpha * (newLo - _kf.lo) / dt;
 
@@ -15198,6 +15212,18 @@ function updateVlakaLabel(i) {
     const mks = _placeLabelMarkers(v.pts, v.nm, 500);
     if (mks.length > 0) { v.labelMk = mks[0]; v.extraLabels = mks.slice(1); }
   }
+
+  // Start/kraj oznake — mala zelena/crvena tačkica direktno na karti (bez klika) da se
+  // odmah vidi gdje vlaka/krak počinje i završava. Isti obrazac (boja/stil) kao privremeni
+  // markeri u _pickJunctionOnVlaka, samo trajni i manji. Guraju se u v.extraLabels (ne novo
+  // polje) — tako automatski nasljeđuju sve postojeće show/hide/cleanup petlje.
+  const _mkEndDot = (pt, col) => L.marker([pt.la, pt.lo], {
+    icon: L.divIcon({ className: '', iconSize: [10, 10], iconAnchor: [5, 5],
+      html: `<div style="width:10px;height:10px;border-radius:50%;background:${col};border:2px solid #fff;box-shadow:0 0 0 2px ${col}55,0 1px 3px rgba(0,0,0,0.5);"></div>` }),
+    interactive: false, zIndexOffset: 480, pane: 'vlakeLabels'
+  }).addTo(map);
+  v.extraLabels.push(_mkEndDot(v.pts[0], '#4ade80'));
+  v.extraLabels.push(_mkEndDot(v.pts[v.pts.length - 1], '#f87171'));
 
   if (v.kr === 0 && v.lager) {
     const pFirst = v.lagerPt || v.pts[0];
