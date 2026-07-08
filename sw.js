@@ -2,7 +2,7 @@
 // Service Worker — ŠPD Unsko-sanske šume
 // Promijeni APP_VERSION pri svakom deploymentu → okida update
 // =====================================================================
-const APP_VERSION = '3.7.0';
+const APP_VERSION = '3.27.2';
 const APP_CACHE   = 'tvlake-app-v' + APP_VERSION;
 const TILE_CACHE  = 'tvlake-tiles-v1';
 const LIB_CACHE   = 'tvlake-lib-v1';
@@ -56,6 +56,10 @@ self.addEventListener('activate', event => {
 // ─── FETCH ───────────────────────────────────────────────────────────
 
 // Helper — cache-then-fetch pattern for tile caches
+// Pregledane pločice se čuvaju TRAJNO (bez FIFO trima) — korisnik ih briše sam
+// kroz "Offline podaci po karti". Protiv browser evikcije pri punom disku se
+// štitimo sa navigator.storage.persist() (traži se iz aplikacije pri startu);
+// na stvarno punom disku cache.put baci QuotaExceededError i tiho se preskoči.
 function _tileRespond(event, cacheName) {
   event.respondWith(
     caches.open(cacheName).then(async cache => {
@@ -63,7 +67,9 @@ function _tileRespond(event, cacheName) {
       if (cached) return cached;
       try {
         const resp = await fetch(event.request);
-        if (resp.ok) try { cache.put(event.request, resp.clone()); } catch(e) {}
+        if (resp.ok) {
+          try { cache.put(event.request, resp.clone()); } catch(e) {}
+        }
         return resp;
       } catch {
         return cached || new Response('', { status: 503 });
