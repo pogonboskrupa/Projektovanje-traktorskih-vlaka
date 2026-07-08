@@ -2425,7 +2425,12 @@ select:focus { outline:none; border-color:#3b82f6; }
   #print-legend {
     display:block !important;
     position:absolute; bottom:8mm; right:8mm;
-    background:rgba(255,255,255,0.92); border:1.5px solid #333;
+    background:rgba(255,255,255,0.96);
+    /* Bijeli outline + tanak tamni prsten oko njega — legenda ostaje čitljiva bez obzira
+       na boju karte ispod (tamna satelitska/hillshade podloga, šuma, itd.), isti princip
+       kao halo oko markera na karti (vidi _pickJunctionOnVlaka). */
+    border:2.5px solid #fff;
+    box-shadow:0 0 0 1px rgba(0,0,0,0.55), 0 2px 10px rgba(0,0,0,0.4);
     padding:4mm 5mm 3mm;
     font-family:Arial,sans-serif; font-size:8pt; color:#222;
     z-index:9000;
@@ -3995,6 +4000,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
     <div id="map">
       <!-- DEM legenda (N.V. + Strane svijeta) -->
       <div id="dem-legend" style="display:none;"></div>
+      <!-- Print legenda — sloj PREKO karte (vidljivo samo pri štampanju, @media print) -->
+      <div id="print-legend" style="display:none;"></div>
 
       <!-- Center crosshair dot (visible only in full-map / MAP mode) -->
       <div id="map-center-dot" style="display:none;">
@@ -4196,7 +4203,6 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
   <span id="pf-left"></span>
   <span id="pf-right"></span>
 </div>
-<div id="print-legend" style="display:none;"></div>
 
 <!-- PRINT MODAL -->
 <div id="print-modal" onclick="if(event.target===this)closePrintModal()">
@@ -4317,7 +4323,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.1';
+const APP_VER = 'v3.27.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
