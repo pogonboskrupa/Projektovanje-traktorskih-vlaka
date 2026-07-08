@@ -11299,6 +11299,15 @@ function stopRec() {
   document.getElementById('rec-parent-row').style.display = 'none';
   document.getElementById('btn-nazad').style.display = 'none';
   if (actI !== null) {
+    // Ukloni rezidualni GPS cik-cak (multipath) prije snimanja finalne dužine.
+    const _simplV = vlake[actI];
+    if (_simplV && _simplV.pts && _simplV.pts.length >= 3) {
+      const _ptsBefore = _simplV.pts.length;
+      _simplV.pts = _simplifyRecordedPts(_simplV.pts, _vlakaSimplifyTolM());
+      if (_simplV.pts.length < _ptsBefore) {
+        _simplV.poly.setLatLngs(_simplV.pts.map(p => [p.la, p.lo]));
+      }
+    }
     updateVlakaLabel(actI);
     clearTimeout(_vlakaSaveTimers[actI]);
     // Uhvati referencu na vlaku PRIJE async flush-a — actI/vlake se mogu promijeniti
@@ -12089,6 +12098,28 @@ function _gpsBearing(la1, lo1, la2, lo2) {
   const y = Math.sin(dLo) * Math.cos(lat2);
   const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLo);
   return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+}
+
+// ─── POST-SNIMANJE IZGLAĐIVANJE (Douglas-Peucker) ──────────────────────────────
+// Kalman/medijan filter tokom snimanja uklanja pojedinačne spike-ove, ali rezidualni
+// "cik-cak" od multipatha (odbijanje signala od zgrada/krošnji) i dalje prolazi jer
+// svaki fix pojedinačno izgleda validan. RDP nakon snimanja briše tačke koje su unutar
+// tolerancije od prave linije susjeda — pravi zavoji trase (desetine metara) ostaju
+// netaknuti, a mikro-talasanje se uklanja. Ovo popravlja i izmjerenu dužinu vlake,
+// jer talasanje vještački produžuje zbir segmenata.
+function _vlakaSimplifyTolM() { return _forestMode ? 3.5 : 2.5; }
+
+function _simplifyRecordedPts(pts, toleranceM) {
+  if (!pts || pts.length < 3 || typeof turf === 'undefined' || !turf.simplify) return pts;
+  try {
+    const line = turf.lineString(pts.map(p => [p.lo, p.la]));
+    const toleranceDeg = toleranceM / MPDEG;
+    const simplified = turf.simplify(line, { tolerance: toleranceDeg, highQuality: true, mutate: false });
+    const keep = new Set(simplified.geometry.coordinates.map(c => c[0] + ',' + c[1]));
+    // Gap-markirane tačke (D3-C) uvijek čuvamo — signaliziraju stvarni prekid GPS-a.
+    const out = pts.filter(p => p.gap || keep.has(p.lo + ',' + p.la));
+    return out.length >= 2 ? out : pts;
+  } catch (e) { return pts; }
 }
 
 function onP(p) {
