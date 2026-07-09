@@ -4323,7 +4323,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.5';
+const APP_VER = 'v3.27.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5841,6 +5841,7 @@ async function sbInitData() {
   dozLoadOdjeli().catch(()=>{});  // fire-and-forget — _dozOdjeli za realtime obavijesti
   autoLoadAllKmlBuckets();        // fire-and-forget (granice u pozadini)
   if (navigator.onLine) _processOfflineQueue(); // flush any queued ops from offline sessions
+  _retryOrphanVlake();            // vlake bez sbId (npr. ranije trajno odbačene iz reda) — probaj opet
   _updSyncBadge();               // prikaži badge ako ima pending ops iz prošle sesije
   if (sbProfile?.is_admin) _adminCheckPending().catch(() => {}); // badge+toast: registracije na čekanju
   setTimeout(_crashCheck, 1500); // provjeri nedovršena snimanja (odgodi da se mapa inicijalizira)
@@ -7336,6 +7337,19 @@ function _flushAllPendingVlake() {
       delete _vlakaSaveTimers[ki];
       sbFlushVlaka(ki);
     }
+  });
+}
+
+// Vlake koje imaju tačke ali nikad nisu dobile sbId (nikad uspješno spašene na
+// server) nemaju ni pending debounce timer ni red za ponovni pokušaj — ako je
+// _OL.bumpRetry() ranije trajno odbacio operaciju (npr. dok je kolona nedostajala
+// u bazi — vidi PGRST204 slučaj), ta vlaka ostaje zauvijek "zaglavljena" samo
+// lokalno bez ikakvog mehanizma koji bi je ikad ponovo pokušao poslati. Pozvano
+// pri svakom loginu/init-u — bezopasno je zvati više puta (sbFlushVlaka je idempotentan
+// po vlaci preko _flushing gard-a).
+function _retryOrphanVlake() {
+  vlake.forEach((v, i) => {
+    if (!v.sbId && !v._deleted && v.pts && v.pts.length > 0) sbFlushVlaka(i);
   });
 }
 
