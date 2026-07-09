@@ -13802,12 +13802,38 @@ function izravnajVlaku(idx) {
   showToast(`✅ ${before - simplified.length} tačaka uklonjeno (${before} → ${simplified.length})`);
 }
 
+// Mala poprečna crta na mjestu gdje krak počinje — vizualno obilježje spoja +
+// zaseban klik-cilj (garantovano bira krak, neovisno o poretku slojeva na spoju).
+function _drawJunctionTick(v) {
+  const brg = _gpsBearing(v.pts[0].la, v.pts[0].lo, v.pts[1].la, v.pts[1].lo);
+  const rot = (brg + 90) % 360;
+  const mk = L.marker([v.pts[0].la, v.pts[0].lo], {
+    icon: L.divIcon({
+      className: '', iconSize: [18, 18], iconAnchor: [9, 9],
+      html: `<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;transform:rotate(${rot}deg);">
+               <div style="width:3px;height:14px;background:${v.color};border:1px solid #fff;border-radius:1px;box-shadow:0 0 2px rgba(0,0,0,0.7);"></div>
+             </div>`
+    }),
+    interactive: true, zIndexOffset: 490, pane: 'vlakeLabels'
+  }).addTo(map);
+  mk.on('click', (e) => {
+    if (recOn) return;
+    if (activeTool === 'edit' || activeTool === 'delnode' || activeTool === 'merge') return;
+    L.DomEvent.stopPropagation(e);
+    if (e.originalEvent) e.originalEvent.stopPropagation();
+    const idx = vlake.findIndex(vv => vv === v);
+    if (idx >= 0) { selI(idx); showVlakaPopup(idx, e.latlng); }
+  });
+  return mk;
+}
+
 // === VLAKA LABELE ===
 function updateVlakaLabel(i) {
   const v = vlake[i];
   if (!v) return;
   if (v.labelMk) { map.removeLayer(v.labelMk); v.labelMk = null; }
   if (v.lagerMk) { map.removeLayer(v.lagerMk); v.lagerMk = null; }
+  if (v.junctionMk) { map.removeLayer(v.junctionMk); v.junctionMk = null; }
   (v.extraLabels || []).forEach(m => map.removeLayer(m));
   v.extraLabels = [];
   if (!v.pts || v.pts.length < 1) return;
@@ -13828,6 +13854,7 @@ function updateVlakaLabel(i) {
       icon: L.divIcon({ className: '', iconSize: [0,0], iconAnchor: [-2,6], html: _labelHtml(v.nm) }),
       interactive: false, zIndexOffset: 500, pane: 'vlakeLabels'
     }).addTo(map);
+    v.junctionMk = _drawJunctionTick(v);
     // Za duže krakove dodaj još labela
     const extraFracs = _labelFracs(v.pts).filter(f => f > 0.1);
     const extra = [];
