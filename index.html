@@ -4323,7 +4323,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.6';
+const APP_VER = 'v3.27.7';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -7890,6 +7890,10 @@ async function sbLoadKolege() {
   kolegeMap = {};
   const toUpdate = [];
   data.forEach((k, i) => {
+    // Vodeći Projektant je nadzorni nalog za pregled rada šumarije (vidi
+    // 20260706_vodeci_projektant.sql) — ne crta vlake, ne treba se nuditi
+    // kao kandidat za dodavanje u projekat.
+    if (/^vode[cć]i\s+projektant$/i.test((k.ime || '').trim())) return;
     let color = k.boja;
     if (!color) {
       color = KORISNIK_PAL[i % KORISNIK_PAL.length];
@@ -14888,7 +14892,9 @@ function rndList() {
   // Filtriraj po aktivnom projektu
   const hasProj = !!_aktivniProjektId;
   const noProjects = !_projekti || _projekti.length === 0;
-  const allProjVlake = hasProj ? vlake.filter(v => v.projektId === _aktivniProjektId) : (noProjects ? vlake : []);
+  // Bez aktivnog projekta ne prikazuj NIŠTA u listi (ni orphan vlake) — samo
+  // poruka/dugme za čišćenje ispod (blok "noProjects && vlake.length > 0") ostaje.
+  const allProjVlake = hasProj ? vlake.filter(v => v.projektId === _aktivniProjektId) : [];
   const rootVlake    = allProjVlake.filter(v => v.kr === 0);
   const krakCount    = allProjVlake.filter(v => v.kr !== 0).length;
   document.getElementById('vc').textContent = rootVlake.length + (krakCount ? ` · ${krakCount}k` : '');
@@ -18043,6 +18049,8 @@ function _distToMainRoad(vlakeList, krak) {
 
 // Izračun Srednje Transportne Distance Privlačenja
 function calcSTD(vlakeList) {
+  // Sortiraj po broju vlake — bez ovoga red zavisi od redoslijeda učitavanja/kreiranja
+  vlakeList = [...vlakeList].sort((a, b) => (a.br || 0) - (b.br || 0));
   const rows = [];
   let totalDist = 0, count = 0;
 
@@ -28073,15 +28081,11 @@ async function autoLoadStorageBucket(bucketName, getOpts, extractOdjeli = false)
 }
 
 // Poziva se iz sbInitData() nakon prijave
-async function autoLoadAllKmlBuckets() {
-  const graniceStyle = { color: '#22c55e', weight: 2, dashArray: '6 4', opacity: 0.9 };
-  // Oba bucketa paralelno — prepolovljava ukupno čekanje
-  await Promise.all([
-    autoLoadStorageBucket('Granice odjela', graniceStyle, true),
-    autoLoadStorageBucket('ODJELI_ODSJECI', _ODJEL_STYLE),
-    _loadOdsjeciSQLite()
-  ]);
-}
+// Bucketi (Granice odjela, ODJELI_ODSJECI, odsjeci SQLite) su namjerno obrisani
+// sa Supabase Storage-a — ne pokušavaj ih više učitati (svaki neuspjeli fetch
+// i dalje troši egress). autoLoadStorageBucket()/_loadOdsjeciSQLite() ostaju
+// definisane ali se nigdje više ne pozivaju.
+async function autoLoadAllKmlBuckets() {}
 
 // =====================================================================
 // ═══ DOZNAKA STABALA ═══
