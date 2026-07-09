@@ -4323,7 +4323,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.8';
+const APP_VER = 'v3.27.9';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -7698,17 +7698,20 @@ function ptAtFrac(pts, frac) {
   }
   return pts[pts.length-1];
 }
-function _labelFracs(pts) {
+// zoom se prosljeđuje da bi se broj labela smanjio kad je zumirano daleko
+// (npr. pregled cijelog odjela) — više vlaka je vidljivo istovremeno, pa
+// dodatne labele po svakoj samo prave šum umjesto da pomažu čitljivosti.
+function _labelFracs(pts, zoom) {
   let total = 0;
   for (let i = 1; i < pts.length; i++) total += ptDist(pts[i-1], pts[i]);
-  if (total < 300) return [0.5];
+  if (total < 300 || (zoom != null && zoom < 15)) return [0.5];
   if (total < 600) return [0.33, 0.67];
   return [0.25, 0.5, 0.75];
 }
-function _placeLabelMarkers(pts, nm, zOff) {
+function _placeLabelMarkers(pts, nm, zOff, zoom) {
   const marks = [];
   try {
-    _labelFracs(pts).forEach(frac => {
+    _labelFracs(pts, zoom).forEach(frac => {
       const pt = ptAtFrac(pts, frac);
       if (!pt || isNaN(pt.la) || isNaN(pt.lo)) return;
       marks.push(L.marker([pt.la, pt.lo], {
@@ -11348,6 +11351,20 @@ function _updMapScale() {
 }
 let _prevHideFT = false;
 map.on('zoomend', _updMapScale);
+
+// Broj labela po vlaci/kraku zavisi od zoom nivoa (vidi _labelFracs) — kad korisnik
+// pređe prag "daleko/blizu" (npr. zumira na cijeli odjel ili se približi jednoj
+// vlaci), labele treba ponovo iscrtati sa novim brojem. Osvježava se samo pri
+// stvarnoj promjeni "tier"-a, ne na svaki zoomend, da se ne prerenderuju labele
+// za sve vlake bez potrebe.
+let _labelZoomFar = null;
+function _refreshLabelZoomTier() {
+  const far = map.getZoom() < 15;
+  if (_labelZoomFar === far) return;
+  _labelZoomFar = far;
+  vlake.forEach((v, i) => updateVlakaLabel(i));
+}
+map.on('zoomend', _refreshLabelZoomTier);
 
 // === IZBOR RAZMJERE (klik na badge) ===
 function toggleScaleMenu(e) {
@@ -15387,13 +15404,17 @@ function updateVlakaLabel(i) {
   if (v.pts.length < 2) return;
 
   // Krak — labela uvijek na početku (pts[0]), + dodatni ako je dugačak
+  const _zoom = map.getZoom();
   if (v.kr > 0) {
     v.labelMk = L.marker([v.pts[0].la, v.pts[0].lo], {
       icon: L.divIcon({ className: '', iconSize: [0,0], iconAnchor: [-2,6], html: _labelHtml(v.nm) }),
       interactive: false, zIndexOffset: 500, pane: 'vlakeLabels'
     }).addTo(map);
-    // Za duže krakove dodaj još labela
-    const extraFracs = _labelFracs(v.pts).filter(f => f > 0.1);
+    // Za duže krakove dodaj još labela — kraćim je dovoljna ona na početku
+    // (fracs.length===1 znači "kratak/daleko zumirano", nema smisla ponoviti
+    // isto ime tik do postojeće labele).
+    const fracs = _labelFracs(v.pts, _zoom);
+    const extraFracs = fracs.length > 1 ? fracs.filter(f => f > 0.1) : [];
     const extra = [];
     extraFracs.forEach(frac => {
       const pt = ptAtFrac(v.pts, frac);
@@ -15405,7 +15426,7 @@ function updateVlakaLabel(i) {
     });
     v.extraLabels = extra;
   } else {
-    const mks = _placeLabelMarkers(v.pts, v.nm, 500);
+    const mks = _placeLabelMarkers(v.pts, v.nm, 500, _zoom);
     if (mks.length > 0) { v.labelMk = mks[0]; v.extraLabels = mks.slice(1); }
   }
 
