@@ -4323,7 +4323,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.4';
+const APP_VER = 'v3.27.5';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4690,6 +4690,16 @@ async function _processOfflineQueue() {
           } else {
             const { error } = await sb.from('vlake').insert(op.payload);
             err = error;
+            // 23505 = drugi uređaj/pokušaj je u međuvremenu upisao red s istim
+            // (korisnik,projekt,nm) — spoji se UPDATE-om umjesto ponavljanja
+            // istog INSERT-a do isteka 5 pokušaja i tihog odbacivanja vlake.
+            if (err && err.code === '23505') {
+              const { data: ex2 } = await look.maybeSingle();
+              if (ex2 && ex2.id) {
+                const { error: e2 } = await sb.from('vlake').update(op.payload).eq('id', ex2.id);
+                err = e2;
+              }
+            }
           }
         }
       } else if (op.type === 'delete_vlaka') {
@@ -4812,8 +4822,10 @@ async function _processOfflineQueue() {
         const dropped = _OL.bumpRetry(op._qid ?? op.ts, 5);
         if (dropped) {
           console.warn('Offline queue: operacija odbačena nakon 5 pokušaja', op.type, err);
-          // OS-N1: tihi drop = tihi gubitak podataka — korisnik MORA vidjeti da je izmjena odbačena
-          showToast('⚠ Jedna offline izmjena (' + op.type.replace(/_/g, ' ') + ') odbačena poslije 5 neuspjelih pokušaja');
+          // OS-N1: tihi drop = tihi gubitak podataka — korisnik MORA vidjeti da je izmjena odbačena.
+          // Kod greške ide u poruku (ne samo konzolu) — bez toga se ne može dijagnosticirati na terenu.
+          const errCode = err?.code ? (' [' + err.code + ']') : '';
+          showToast('⚠ Jedna offline izmjena (' + op.type.replace(/_/g, ' ') + ') odbačena poslije 5 neuspjelih pokušaja' + errCode);
         }
       }
     } catch(e) { break; } // still offline
@@ -7414,6 +7426,17 @@ async function _sbFlushVlakaImpl(v, i, _retried) {
         ({ data, error } = await sb.from('vlake').update(payload).eq('id', ex.id).select(_SEL).single());
       } else {
         ({ data, error } = await sb.from('vlake').insert(payload).select(_SEL).single());
+        // 23505 = unique(korisnik,projekt,nm) sudar — najčešće drugi uređaj istog
+        // naloga je u međuvremenu (prije nego je ovaj lookup stigao) upisao vlaku
+        // s istim imenom (npr. oba predložila "T1"). Red sad postoji — spoji se
+        // na njega UPDATE-om umjesto da ponavljamo identičan INSERT 5 puta i
+        // na kraju tiho izgubimo upravo nacrtanu vlaku.
+        if (error && error.code === '23505') {
+          const { data: ex2 } = await look.maybeSingle();
+          if (ex2 && ex2.id) {
+            ({ data, error } = await sb.from('vlake').update(payload).eq('id', ex2.id).select(_SEL).single());
+          }
+        }
       }
     }
     if (!error && data) {
