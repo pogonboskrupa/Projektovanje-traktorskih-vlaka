@@ -4323,7 +4323,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.9';
+const APP_VER = 'v3.27.10';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -7680,8 +7680,36 @@ function ptDist(a, b) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 function _labelHtml(nm) {
-  return `<div style="color:#fff;font-size:12px;font-weight:bold;font-family:Arial,sans-serif;pointer-events:none;white-space:nowrap;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;">${nm}</div>`;
+  return `<div class="vlaka-lbl" style="color:#fff;font-size:12px;font-weight:bold;font-family:Arial,sans-serif;pointer-events:none;white-space:nowrap;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;">${nm}</div>`;
 }
+
+// ─── SPRJEČAVANJE PREKLAPANJA LABELA ───────────────────────────────────────
+// Leaflet nema ugrađeno rješenje za ovo. Umjesto da diramo geometriju/pozicije
+// (koje moraju ostati tačne — labela ide na stvarnu tačku vlake), samo SAKRIJEMO
+// labele koje bi se preklopile sa već prikazanom (visibility:hidden — čuva layout
+// poziciju pa nema potrebe za posebnim "reset" prolazom prije mjerenja).
+function _declutterVlakaLabels() {
+  const mapEl = map.getContainer();
+  const mapRect = mapEl.getBoundingClientRect();
+  const labels = mapEl.querySelectorAll('.vlaka-lbl');
+  const kept = [];
+  labels.forEach(el => {
+    const r = el.getBoundingClientRect();
+    // Van vidljivog dijela karte — Leaflet ga i onako klipuje, preskoči (perf).
+    if (r.right < mapRect.left || r.left > mapRect.right || r.bottom < mapRect.top || r.top > mapRect.bottom) return;
+    const PAD = 2; // mala margina da tekst ne bude zalijepljen ivica-uz-ivicu
+    const overlaps = kept.some(k =>
+      !(r.right < k.left - PAD || r.left > k.right + PAD || r.bottom < k.top - PAD || r.top > k.bottom + PAD));
+    el.style.visibility = overlaps ? 'hidden' : '';
+    if (!overlaps) kept.push(r);
+  });
+}
+let _declutterTimer = null;
+function _scheduleDeclutterLabels() {
+  clearTimeout(_declutterTimer);
+  _declutterTimer = setTimeout(_declutterVlakaLabels, 120);
+}
+// map.on(...) hook je niže u fajlu, poslije definicije `map` (vidi _refreshLabelZoomTier).
 function ptAtFrac(pts, frac) {
   let total = 0;
   for (let i = 1; i < pts.length; i++) total += ptDist(pts[i-1], pts[i]);
@@ -11365,6 +11393,7 @@ function _refreshLabelZoomTier() {
   vlake.forEach((v, i) => updateVlakaLabel(i));
 }
 map.on('zoomend', _refreshLabelZoomTier);
+map.on('moveend zoomend', _scheduleDeclutterLabels);
 
 // === IZBOR RAZMJERE (klik na badge) ===
 function toggleScaleMenu(e) {
@@ -15475,6 +15504,7 @@ function updateVlakaLabel(i) {
       interactive: false, zIndexOffset: 600, pane: 'vlakeLabels'
     }).addTo(map);
   }
+  _scheduleDeclutterLabels();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
