@@ -4323,7 +4323,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.7';
+const APP_VER = 'v3.27.8';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4378,6 +4378,18 @@ function _saveLocalVlake() {
 function _loadLocalVlake() {
   try { return JSON.parse(localStorage.getItem(LOCAL_VLAKE_KEY) || '[]'); }
   catch(e) { return []; }
+}
+
+// crypto.randomUUID() je dodan u Chromium 92 (2021) — starije/neažurirane
+// Android WebView komponente ga nemaju, pa nezaštićen poziv baca TypeError.
+// Koristi se za privremene klijentske ID-jeve (optimistički UI, kasnije
+// zamijenjeni pravim server ID-jem) — ne treba kriptografska jačina.
+function _genUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
 }
 
 // ─── OFFLINE DATA LAYER ───────────────────────────────────────────────────────
@@ -4453,9 +4465,8 @@ const _OL = {
       // izgubljenog odgovora postaje idempotentan (23505 = već upisano). NE za
       // upsert_trag: procesor po payload.id bira update-vs-insert granu (trag
       // idempotentnost se rješava pre-lookupom po korisnik+nm u procesoru).
-      if (['insert_doz_marking', 'insert_projekt'].includes(op.type)
-          && op.payload && !op.payload.id && typeof crypto !== 'undefined' && crypto.randomUUID) {
-        op.payload.id = crypto.randomUUID();
+      if (['insert_doz_marking', 'insert_projekt'].includes(op.type) && op.payload && !op.payload.id) {
+        op.payload.id = _genUUID();
       }
       q.push({ ...op, ts: Date.now(), _qid: qid, _uid: uid });
       if (q.length > 500) { q.splice(0, q.length - 500); showToast('⚠ Offline red prepun — najstarije operacije odbačene'); }
@@ -5294,15 +5305,30 @@ async function doRegister() {
   const { data: existingK } = await sb.from('korisnici').select('id').eq('sumarija', sumarija);
   const korisnikBoja = KORISNIK_PAL[(existingK?.length || 0) % KORISNIK_PAL.length];
 
-  const { error: insertErr } = await sb.from('korisnici').insert({
-    id: data.user.id, ime, prezime, sumarija, login_email: loginEmail, boja: korisnikBoja
-  });
+  // sb.auth.signUp() gore je VEĆ uspio — auth.users red postoji. Ako ovaj insert
+  // padne (npr. prolazni prekid veze, češći na Android WebView-u nego u pravom
+  // browseru), korisnik ostaje "siroče": ima nalog za login ali admin ga nikad
+  // ne vidi (admin_get_all_users čita SAMO korisnici tabelu) — pa ga ne može
+  // odobriti. Par pokušaja s pauzom prije odustajanja hvata baš takve blipove.
+  let insertErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 700 * attempt));
+    const { error: e } = await sb.from('korisnici').insert({
+      id: data.user.id, ime, prezime, sumarija, login_email: loginEmail, boja: korisnikBoja
+    });
+    insertErr = e;
+    if (!insertErr) break;
+    if (insertErr.code === '23505') {
+      // Provjeri je li VLASTITI red (id = data.user.id) ipak upisan — raniji
+      // pokušaj je mogao uspjeti na serveru dok je odgovor izgubljen, što
+      // izgleda kao 23505 na retry-u. Ako reda pod NAŠIM id-jem i dalje nema,
+      // konflikt je po drugom polju (npr. imenu) — stvarna greška, ne uspjeh.
+      const { data: self } = await sb.from('korisnici').select('id').eq('id', data.user.id).maybeSingle();
+      if (self) { insertErr = null; break; }
+    }
+  }
   if (insertErr) {
-    // D2-K: check-pa-insert gore (4910) je racy — dva uređaja mogu proći provjeru
-    // istovremeno. Ako DB ima unique constraint, prepoznaj je i prikaži jasnu poruku
-    // umjesto sirove Postgres greške.
-    const dupNazivErr = insertErr.code === '23505';
-    showAuthErr(dupNazivErr ? `Korisnik "${ime} ${prezime}" već postoji` : 'Greška pri kreiranju profila: ' + insertErr.message, true);
+    showAuthErr('Greška pri kreiranju profila (probaj ponovo): ' + insertErr.message, true);
     return;
   }
 
@@ -6162,7 +6188,7 @@ async function saveNovProjekt() {
   };
 
   if (!navigator.onLine) {
-    const tempId = crypto.randomUUID();
+    const tempId = _genUUID();
     const newProj = { ...payload, id: tempId, clanovi: [], _pendingSync: true };
     _projekti.unshift(newProj);
     _OL.save(_OL.PROJEKTI, _projekti);
@@ -6180,7 +6206,7 @@ async function saveNovProjekt() {
     // OS-S1: onLine=true ali zahtjev pao (mrtva/špotava veza) — NE gubi projekat:
     // isti postupak kao offline grana (temp ID + lokalni upis + red čekanja).
     if (_isNetworkErr(error)) {
-      const tempId = crypto.randomUUID();
+      const tempId = _genUUID();
       const newProj = { ...payload, id: tempId, clanovi: [], _pendingSync: true };
       _projekti.unshift(newProj);
       _OL.save(_OL.PROJEKTI, _projekti);
@@ -6199,6 +6225,12 @@ async function saveNovProjekt() {
   hideNovProjektForm();
   if (data?.id) { _aktivniProjektId = data.id; localStorage.setItem('tvlake_akt_proj', data.id); }
   await sbLoadProjekti();
+  } catch(e) {
+    // Bez ovoga bilo koja neočekivana greška (npr. starije/neažurirane WebView
+    // komponente bez neke API funkcije) tiho ubija kreiranje projekta —
+    // korisnik samo vidi da se ništa ne desilo, bez ijedne poruke.
+    console.error('saveNovProjekt:', e);
+    showToast('⚠ Greška pri kreiranju projekta: ' + (e?.message || e));
   } finally {
     _npSaveInFlight = false;
   }
@@ -6309,6 +6341,24 @@ function showProjektDetalji(id) {
     ukBtn.style.display = '';
   } else if (ukBtn) {
     ukBtn.style.display = 'none';
+  }
+
+  // Za ne-vlasnike: napusti projekat (član sam sebe uklanja — vlasnik i ostali
+  // ostaju netaknuti). Vlasnik ne može "napustiti" — koristi "Obriši projekat".
+  let leaveBtn = document.getElementById('pd-leave-btn');
+  if (!isVlasnik && !ro) {
+    if (!leaveBtn) {
+      leaveBtn = document.createElement('button');
+      leaveBtn.id = 'pd-leave-btn';
+      leaveBtn.className = 'btn gr';
+      leaveBtn.style.cssText = 'width:100%;font-size:12px;padding:7px;margin-top:4px;color:#f87171;';
+      document.getElementById('pd-delete-btn').parentNode.appendChild(leaveBtn);
+    }
+    leaveBtn.textContent = '🚪 Napusti projekat';
+    leaveBtn.onclick = () => napustiProjekat(id);
+    leaveBtn.style.display = '';
+  } else if (leaveBtn) {
+    leaveBtn.style.display = 'none';
   }
 }
 
@@ -6498,6 +6548,31 @@ async function removeProjektClan(projekt_id, korisnik_id) {
   await sbLoadProjekti();
   showProjektDetalji(projekt_id);
   await sbLoadKolegeVlake();
+}
+
+// Član (NE vlasnik) sam sebe uklanja iz projekta — vlasnik/ostali članovi i njihovi
+// podaci ostaju netaknuti. RLS (projekt_clanovi_delete) izričito dozvoljava ovo
+// (korisnik_id = auth.uid()), ali dosad nije postojalo nijedno dugme koje to zove.
+async function napustiProjekat(projekt_id) {
+  if (isReadOnly()) { showToast('Pregledni nalog — samo čitanje'); return; }
+  const p = _projekti.find(x => x.id === projekt_id);
+  if (!p || !sbUser) return;
+  if (p.korisnik_id === sbUser.id) { showToast('Ti si vlasnik ovog projekta — koristi "Obriši projekat".'); return; }
+  const ok = await _dlgConfirm(`Napustiti projekat "${p.odjel || ''}"?\nVlasnik i ostali članovi zadržavaju pristup — samo ti gubiš vidljivost.`, { danger: true });
+  if (!ok) return;
+  const { error } = await sb.from('projekt_clanovi').delete()
+    .eq('projekt_id', projekt_id).eq('korisnik_id', sbUser.id);
+  if (error) { showToast('Greška: ' + error.message); return; }
+  if (_aktivniProjektId === projekt_id) {
+    _aktivniProjektId = null;
+    localStorage.removeItem('tvlake_akt_proj');
+    _updFabVisibility();
+  }
+  _pdProjektId = null;
+  showProjektiList();
+  await sbLoadProjekti();
+  await sbLoadKolegeVlake();
+  showToast('Napustio/la si projekat.');
 }
 
 async function aktivirajProjekt(id) {
