@@ -13614,7 +13614,12 @@ function showVlakaPopup(i, latlng) {
   const brLabel  = v.br != null ? `<span style="font-size:11px;color:#64748b;margin-left:5px;">br.${v.br}</span>` : '';
   document.getElementById('vp-nm').innerHTML =
     `<span style="color:${v.color};">${v.nm}</span>${brLabel}<span style="color:#64748b;font-size:11px;">${tipLabel}</span>`;
+  const proj = v.projektId ? (_projekti || []).find(p => p.id === v.projektId) : null;
+  const projRow = proj
+    ? `<div class="vp-row">📁 Projekat: <b>${proj.odjel || '—'}</b>${proj.gj ? ' · ' + proj.gj : ''}</div>`
+    : '';
   document.getElementById('vp-info').innerHTML = `
+    ${projRow}
     <div class="vp-row">🔢 Broj vlake: <b>${v.br ?? '—'}</b>${v.kr > 0 ? `&nbsp;(krak ${v.kr})` : ''}</div>
     <div class="vp-row">📏 Dužina: <b>${fmtL(len)}</b></div>
     <div class="vp-row">📍 Tačaka GPS: <b>${v.pts.length}</b></div>
