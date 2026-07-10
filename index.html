@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.28.3';
+const APP_VER = 'v3.28.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -18428,9 +18428,20 @@ function _distToMainRoad(vlakeList, krak) {
 }
 
 // Izračun Srednje Transportne Distance Privlačenja
+// Broj vlake često ne odgovara `br` polju (miješani nazivi — neke vlake su
+// nazvane čistim brojem "5", "9", "34", druge "T1".."T7") — sortiranje po br
+// je davalo šaren, nečitljiv redoslijed. Sortiraj po broju IZVUČENOM iz samog
+// imena (ignoriše slovni prefiks), pa tek po imenu ako se broj poklapa (npr.
+// "5" i "T5").
+function _stdSortKey(nm) {
+  const m = String(nm || '').match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : Infinity;
+}
 function calcSTD(vlakeList) {
-  // Sortiraj po broju vlake — bez ovoga red zavisi od redoslijeda učitavanja/kreiranja
-  vlakeList = [...vlakeList].sort((a, b) => (a.br || 0) - (b.br || 0));
+  vlakeList = [...vlakeList].sort((a, b) => {
+    const ka = _stdSortKey(a.nm), kb = _stdSortKey(b.nm);
+    return ka !== kb ? ka - kb : String(a.nm).localeCompare(String(b.nm));
+  });
   const rows = [];
   let totalDist = 0, count = 0;
 
