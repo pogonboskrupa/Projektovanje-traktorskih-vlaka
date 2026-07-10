@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.28.5';
+const APP_VER = 'v3.28.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -6664,9 +6664,7 @@ async function startManualVlakaDraw() {
     showToast('Prvo aktiviraj projekat');
     return;
   }
-  const usedBr = new Set(vlake.filter(v => v.projektId === _aktivniProjektId).map(v => v.br));
-  let nextBr = 1;
-  while (usedBr.has(nextBr)) nextBr++;
+  const nextBr = _nextMainBr();  // uključuje i brojeve zauzete od kolega na projektu
   const defaultNm = `T${nextBr}`;
   const rawNm = await _dlgPrompt('Naziv vlake:', defaultNm, { title: 'Nova ručna vlaka' });
   if (!rawNm) return;
@@ -6675,6 +6673,15 @@ async function startManualVlakaDraw() {
   if (exists !== -1) {
     showToast('Vlaka "' + nm + '" već postoji u projektu');
     return;
+  }
+  // I kolega na istom projektu može već imati vlaku ovog imena (jedinstvenost
+  // između projektanata ne može biti DB constraint zbog RLS-a — samo obavijest).
+  const kolegaDup = typeof _kolegaVlakaDup === 'function' ? _kolegaVlakaDup(nm) : null;
+  if (kolegaDup) {
+    const ok = await _dlgConfirm(
+      `Vlaka "${nm}" već postoji u projektu — nacrtao/la ju je ${kolegaDup}.\n\nŽeliš li svejedno kreirati?`,
+      { title: '⚠ Ista vlaka već u projektu', okLabel: 'Svejedno kreiraj', danger: true });
+    if (!ok) return;
   }
   const brMatch = nm.match(/^T(\d+)(?:\.(\d+))?$/);
   const br = brMatch ? parseInt(brMatch[1]) : nextBr;
@@ -11876,6 +11883,13 @@ async function edpRename() {
     showToast('⚠ Naziv "' + nm + '" već postoji u projektu');
     return;
   }
+  const kolegaDup = typeof _kolegaVlakaDup === 'function' ? _kolegaVlakaDup(nm) : null;
+  if (kolegaDup) {
+    const ok = await _dlgConfirm(
+      `Vlaka "${nm}" već postoji u projektu — snimio/la ju je ${kolegaDup}.\n\nŽeliš li svejedno preimenovati?`,
+      { title: '⚠ Ista vlaka već u projektu', okLabel: 'Svejedno', danger: true });
+    if (!ok) return;
+  }
   await renameVlaka(actI, nm);
   document.getElementById('edp-nm').textContent = nm;
   showToast('✏ Preimenovano u ' + nm);
@@ -12116,6 +12130,16 @@ function _nextMainBr() {
     vlake.filter(v => !v.nm.includes('.') && v.projektId === _aktivniProjektId)
          .map(v => parseInt(v.nm.slice(1)))
   );
+  // I brojevi koje su KOLEGE na projektu već zauzele — inače predloženi broj
+  // odmah okine dijalog o duplikatu (dva projektanta na istom odjelu).
+  try {
+    for (const key in kolegeVlakeMap) {
+      const nm = key.slice(key.indexOf('::') + 2);
+      if (nm.includes('.')) continue;
+      const n = parseInt(String(nm).replace(/^T/i, ''), 10);
+      if (n) used.add(n);
+    }
+  } catch(e) {}
   let n = 1; while (used.has(n)) n++; return n;
 }
 
@@ -18447,6 +18471,28 @@ function _stdSortKey(nm) {
   const m = String(nm || '').match(/(\d+)/);
   return m ? parseInt(m[1], 10) : Infinity;
 }
+// SVE vlake aktivnog projekta — moje + kolega-projektanata (kolegeVlakeMap je
+// učitan baš za aktivni projekat). STD/rekap/izvoz za odjel mora obuhvatiti
+// CIJELU mrežu vlaka projekta, ne samo vlake trenutno prijavljenog projektanta —
+// inače tim od 2+ projektanata dobija pogrešan (podcijenjen) STD i sumu.
+function _projSveVlake() {
+  if (!_aktivniProjektId) return vlake.slice();
+  const moje = vlake.filter(v => v.projektId === _aktivniProjektId);
+  const tudje = [];
+  try {
+    for (const key in kolegeVlakeMap) {
+      const kv = kolegeVlakeMap[key];
+      if (!kv?.pts || kv.pts.length < 2) continue;
+      const i = key.indexOf('::');
+      const nm = i >= 0 ? key.slice(i + 2) : key;
+      const krM = String(nm).match(/\.(\d+)$/);
+      tudje.push({ nm, pts: kv.pts, color: kv.color || '#94a3b8',
+                   kr: krM ? parseInt(krM[1]) : 0, _kolega: kv.ime || null });
+    }
+  } catch(e) {}
+  return [...moje, ...tudje];
+}
+
 function calcSTD(vlakeList) {
   vlakeList = [...vlakeList].sort((a, b) => {
     const ka = _stdSortKey(a.nm), kb = _stdSortKey(b.nm);
@@ -20581,7 +20627,7 @@ function updProjStats() {
   // === STD PRIVLAČENJA ===
   const stdEl = document.getElementById('std-card');
   if (stdEl) {
-    const std = calcSTD(projVlake);
+    const std = calcSTD(_projSveVlake());
     if (std.count === 0) {
       stdEl.innerHTML = '<div style="color:#475569;font-size:12px;text-align:center;padding:8px;">Nema vlaka za izračun STD</div>';
     } else {
@@ -20768,8 +20814,7 @@ function exportTerenStats() {
   const s = _calcTerenStats();
   const odjel = getOdjel() || 'odjel';
   const sumarija = document.getElementById('p-sumarija').value.trim() || '';
-  const projVlake = _aktivniProjektId ? vlake.filter(v => v.projektId === _aktivniProjektId) : vlake;
-  const std = calcSTD(projVlake);
+  const std = calcSTD(_projSveVlake());
   const date = todayStr();
 
   let txt = `PROJEKTOVANJE TRAKTORSKIH VLAKA — STATISTIKE\n`;
@@ -20822,8 +20867,7 @@ function exportTerenStats() {
 }
 
 function exportSTDcsv() {
-  const projVlake = _aktivniProjektId ? vlake.filter(v => v.projektId === _aktivniProjektId) : vlake;
-  const std = calcSTD(projVlake);
+  const std = calcSTD(_projSveVlake());
   if (!std.count) { showToast('Nema vlaka za eksport'); return; }
   const odjel = getOdjel() || 'odjel';
   let csv = 'Vlaka/krak;Tip;Strana;Duzina vlastita (m);Duzina do puta (m);Efektivna distanca (m);Formula\n';
@@ -20844,8 +20888,7 @@ function exportSTDcsv() {
 }
 
 function exportSTDtxt() {
-  const projVlake = _aktivniProjektId ? vlake.filter(v => v.projektId === _aktivniProjektId) : vlake;
-  const std = calcSTD(projVlake);
+  const std = calcSTD(_projSveVlake());
   if (!std.count) { showToast('Nema vlaka za eksport'); return; }
   const odjel = getOdjel() || 'Odjel';
   const pad = (s, n) => String(s).padEnd(n);
