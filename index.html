@@ -4323,7 +4323,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.10';
+const APP_VER = 'v3.28.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -13551,6 +13551,16 @@ const MPDEG        = 111320; // ≈ metri po stepenu geografske širine
 let _kf          = null;   // Kalman state: {la,lo,vla,vlo,Pla,Plo,t}
 let _lastRecTime = 0;
 
+// ─── DIREKTNO SNIMANJE (bez medijane/Kalmana) ────────────────────────────────
+// Medijana kasni ~pola prozora iza stvarne pozicije, a Kalman dodatno vuče ka
+// predikciji — zajedno prave "stoji pa povuče crtu" umjesto praćenja kretanja.
+// Trag se sad upisuje iz SIROVIH fixeva; jedina anti-spike zaštita je
+// dvofixna potvrda skoka: izolovan teleport-fix se zadrži JEDAN fix, i upiše
+// se tek ako ga sljedeći fix potvrdi (stvaran skok, npr. GPS se vratio poslije
+// prekida) — normalno kretanje prolazi bez ikakvog kašnjenja.
+let _lastFixRaw     = null;  // {la, lo, t} zadnji prihvaćen sirovi fix
+let _pendingJumpFix = null;  // fix odbačen kao mogući spike — čeka potvrdu
+
 // ─── MEDIAN PRE-FILTER ──────────────────────────────────────────────────────────────────
 // Čuva zadnja _gpsMedN() prihvatljiva mjerenja i vraća MEDIJANU.
 let _gpsBuf = [];   // [{la, lo, ac}]
@@ -13570,7 +13580,7 @@ function _gpsMedianPt(la, lo, ac) {
   };
 }
 
-function _kfReset() { _kf = null; _gpsBuf = []; _altEma = null; }
+function _kfReset() { _kf = null; _gpsBuf = []; _altEma = null; _lastFixRaw = null; _pendingJumpFix = null; }
 
 // Krak/nastavak dok se aktivno snima: ukloni SAMO "momentum" (brzinu/pravac) starog
 // segmenta — pozicija/kovarijansa ostaju tople (bez cold-start gubitka prvih fixeva iz
@@ -13584,10 +13594,9 @@ function _kfSoftReset() {
 }
 
 // ─── LIVE PREVIEW TRAGA ─────────────────────────────────────────────────────
-// Upisane tačke po dizajnu kasne za stvarnom pozicijom (medijana + Kalman + min-razmak
-// čekaju potvrdu prije upisa) pa puna linija "stoji pa povuče". Isprekidani segment od
-// zadnje upisane tačke do trenutne pozicije markera ažurira se na SVAKI fix — trag
-// vidljivo prati korisnika, a upisuje se i dalje samo filtrirano.
+// Upisane tačke i uz direktan upis blago kasne (min-razmak od ~3m čeka pomak prije
+// upisa). Isprekidani segment od zadnje upisane tačke do trenutne pozicije markera
+// ažurira se na SVAKI fix — trag vidljivo prati korisnika bez ikakvog čekanja.
 let _recPrevLine = null;
 function _updRecPreview(la, lo) {
   const v = (recOn && !recPaused && actI !== null) ? vlake[actI] : null;
@@ -13783,40 +13792,43 @@ function onP(p) {
   // 1. FILTER TAČNOSTI
   if (ac > GPS_MAX_ACC) return;
 
-  // 2. DOPPLER SPEED VALIDACIJA — odbaci samo ekstremne spike-ove.
-  //    Šumski GPS šum je 5–15m, pa threshold mora biti > GPS_MAX_ACC da ne odbaci normalne fixove.
-  //    Kada GPS kaže speed=0 (mirovanie) ali pozicija skoči > 2× GPS_MAX_ACC → vjerovatno spike.
-  if (gpsSpeed != null && gpsSpeed >= 0 && _kf) {
-    const dtS = Math.max(0.5, (Date.now() - _kf.t) / 1000);
-    const maxAllowed = Math.max(GPS_MAX_ACC * 2.5, gpsSpeed * dtS * 4.0 + GPS_MAX_ACC);
-    if (dst(_kf.la, _kf.lo, la, lo) > maxAllowed) return;
+  // 2. SPIKE ZAŠTITA — dvofixna potvrda skoka (jedina anti-spike odbrana; medijana
+  //    i Kalman su uklonjeni iz upisa jer su pravili kašnjenje/povlačenje linije).
+  //    Fix predaleko od prethodnog (više nego što GPS_MAX_SPEED hod dozvoljava, uz
+  //    marginu za tačnost) se zadrži JEDAN fix: upiše se tek ako ga sljedeći fix
+  //    potvrdi (stvaran skok — npr. signal se vratio poslije prekida), a izolovan
+  //    teleport-spike (multipath) nestaje jer ga sljedeći fix ne potvrdi.
+  const nowMs = Date.now();
+  if (_lastFixRaw) {
+    const dtS = Math.max(0.5, (nowMs - _lastFixRaw.t) / 1000);
+    const maxAllowed = Math.max(GPS_MAX_JUMP, GPS_MAX_SPEED * dtS * 3 + ac);
+    if (dst(_lastFixRaw.la, _lastFixRaw.lo, la, lo) > maxAllowed) {
+      if (_pendingJumpFix && dst(_pendingJumpFix.la, _pendingJumpFix.lo, la, lo) <= Math.max(GPS_MAX_JUMP, ac * 2)) {
+        _pendingJumpFix = null;  // drugi fix potvrđuje novu lokaciju — prihvati
+      } else {
+        _pendingJumpFix = { la, lo, t: nowMs };
+        return;
+      }
+    } else {
+      _pendingJumpFix = null;
+    }
   }
+  _lastFixRaw = { la, lo, t: nowMs };
 
-  // 3. MEDIAN PRE-FILTER — uzima medijanu zadnja _gpsMedN() fikseva.
-  //    Jedan loš fix (multipath) ne može pomjeriti medijanu kad su ostala dva dobra.
-  const med = _gpsMedianPt(la, lo, ac);
-  if (!med) return;  // prvih _gpsMedN()-1 fikseva: buffer se puni
-
-  // 4. KATASTROFALNI SKOK NA MEDIJANI — ako i medijana skaci > GPS_MAX_JUMP, GPS lock-loss
-  if (_kf && dst(_kf.la, _kf.lo, med.la, med.lo) > GPS_MAX_JUMP) {
-    _kfReset(); _lastRecTime = 0; return;
-  }
-
-  // 5. KALMAN — glačanje ostatnog šuma, predikcija smjera kretanja
-  const kfOut = _kfStep(med.la, med.lo, med.ac, Date.now());
-  if (!kfOut) return;
-  const { la: sla, lo: slo } = kfOut;
+  // 3. DIREKTAN UPIS — sirova pozicija, bez glačanja. Rezidualni šum čisti
+  //    Douglas-Peucker pri zaustavljanju snimanja (_simplifyRecordedPts u stopRec).
+  const sla = la, slo = lo;
 
   const v = vlake[actI];
   if (v.pts.length > 0) {
     const last  = v.pts[v.pts.length - 1];
     const distM = dst(last.la, last.lo, sla, slo);
 
-    // 6. MIN RAZMAK — adaptivni: lošija tačnost zahtijeva veći pomak
+    // 4. MIN RAZMAK — adaptivni: lošija tačnost zahtijeva veći pomak
     const effectiveDist = Math.max(GPS_MIN_DIST, ac * _gpsDistMul());
     if (distM < effectiveDist) return;
 
-    // 7. SPEED GATE — backup za slučaj da Doppler nije dostupan
+    // 5. SPEED GATE — backup za slučaj da Doppler nije dostupan
     const reported = (gpsSpeed != null && gpsSpeed >= 0) ? gpsSpeed : null;
     if (reported !== null && reported > GPS_MAX_SPEED) return;
     const elapsed = (Date.now() - _lastRecTime) / 1000;
@@ -13824,11 +13836,11 @@ function onP(p) {
       if (distM / elapsed > GPS_MAX_SPEED) return;
     }
 
-    // 8. BEARING CHECK — nagla promjena smjera + mali pomak = residualni multipath
+    // 6. BEARING CHECK — nagla promjena smjera + mali pomak = residualni multipath
     // D3-S: distanca-gate snižena 15→8m — stvaran oštar okret (krak) pri kojem operater
     // pređe >8m u novom smjeru se UVIJEK zadrži; odbacuje se samo jitter-blizu (<8m)
-    // near-reversal (multipath potpis). Median pre-filter + Kalman i dalje čuvaju od
-    // izolovanih spikeova, pa je ovaj gate tek tercijarna odbrana.
+    // near-reversal (multipath potpis). Uz direktan upis (bez medijane/Kalmana) ovo
+    // je uz dvofixnu spike-potvrdu glavna odbrana od multipath jittera.
     if (v.pts.length >= 2) {
       const p2 = v.pts[v.pts.length - 1];
       const p1 = v.pts[v.pts.length - 2];
