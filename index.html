@@ -938,6 +938,14 @@ input:focus { outline:none; border-color:#3b82f6; }
   font-size:11px; color:#64748b; padding:0 15px 2px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
+/* Stil linija modal */
+.stil-row { display:flex; align-items:center; gap:10px; margin-bottom:9px; font-size:12px; color:#94a3b8; }
+.stil-row span:first-child { flex:0 0 auto; min-width:96px; }
+.stil-row input[type=range] { flex:1; accent-color:#38bdf8; }
+.stil-row b { color:#e2e8f0; font-size:12px; min-width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+.stil-row input[type=checkbox] { width:18px; height:18px; accent-color:#38bdf8; margin-left:auto; }
+.stil-dash { flex:1; padding:6px 4px; background:#1e293b; border:1px solid #334155; border-radius:8px; color:#94a3b8; font-size:11px; cursor:pointer; }
+.stil-dash.on { border-color:#4ade80; color:#4ade80; }
 #edp-proj b { color:#334155; font-weight:700; }
 #edp-rename {
   background:#fef3c7; border:none; color:#d97706; width:26px; height:26px;
@@ -4332,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.28.1';
+const APP_VER = 'v3.28.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -8174,16 +8182,20 @@ let _tackaPlaceNm   = '';     // naziv koji se koristi pri kliku
 // nav lines live in vodiMeDoTacke section below
 
 function _tačkaIcon(n, nm) {
+  // Globalna veličina tačaka iz "Stil linija" (50–200%); _lineStyle je definisan niže
+  // u fajlu ali se ikone grade tek po interakciji, pa je guard dovoljan.
+  const s = (typeof _lineStyle !== 'undefined' ? (_lineStyle.tackaScale || 100) : 100) / 100;
+  const W = Math.round(24 * s), H = Math.round(32 * s);
   const label = nm
-    ? `<div style="position:absolute;top:30px;left:50%;transform:translateX(-50%);
-        white-space:nowrap;font-size:9px;font-weight:700;line-height:14px;
+    ? `<div style="position:absolute;top:${Math.round(30*s)}px;left:50%;transform:translateX(-50%);
+        white-space:nowrap;font-size:${Math.max(8, Math.round(9*s))}px;font-weight:700;line-height:14px;
         color:#fff;text-shadow:-1.5px -1.5px 0 #000,1.5px -1.5px 0 #000,
         -1.5px 1.5px 0 #000,1.5px 1.5px 0 #000;">${_escHtml(nm)}</div>`
     : '';
   return L.divIcon({
-    className: '', iconSize:[24, nm ? 46 : 32], iconAnchor:[12, 32], popupAnchor:[0,-34],
+    className: '', iconSize:[W, nm ? Math.round(46*s) : H], iconAnchor:[W/2, H], popupAnchor:[0,-(H+2)],
     html:`<div style="position:relative;overflow:visible;">
-      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="32" viewBox="0 0 24 32">
+      <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 24 32">
         <path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 20 12 20S24 21 24 12C24 5.37 18.63 0 12 0z"
           fill="#fbbf24" stroke="#92400e" stroke-width="1.4"/>
         <circle cx="12" cy="12" r="5.5" fill="#fff"/>
@@ -14306,19 +14318,88 @@ function _tqmClose() {
   _tqmId = null;
 }
 
+// ─── STIL LINIJA — globalne postavke (Meni → 🖌 Stil linija) ─────────────────
+// Defaulti za tragove/mjerenja/tačke; pojedinačne izmjene na tragu (popup) i
+// dalje imaju prednost za taj trag. Čuva se lokalno po uređaju.
+const _LSTYLE_KEY = 'tvlake_stil_linija';
+let _lineStyle = {
+  tragW: 3, tragOp: 85, tragDash: 'solid', tragCol: '', tragLen: false,
+  msrW: 4, msrFillOp: 18, msrArea: true, msrLen: false,
+  tackaScale: 100
+};
+try { Object.assign(_lineStyle, JSON.parse(localStorage.getItem(_LSTYLE_KEY) || '{}')); } catch(e) {}
+function _lineStyleSave() { try { localStorage.setItem(_LSTYLE_KEY, JSON.stringify(_lineStyle)); } catch(e) {} }
+
+function openStilLinija() {
+  const g = id => document.getElementById(id);
+  g('stil-tragW').value = _lineStyle.tragW;       g('stil-tragW-v').textContent = _lineStyle.tragW;
+  g('stil-tragOp').value = _lineStyle.tragOp;     g('stil-tragOp-v').textContent = _lineStyle.tragOp + '%';
+  g('stil-msrW').value = _lineStyle.msrW;         g('stil-msrW-v').textContent = _lineStyle.msrW;
+  g('stil-msrFillOp').value = _lineStyle.msrFillOp; g('stil-msrFillOp-v').textContent = _lineStyle.msrFillOp + '%';
+  g('stil-tackaScale').value = _lineStyle.tackaScale; g('stil-tackaScale-v').textContent = _lineStyle.tackaScale + '%';
+  g('stil-tragLen').checked = !!_lineStyle.tragLen;
+  g('stil-msrArea').checked = !!_lineStyle.msrArea;
+  g('stil-msrLen').checked = !!_lineStyle.msrLen;
+  g('stil-tragColOn').checked = !!_lineStyle.tragCol;
+  if (_lineStyle.tragCol) g('stil-tragCol').value = _lineStyle.tragCol;
+  document.querySelectorAll('.stil-dash').forEach(b => b.classList.toggle('on', b.dataset.d === _lineStyle.tragDash));
+  g('stil-modal').style.display = '';
+}
+function closeStilLinija() { document.getElementById('stil-modal').style.display = 'none'; }
+
+function _stilSet(key, val, el) {
+  _lineStyle[key] = val;
+  _lineStyleSave();
+  // Osvježi prikaz vrijednosti pored slidera / stanje dash dugmadi
+  if (el) {
+    const v = document.getElementById(el.id + '-v');
+    if (v) v.textContent = val + (/Op|Scale/.test(el.id) ? '%' : '');
+  }
+  if (key === 'tragDash') document.querySelectorAll('.stil-dash').forEach(b => b.classList.toggle('on', b.dataset.d === val));
+  _stilApply();
+}
+
+// Primijeni globalni stil na SVE postojeće slojeve odmah (live)
+function _stilApply() {
+  try { (_tragRegistry || []).forEach(t => _tragRegAddLayer(t)); } catch(e) {}
+  try { if (typeof _msrDrawAllSaved === 'function') _msrDrawAllSaved(); } catch(e) {}
+  try { (_tacke || []).forEach((t, i) => { if (t.marker) t.marker.setIcon(_tačkaIcon(i + 1, t.nm)); }); } catch(e) {}
+}
+
+let _tragLenMk = {};  // id → L.marker s tekstom dužine na sredini traga
+
 function _tragRegAddLayer(t) {
   if (_tragLayers[t.id]) { try { map.removeLayer(_tragLayers[t.id]); } catch(e) {} }
   if (_tragHitLayers[t.id]) { try { map.removeLayer(_tragHitLayers[t.id]); } catch(e) {} }
-  const dashArray = t.dashStyle==='dot' ? '2 6' : (t.dashStyle==='dash' ? '8 4' : null);
+  if (_tragLenMk[t.id]) { try { map.removeLayer(_tragLenMk[t.id]); } catch(e) {} delete _tragLenMk[t.id]; }
+  const dash = t.dashStyle || _lineStyle.tragDash;
+  const dashArray = dash==='dot' ? '2 6' : (dash==='dash' ? '8 4' : null);
   const lls = t.pts.map(p => [p[0], p[1]]);
   const line = L.polyline(lls, {
-    color: t.color || '#f97316', weight: t.weight || 3, opacity: 0.85, dashArray, interactive: false
+    color: _lineStyle.tragCol || t.color || '#f97316',
+    weight: t.weight || _lineStyle.tragW,
+    opacity: (_lineStyle.tragOp || 85) / 100, dashArray, interactive: false
   });
   const hit = L.polyline(lls, { weight: 24, opacity: 0.001, color: '#000', interactive: true });
   const lenM = _tragCalcLen(t.pts);
   line.bindPopup(() => _tragPopupHtml(t, lenM), { maxWidth: 260 });
-  hit.on('click', e => { L.DomEvent.stopPropagation(e); line.openPopup(e.latlng); });
+  hit.on('click', e => {
+    L.DomEvent.stopPropagation(e);
+    // Bez ovoga map-level click handler (zatvaranje popupa + proximity-fallback na
+    // vlake) opali ODMAH poslije i ubije tek otvoreni popup — trag "nije klikabilan".
+    if (e.originalEvent) e.originalEvent.stopPropagation();
+    line.openPopup(e.latlng);
+  });
   if (t.visible !== false) { line.addTo(map); hit.addTo(map); }
+  // Dužina na sredini traga (globalna opcija) — .vlaka-lbl klasa je uključuje u declutter
+  if (_lineStyle.tragLen && t.visible !== false && t.pts.length >= 2) {
+    const mid = t.pts[Math.floor(t.pts.length / 2)];
+    _tragLenMk[t.id] = L.marker([mid[0], mid[1]], {
+      icon: L.divIcon({ className: '', iconSize: [0,0], iconAnchor: [0,0],
+        html: `<div class="vlaka-lbl" style="color:#fff;font-size:11px;font-weight:bold;pointer-events:none;white-space:nowrap;text-shadow:0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;">${_tragFmtLen(lenM)}</div>` }),
+      interactive: false, pane: 'vlakeLabels'
+    }).addTo(map);
+  }
   _tragLayers[t.id] = line;
   _tragHitLayers[t.id] = hit;
 }
@@ -14529,18 +14610,10 @@ function _tragRegToggle(id) {
   const t = _tragRegistry.find(x => x.id === id);
   if (!t) return;
   t.visible = t.visible === false ? true : false;
+  // Re-kreiraj slojeve kroz jedinstvenu putanju — rukuje i oznakom dužine (tragLen)
+  _tragRegAddLayer(t);
   const line = _tragLayers[id];
-  const hit  = _tragHitLayers[id];
-  if (line) {
-    if (t.visible) {
-      line.addTo(map);
-      if (hit) hit.addTo(map);
-    } else {
-      map.removeLayer(line);
-      if (hit) { try { map.removeLayer(hit); } catch(e) {} }
-    }
-    line.setPopupContent(_tragPopupHtml(t, _tragCalcLen(t.pts)));
-  }
+  if (line) line.setPopupContent(_tragPopupHtml(t, _tragCalcLen(t.pts)));
   _tragRegSave();
   _tragRegRender();
 }
@@ -14553,6 +14626,7 @@ function _tragRegDelete(id) {
   if (line) { try { map.removeLayer(line); } catch(e) {} delete _tragLayers[id]; }
   const hit = _tragHitLayers[id];
   if (hit) { try { map.removeLayer(hit); } catch(e) {} delete _tragHitLayers[id]; }
+  if (_tragLenMk[id]) { try { map.removeLayer(_tragLenMk[id]); } catch(e) {} delete _tragLenMk[id]; }
   _tragRegistry = _tragRegistry.filter(x => x.id !== id);
   _tragRegSave();
   _tragRegRender();
@@ -22006,23 +22080,39 @@ function _msrDrawAllSaved() {
       return html;
     };
 
+    const gw = _lineStyle.msrW || 4;
+    // Tekstualna oznaka na karti (dužina na sredini linije / površina u centru poligona)
+    const _msrTextMk = (lat, lng, txt) => L.marker([lat, lng], {
+      icon: L.divIcon({ className: '', iconSize: [0,0], iconAnchor: [0,0],
+        html: `<div class="vlaka-lbl" style="color:#fff;font-size:11px;font-weight:bold;pointer-events:none;white-space:nowrap;text-shadow:0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;">${txt}</div>` }),
+      interactive: false, pane: 'vlakeLabels'
+    });
     if (mode === 'area' && latlngs.length >= 3) {
       const poly = L.polygon(latlngs, {
-        color: color, weight: 4,
-        fillColor: color, fillOpacity: m.fillOpacity ?? 0.18,
+        color: color, weight: gw,
+        fillColor: color, fillOpacity: m.fillOpacity ?? ((_lineStyle.msrFillOp ?? 18) / 100),
         opacity: 0.9
       });
       poly.bindPopup(buildPopup, {maxWidth: 260});
       _msrSavedLayer.addLayer(poly);
+      if (_lineStyle.msrArea) {
+        const c = poly.getBounds().getCenter();
+        const aM2 = _msrSphericalArea(m.pts);
+        _msrSavedLayer.addLayer(_msrTextMk(c.lat, c.lng, (aM2/10000).toFixed(2) + ' ha'));
+      }
     } else {
       const drawLL = mode === 'area' ? [...latlngs, latlngs[0]] : latlngs;
       const hit = L.polyline(drawLL, {color:'#000', weight:28, opacity:0.001, lineCap:'round', lineJoin:'round'});
-      const bg  = L.polyline(drawLL, {color:'#fff', weight:7, opacity:0.7, lineCap:'round', lineJoin:'round', interactive:false});
-      const fg  = L.polyline(drawLL, {color, weight:4, opacity:1.0, lineCap:'round', lineJoin:'round', interactive:false});
+      const bg  = L.polyline(drawLL, {color:'#fff', weight:gw+3, opacity:0.7, lineCap:'round', lineJoin:'round', interactive:false});
+      const fg  = L.polyline(drawLL, {color, weight:gw, opacity:1.0, lineCap:'round', lineJoin:'round', interactive:false});
       hit.bindPopup(buildPopup, {maxWidth: 260});
       _msrSavedLayer.addLayer(hit);
       _msrSavedLayer.addLayer(bg);
       _msrSavedLayer.addLayer(fg);
+      if (_lineStyle.msrLen && m.pts.length >= 2) {
+        const midP = m.pts[Math.floor(m.pts.length / 2)];
+        _msrSavedLayer.addLayer(_msrTextMk(midP.lat, midP.lng, _msrFmt(_msrPts2Len(m.pts))));
+      }
     }
   });
 }
@@ -30488,6 +30578,7 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" id="mdrop-upravljanje" onclick="closeMenuDropdown();showProjectManagement()">📊 Upravljanje projektima</div>
   <div class="mdrop-item" id="mdrop-izvjestaji" style="display:none;" onclick="closeMenuDropdown();showIzvjestaji()">📅 Sedmični / mjesečni izvještaji</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();toggleMjtrgDropdown()">📏 Mjerenja &amp; Tragovi</div>
+  <div class="mdrop-item" onclick="closeMenuDropdown();openStilLinija()">🖌 Stil linija</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();openGraniceModal()">🗺 Granice Odjela</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();startLocPhoto()">📷 Uslikaj lokaciju</div>
@@ -30502,6 +30593,48 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();promijeniPin()">🔑 Promijeni PIN</div>
   <div class="mdrop-item" style="color:#f87171;" onclick="closeMenuDropdown();doLogout()">⎋ Odjava</div>
   <div style="color:#475569;font-size:9px;text-align:center;padding:6px 0 2px;letter-spacing:0.05em;" id="menu-app-ver"></div>
+</div>
+
+<!-- ─── STIL LINIJA MODAL (globalni stil tragova/mjerenja/tačaka) ────────── -->
+<div id="stil-modal" onclick="if(event.target===this)closeStilLinija()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99500;">
+  <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,94vw);max-height:88vh;overflow-y:auto;background:#16213e;border:1px solid #0f3460;border-radius:14px;padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="font-weight:700;color:#e2e8f0;font-size:15px;">🖌 Stil linija</div>
+      <button onclick="closeStilLinija()" style="background:none;border:none;color:#64748b;font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Globalni stil — vrijedi za sve tragove, mjerenja i tačke. Pojedinačna izmjena na tragu (kroz njegov popup) ima prednost za taj trag.</div>
+
+    <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:12px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:700;color:#f97316;margin-bottom:10px;">📍 Tragovi (linije)</div>
+      <div class="stil-row"><span>Debljina</span><input type="range" min="1" max="10" value="3" id="stil-tragW" oninput="_stilSet('tragW',+this.value,this)"><b id="stil-tragW-v">3</b></div>
+      <div class="stil-row"><span>Prozirnost</span><input type="range" min="20" max="100" value="85" id="stil-tragOp" oninput="_stilSet('tragOp',+this.value,this)"><b id="stil-tragOp-v">85%</b></div>
+      <div class="stil-row"><span>Stil</span>
+        <span style="display:flex;gap:4px;flex:1;">
+          <button class="stil-dash" data-d="solid" onclick="_stilSet('tragDash','solid')">━ Puna</button>
+          <button class="stil-dash" data-d="dash" onclick="_stilSet('tragDash','dash')">╌ Crtice</button>
+          <button class="stil-dash" data-d="dot" onclick="_stilSet('tragDash','dot')">· Tačke</button>
+        </span>
+      </div>
+      <div class="stil-row"><span>Jedna boja za sve</span>
+        <input type="checkbox" id="stil-tragColOn" onchange="_stilSet('tragCol', this.checked ? document.getElementById('stil-tragCol').value : '')">
+        <input type="color" id="stil-tragCol" value="#f97316" onchange="if(document.getElementById('stil-tragColOn').checked)_stilSet('tragCol',this.value)" style="width:32px;height:24px;border:none;background:none;cursor:pointer;">
+      </div>
+      <div class="stil-row"><span>Prikaži dužinu na tragu</span><input type="checkbox" id="stil-tragLen" onchange="_stilSet('tragLen',this.checked)"></div>
+    </div>
+
+    <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:12px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:10px;">📏 Mjerenja (linije i poligoni)</div>
+      <div class="stil-row"><span>Debljina</span><input type="range" min="1" max="10" value="4" id="stil-msrW" oninput="_stilSet('msrW',+this.value,this)"><b id="stil-msrW-v">4</b></div>
+      <div class="stil-row"><span>Ispuna poligona</span><input type="range" min="0" max="100" value="18" id="stil-msrFillOp" oninput="_stilSet('msrFillOp',+this.value,this)"><b id="stil-msrFillOp-v">18%</b></div>
+      <div class="stil-row"><span>Površina unutar poligona</span><input type="checkbox" id="stil-msrArea" onchange="_stilSet('msrArea',this.checked)"></div>
+      <div class="stil-row"><span>Dužina na liniji</span><input type="checkbox" id="stil-msrLen" onchange="_stilSet('msrLen',this.checked)"></div>
+    </div>
+
+    <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:12px;">
+      <div style="font-size:13px;font-weight:700;color:#38bdf8;margin-bottom:10px;">📌 Tačke</div>
+      <div class="stil-row"><span>Veličina</span><input type="range" min="50" max="200" step="10" value="100" id="stil-tackaScale" oninput="_stilSet('tackaScale',+this.value,this)"><b id="stil-tackaScale-v">100%</b></div>
+    </div>
+  </div>
 </div>
 
 <!-- ─── UPRAVLJANJE PROJEKTIMA MODAL ──────────────────────────────────── -->
