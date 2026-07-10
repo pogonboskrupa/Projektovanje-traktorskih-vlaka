@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.28.2';
+const APP_VER = 'v3.28.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -10333,7 +10333,7 @@ async function _crashCheck() {
       if (_tragLine) { map.removeLayer(_tragLine); _tragLine = null; }
       _tragLiveClear();
       _tragLine = L.polyline(_tragPts.map(p => [p[0], p[1]]),
-        { color: '#f97316', weight: 3, opacity: 0.85 }).addTo(map);
+        { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85 }).addTo(map);
       _tragOn = true; _tragPaused = false;
       const b = document.getElementById('btrag');
       if (b) b.classList.add('active');
@@ -14323,7 +14323,7 @@ function _tqmClose() {
 // dalje imaju prednost za taj trag. Čuva se lokalno po uređaju.
 const _LSTYLE_KEY = 'tvlake_stil_linija';
 let _lineStyle = {
-  tragW: 3, tragOp: 85, tragDash: 'solid', tragCol: '', tragLen: false,
+  tragW: 4, tragOp: 85, tragDash: 'solid', tragCol: '', tragLen: false,
   msrW: 4, msrFillOp: 18, msrArea: true, msrLen: false,
   tackaScale: 100
 };
@@ -14948,7 +14948,7 @@ function fabSnimTrag() {
     _tragLastT = 0;
     if (_tragLine) { map.removeLayer(_tragLine); _tragLine = null; }
     _tragLiveClear();
-    _tragLine = L.polyline([], { color: '#f97316', weight: 3, opacity: 0.85 }).addTo(map);
+    _tragLine = L.polyline([], { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85 }).addTo(map);
     const bt = document.getElementById('btrag');
     if (bt) bt.classList.add('active');
     // Ako je snimanje pokrenuto iz Tragovi panela, prebaci na kartu da se vidi trag uživo
@@ -15069,7 +15069,7 @@ function _addTragPoint(la, lo, ac, al) {
     const segLatLngs = [[last[0], last[1]], [la, lo]];
     if (!_tragLiveSeg) {
       _tragLiveSeg = L.polyline(segLatLngs,
-        { color: '#f97316', weight: 3, opacity: 0.85, interactive: false }).addTo(map);
+        { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85, interactive: false }).addTo(map);
     } else {
       _tragLiveSeg.setLatLngs(segLatLngs);
     }
@@ -30606,7 +30606,7 @@ if (typeof AndroidDownload !== 'undefined') {
 
     <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:12px;margin-bottom:10px;">
       <div style="font-size:13px;font-weight:700;color:#f97316;margin-bottom:10px;">📍 Tragovi (linije)</div>
-      <div class="stil-row"><span>Debljina</span><input type="range" min="1" max="10" value="3" id="stil-tragW" oninput="_stilSet('tragW',+this.value,this)"><b id="stil-tragW-v">3</b></div>
+      <div class="stil-row"><span>Debljina</span><input type="range" min="1" max="10" value="4" id="stil-tragW" oninput="_stilSet('tragW',+this.value,this)"><b id="stil-tragW-v">4</b></div>
       <div class="stil-row"><span>Prozirnost</span><input type="range" min="20" max="100" value="85" id="stil-tragOp" oninput="_stilSet('tragOp',+this.value,this)"><b id="stil-tragOp-v">85%</b></div>
       <div class="stil-row"><span>Stil</span>
         <span style="display:flex;gap:4px;flex:1;">
