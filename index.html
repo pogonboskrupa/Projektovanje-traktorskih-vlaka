@@ -3559,6 +3559,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
         <button class="btn" id="pd-draw-vlaka-btn" onclick="startManualVlakaDraw()" style="width:100%;margin-bottom:6px;background:linear-gradient(135deg,#059669,#10b981);border:none;color:#fff;font-size:13px;padding:9px;border-radius:8px;font-weight:600;letter-spacing:0.3px;">✏ Nacrtaj vlaku ručno</button>
         <button class="btn" id="pd-vlake-btn" onclick="toggleProjektVlakeVisible(_pdProjektId)" style="width:100%;margin-bottom:6px;background:#0f1f2e;border:1px solid #1e3a5f;color:#94a3b8;font-size:12px;padding:7px;">🙈 Sakrij vlake</button>
         <button class="btn" onclick="exportProjektKml()" style="width:100%;margin-bottom:6px;background:#0f3460;border:1px solid #1e3a5f;color:#60a5fa;font-size:12px;padding:7px;">📥 Izvezi projekat kao KML</button>
+        <button class="btn" id="pd-share-code-btn" onclick="shareProjektCode()" style="display:none;width:100%;font-size:12px;padding:7px;margin-bottom:6px;background:#0f172a;border:1px solid #38bdf8;color:#38bdf8;">🔑 Podijeli šifrom (teren)</button>
         <button class="btn" id="pd-transfer-btn" onclick="transferProjektUI()" style="display:none;width:100%;font-size:12px;padding:7px;margin-bottom:6px;background:#0f172a;border:1px solid #f59e0b;color:#f59e0b;">🔄 Predaj projekat drugom projektantu</button>
         <button class="btn gr" id="pd-delete-btn" onclick="deleteProjektUI()" style="width:100%;font-size:12px;padding:7px;">🗑 Obriši projekat</button>
       </div>
@@ -3763,6 +3764,14 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
             <div id="trn-heading" style="font-size:22px;font-weight:700;color:#34d399;font-family:monospace;">—°</div>
             <div id="trn-heading-dir" style="font-size:11px;color:#64748b;">azimut uređaja</div>
           </div>
+        </div>
+
+        <!-- UČITAJ PROJEKAT (šifra od projektanta) -->
+        <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;">
+          <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:8px;">📥 Učitaj projekat</div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Ukucaj šifru koju ti je dao projektant (npr. RK70ABGH) — vlake odjela se prikažu na karti.</div>
+          <button onclick="terenUcitajProjekat()" style="width:100%;padding:13px;background:linear-gradient(135deg,#0369a1,#0ea5e9);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">🔑 Ukucaj šifru</button>
+          <div id="trn-shared-list" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;"></div>
         </div>
 
         <!-- KARTE I SLOJEVI -->
@@ -4323,7 +4332,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.28.0';
+const APP_VER = 'v3.28.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5868,6 +5877,7 @@ async function sbInitData() {
   autoLoadAllKmlBuckets();        // fire-and-forget (granice u pozadini)
   if (navigator.onLine) _processOfflineQueue(); // flush any queued ops from offline sessions
   _retryOrphanVlake();            // vlake bez sbId (npr. ranije trajno odbačene iz reda) — probaj opet
+  _trnSharedRestore();            // teren: vrati projekte učitane šifrom (localStorage keš)
   _updSyncBadge();               // prikaži badge ako ima pending ops iz prošle sesije
   if (sbProfile?.is_admin) _adminCheckPending().catch(() => {}); // badge+toast: registracije na čekanju
   setTimeout(_crashCheck, 1500); // provjeri nedovršena snimanja (odgodi da se mapa inicijalizira)
@@ -6323,6 +6333,7 @@ function showProjektDetalji(id) {
   const ro = isReadOnly();
   document.getElementById('pd-add-clan-sec').style.display = (isVlasnik && !ro) ? '' : 'none';
   document.getElementById('pd-delete-btn').style.display = (isVlasnik && !ro) ? '' : 'none';
+  document.getElementById('pd-share-code-btn').style.display = (isVlasnik && !ro) ? '' : 'none';
   const hasClanovi = (p.clanovi || []).length > 0;
   document.getElementById('pd-transfer-btn').style.display = (isVlasnik && hasClanovi && !ro) ? '' : 'none';
 
@@ -6573,6 +6584,40 @@ async function napustiProjekat(projekt_id) {
   await sbLoadProjekti();
   await sbLoadKolegeVlake();
   showToast('Napustio/la si projekat.');
+}
+
+// ─── DIJELJENJE PROJEKTA ŠIFROM (teren) ──────────────────────────────────────
+// Vlasnik napravi šifru (predložena iz skraćenice odjela + slučajna slova, ali
+// može upisati bilo koju) i saopšti je terenskom radniku. Terenski profil je
+// ukuca kroz "Učitaj projekat" (teren panel) i dobije read-only snapshot vlaka
+// preko redeem_share_code RPC-a — bez članstva u projektu.
+function _predloziSifru(odjel, gj) {
+  const abbr = ((gj || '').replace(/[^A-Za-zČĆŽŠĐčćžšđ]/g, '').slice(0, 2) +
+                (odjel || '').replace(/[^A-Za-z0-9]/g, '')).toUpperCase()
+    .replace(/Č|Ć/g, 'C').replace(/Ž/g, 'Z').replace(/Š/g, 'S').replace(/Đ/g, 'D')
+    .slice(0, 6);
+  let rand = '';
+  const AZ = 'ABCDEFGHJKLMNPRSTUVZ'; // bez I/O/Q — lakše za diktiranje
+  for (let i = 0; i < 4; i++) rand += AZ[Math.floor(Math.random() * AZ.length)];
+  return (abbr + rand).slice(0, 16);
+}
+
+async function shareProjektCode() {
+  const p = _projekti.find(x => x.id === _pdProjektId);
+  if (!p || p.korisnik_id !== sbUser?.id) { showToast('Samo vlasnik može podijeliti šifrom'); return; }
+  if (p._pendingSync) { showToast('⚠ Projekat još nije sinhronizovan na server — pokušaj za koji minut'); return; }
+  const sug = _predloziSifru(p.odjel, p.gj);
+  const raw = await _dlgPrompt('Šifra za dijeljenje (4–16 slova/cifara).\nMožeš je promijeniti u bilo koju:', sug, { title: '🔑 Podijeli šifrom', okLabel: 'Napravi šifru' });
+  if (raw === null) return;
+  const code = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length < 4 || code.length > 16) { showToast('Šifra mora imati 4–16 slova/cifara'); return; }
+  const { data, error } = await sb.rpc('create_share_code', { p_kind: 'projekat', p_target_id: p.id, p_code: code });
+  if (error) {
+    const missing = /function .*does not exist|schema cache|PGRST202/i.test(error.message || '') || error.code === 'PGRST202';
+    showToast(missing ? '⚠ Primijeni migraciju 20260710 na Supabase (funkcija ne postoji)' : 'Greška: ' + error.message);
+    return;
+  }
+  await _dlgConfirm(`Šifra projekta "${p.odjel}":\n\n${data}\n\nSaopšti je terenskom radniku — u Teren panelu ukuca šifru kroz "📥 Učitaj projekat" i dobije vlake ovog odjela na karti.\n\n(Nova šifra za isti projekat poništava staru.)`, { title: '✅ Šifra napravljena', okLabel: 'U redu' });
 }
 
 async function aktivirajProjekt(id) {
@@ -9653,6 +9698,8 @@ function terenRender() {
   terenUpdCompass();
   // Tačke
   terenRenderTacke();
+  // Učitani projekti (šifra)
+  terenRenderShared();
   // Tragovi + Mjerenja
   terenRenderTragovi();
   terenRenderMjerenja();
@@ -9670,6 +9717,127 @@ function _trnUpdOdjel(la, lo) {
     if (od) showToast('🌲 Ušao si u odjel: ' + od);
     if (_activeTab === 'teren') terenRender();
   }
+}
+
+// ── Teren: učitaj projekat šifrom (read-only snapshot od projektanta) ─────────
+// Projektant napravi šifru (shareProjektCode u detaljima projekta), terenski je
+// ukuca ovdje. Snapshot (projekat + vlake, ili doznaka plohe) se kešira u
+// localStorage da preživi restart i radi offline; osvježava se ponovnim unosom
+// iste šifre.
+const _TRN_SHARED_KEY = 'tvlake_teren_shared';
+let _trnSharedLayers = {};  // code → L.layerGroup na karti
+
+function _trnSharedLoad() {
+  try { return JSON.parse(localStorage.getItem(_TRN_SHARED_KEY) || '[]'); } catch { return []; }
+}
+function _trnSharedSave(arr) {
+  try { localStorage.setItem(_TRN_SHARED_KEY, JSON.stringify(arr)); } catch(e) {}
+}
+
+function _trnSharedDraw(entry) {
+  if (_trnSharedLayers[entry.code]) { try { map.removeLayer(_trnSharedLayers[entry.code]); } catch(e) {} }
+  const grp = L.layerGroup();
+  if (entry.kind === 'doznaka') {
+    (entry.markings || []).forEach(m => {
+      try {
+        const col = (typeof DOZ_TYPES !== 'undefined' && DOZ_TYPES[m.type]?.color) || '#9B5DE5';
+        const lyr = L.geoJSON(m.geojson, { style: { color: col, weight: 2, fillColor: col, fillOpacity: 0.18 } });
+        const lbl = [m.label, m.note].filter(Boolean).join(' — ');
+        if (lbl) lyr.bindTooltip(lbl, { sticky: true, opacity: 0.9 });
+        grp.addLayer(lyr);
+      } catch(e) {}
+    });
+  } else {
+    (entry.vlake || []).forEach(v => {
+      const pts = (v.pts || []).filter(p => p && Number.isFinite(p.la) && Number.isFinite(p.lo));
+      if (pts.length < 2) return;
+      const col = v.boja || '#4ade80';
+      const pl = L.polyline(pts.map(p => [p.la, p.lo]), { color: col, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer });
+      pl.bindTooltip(`${v.nm} (${entry.projekat?.odjel || ''})`, { sticky: true, opacity: 0.9 });
+      grp.addLayer(pl);
+      const mid = ptAtFrac(pts, 0.5);
+      if (mid && !isNaN(mid.la)) {
+        grp.addLayer(L.marker([mid.la, mid.lo], {
+          icon: L.divIcon({ className: '', iconSize: [0,0], iconAnchor: [-2,6], html: _labelHtml(v.nm) }),
+          interactive: false, zIndexOffset: 500, pane: 'vlakeLabels'
+        }));
+      }
+    });
+  }
+  grp.addTo(map);
+  _trnSharedLayers[entry.code] = grp;
+  return grp;
+}
+
+function _trnSharedBounds(entry) {
+  const b = L.latLngBounds([]);
+  (entry.vlake || []).forEach(v => (v.pts || []).forEach(p => { if (p && Number.isFinite(p.la)) b.extend([p.la, p.lo]); }));
+  if (entry.kind === 'doznaka') {
+    (entry.markings || []).forEach(m => { try { b.extend(L.geoJSON(m.geojson).getBounds()); } catch(e) {} });
+  }
+  return b.isValid() ? b : null;
+}
+
+async function terenUcitajProjekat() {
+  const raw = await _dlgPrompt('Ukucaj šifru koju ti je dao projektant:', '', { title: '📥 Učitaj projekat', okLabel: 'Učitaj' });
+  if (raw === null) return;
+  const code = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length < 4) { showToast('Šifra mora imati bar 4 slova/cifre'); return; }
+  const { data, error } = await sb.rpc('redeem_share_code', { p_code: code });
+  if (error) {
+    const missing = /function .*does not exist|schema cache|PGRST202/i.test(error.message || '') || error.code === 'PGRST202';
+    showToast(missing ? '⚠ Migracija 20260710 nije primijenjena na Supabase' : '⚠ ' + (error.message || 'Greška'));
+    return;
+  }
+  const entry = { ...data, loadedAt: new Date().toISOString() };
+  const arr = _trnSharedLoad().filter(e => e.code !== entry.code);
+  arr.push(entry);
+  _trnSharedSave(arr);
+  _trnSharedDraw(entry);
+  terenRenderShared();
+  const cnt = entry.kind === 'doznaka' ? (entry.markings || []).length : (entry.vlake || []).length;
+  showToast(`✅ ${entry.projekat?.odjel || code}: učitano (${cnt} ${entry.kind === 'doznaka' ? 'zona' : 'vlaka'})`);
+  const b = _trnSharedBounds(entry);
+  if (b) { switchTab('karta'); map.fitBounds(b, { padding: [30, 30] }); }
+}
+
+async function terenRemoveShared(code) {
+  if (!await _dlgConfirm('Ukloniti učitani projekat s karte?')) return;
+  if (_trnSharedLayers[code]) { try { map.removeLayer(_trnSharedLayers[code]); } catch(e) {} delete _trnSharedLayers[code]; }
+  _trnSharedSave(_trnSharedLoad().filter(e => e.code !== code));
+  terenRenderShared();
+}
+
+function terenZoomShared(code) {
+  const entry = _trnSharedLoad().find(e => e.code === code);
+  if (!entry) return;
+  const b = _trnSharedBounds(entry);
+  if (b) { switchTab('karta'); map.fitBounds(b, { padding: [30, 30] }); }
+}
+
+function terenRenderShared() {
+  const el = document.getElementById('trn-shared-list');
+  if (!el) return;
+  const arr = _trnSharedLoad();
+  if (!arr.length) { el.innerHTML = ''; return; }
+  el.innerHTML = arr.map(e => {
+    const cnt = e.kind === 'doznaka' ? (e.markings || []).length + ' zona' : (e.vlake || []).length + ' vlaka';
+    return `<div style="display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:8px 10px;">
+      <div style="flex:1;min-width:0;cursor:pointer;" onclick="terenZoomShared('${e.code}')">
+        <div style="font-size:13px;font-weight:700;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📁 ${_escHtml(e.projekat?.odjel || e.code)}${e.projekat?.gj ? ' · ' + _escHtml(e.projekat.gj) : ''}</div>
+        <div style="font-size:11px;color:#64748b;">${cnt} · šifra ${e.code} · ${_escHtml(e.projekat?.vlasnik || '')}</div>
+      </div>
+      <button onclick="terenRemoveShared('${e.code}')" style="background:none;border:none;color:#f87171;font-size:16px;cursor:pointer;padding:2px 6px;">✕</button>
+    </div>`;
+  }).join('');
+}
+
+// Vrati keširane učitane projekte na kartu poslije restarta (poziva se iz sbInitData).
+function _trnSharedRestore() {
+  try {
+    _trnSharedLoad().forEach(e => _trnSharedDraw(e));
+    terenRenderShared();
+  } catch(e) {}
 }
 
 // ── Teren: dijeljenje kretanja — jedan tap, svi kolege ───────────────────────
