@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.28.4';
+const APP_VER = 'v3.28.5';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -6668,8 +6668,9 @@ async function startManualVlakaDraw() {
   let nextBr = 1;
   while (usedBr.has(nextBr)) nextBr++;
   const defaultNm = `T${nextBr}`;
-  const nm = await _dlgPrompt('Naziv vlake:', defaultNm, { title: 'Nova ručna vlaka' });
-  if (!nm) return;
+  const rawNm = await _dlgPrompt('Naziv vlake:', defaultNm, { title: 'Nova ručna vlaka' });
+  if (!rawNm) return;
+  const nm = _ensureTPrefix(rawNm.trim());
   const exists = vlake.findIndex(v => v.nm === nm && v.projektId === _aktivniProjektId);
   if (exists !== -1) {
     showToast('Vlaka "' + nm + '" već postoji u projektu');
@@ -7611,11 +7612,20 @@ function _updateVlakaSyncIcon(i, status) {
   }
 }
 
+// "T" je oznaka vlake — naziv MORA početi tim slovom (npr. T5, T5.1 za krak).
+// Normalizuje "5"/"5.1" u "T5"/"T5.1"; custom nazive koji ne liče na broj
+// vlake ostavlja netaknute.
+function _ensureTPrefix(nm) {
+  const m = String(nm || '').trim().match(/^T?(\d+)(?:\.(\d+))?$/i);
+  return m ? ('T' + m[1] + (m[2] ? '.' + m[2] : '')) : nm;
+}
+
 // Preimenuje vlaku — ažurira nm/br/kr, tooltip, label, lokalni keš i DB red (po id, bez orphan reda)
 async function renameVlaka(i, newNm) {
   const v = vlake[i];
   if (!v) return;
   const oldNm = v.nm;
+  newNm = _ensureTPrefix(newNm);
   v.nm = newNm;
   const m = newNm.match(/^T?(\d+)(?:\.(\d+))?$/i);
   if (m) { v.br = parseInt(m[1]); v.kr = m[2] ? parseInt(m[2]) : 0; }
@@ -11860,7 +11870,7 @@ async function edpRename() {
   const v = vlake[actI];
   const nw = await _dlgPrompt('Novi naziv vlake (T5 = vlaka, T5.1 = krak):', v.nm, { title: 'Preimenuj vlaku' });
   if (!nw) return;
-  const nm = nw.trim();
+  const nm = _ensureTPrefix(nw.trim());
   if (!nm || nm === v.nm) return;
   if (vlake.some((x, xi) => xi !== actI && x.nm === nm && x.projektId === v.projektId)) {
     showToast('⚠ Naziv "' + nm + '" već postoji u projektu');
