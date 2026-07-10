@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.28.6';
+const APP_VER = 'v3.28.7';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -6704,7 +6704,7 @@ async function startManualVlakaDraw() {
 
   const color = kr > 0 ? getBojaKraka() : getBojaVlake();
   const poly = L.polyline([], { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
-  poly.bindTooltip(nm, { sticky: true, opacity: 0.9 });
+  poly.bindTooltip(_escHtml(nm), { sticky: true, opacity: 0.9 });
   attachPolyClick(poly);
   const strVal = kr > 0 ? (kr % 2 !== 0 ? 'L' : 'D') : null;
   vlake.push({ nm, br, kr, strana: strVal, color, lager: '', pts: [], poly, wpts: [], sbId: null, projektId: _aktivniProjektId, projektantIme: getIme(), labelMk: null, lagerMk: null, extraLabels: [], updatedAt: new Date().toISOString() });
@@ -7341,7 +7341,7 @@ function _applyVlakeRows(rows) {
     if (vlake.find(v => v.nm === row.nm && !v.projektId && !row.projekt_id)) return;
     const color = row.boja || '#4ade80';
     const poly  = L.polyline([], { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
-    poly.bindTooltip(row.nm, { sticky: true, opacity: 0.9 });
+    poly.bindTooltip(_escHtml(row.nm), { sticky: true, opacity: 0.9 });
     const v = { nm: row.nm, br: row.br, kr: row.kr, strana: row.strana || null, color, lager: row.lager || '', lagerPt: row.lager_pt || null, pts: row.pts || [], poly, wpts: row.wpts || [], sbId: row.id || null, projektId: row.projekt_id || null, projektantIme: row.projektant_ime || null, labelMk: null, lagerMk: null, extraLabels: [], updatedAt: row.updated_at || null, rev: row.rev != null ? row.rev : null };
     v.pts.forEach(p => poly.addLatLng([p.la, p.lo]));
     vlake.push(v);
@@ -7636,7 +7636,7 @@ async function renameVlaka(i, newNm) {
   v.nm = newNm;
   const m = newNm.match(/^T?(\d+)(?:\.(\d+))?$/i);
   if (m) { v.br = parseInt(m[1]); v.kr = m[2] ? parseInt(m[2]) : 0; }
-  try { v.poly.setTooltipContent(newNm); } catch(e) {}
+  try { v.poly.setTooltipContent(_escHtml(newNm)); } catch(e) {}
   updateVlakaLabel(i);
   // Očisti stari red iz offline keša
   if (sbUser) {
@@ -7750,7 +7750,7 @@ function ptDist(a, b) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 function _labelHtml(nm) {
-  return `<div class="vlaka-lbl" style="color:#fff;font-size:12px;font-weight:bold;font-family:Arial,sans-serif;pointer-events:none;white-space:nowrap;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;">${nm}</div>`;
+  return `<div class="vlaka-lbl" style="color:#fff;font-size:12px;font-weight:bold;font-family:Arial,sans-serif;pointer-events:none;white-space:nowrap;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;">${_escHtml(nm)}</div>`;
 }
 
 // ─── SPRJEČAVANJE PREKLAPANJA LABELA ───────────────────────────────────────
@@ -7900,7 +7900,7 @@ async function sbLoadKolegeVlake() {
       const mapKey = kid + '::' + row.nm;
       const poly = L.polyline(row.pts.map(p => [p.la, p.lo]),
         { color, weight: 3, opacity: 0.7, dashArray: kid === sbUser?.id ? null : '10,6', interactive: true }).addTo(map);
-      poly.bindTooltip(`${info.ime}: ${row.nm}`, { sticky: true, opacity: 0.85 });
+      poly.bindTooltip(_escHtml(`${info.ime}: ${row.nm}`), { sticky: true, opacity: 0.85 });
       kolegeVlake.push(poly);
       kolegeVlakeMap[mapKey] = { poly, pts: row.pts, nm: row.nm, ime: info.ime };
     });
@@ -7963,7 +7963,7 @@ async function sbLoadKolegeVlake() {
       row.pts.map(p => [p.la, p.lo]),
       { color, weight: 3, opacity: 0.7, dashArray: '10,6', interactive: true }
     ).addTo(map);
-    poly.bindTooltip(`${info.ime}: ${row.nm}`, { sticky: true, opacity: 0.85 });
+    poly.bindTooltip(_escHtml(`${info.ime}: ${row.nm}`), { sticky: true, opacity: 0.85 });
     poly.on('click', function(e) {
       L.DomEvent.stopPropagation(e);
       showKolegeVlakaInfo(mapKey, e.latlng);
@@ -9782,7 +9782,7 @@ function _trnSharedDraw(entry) {
       if (pts.length < 2) return;
       const col = v.boja || '#4ade80';
       const pl = L.polyline(pts.map(p => [p.la, p.lo]), { color: col, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer });
-      pl.bindTooltip(`${v.nm} (${entry.projekat?.odjel || ''})`, { sticky: true, opacity: 0.9 });
+      pl.bindTooltip(_escHtml(`${v.nm} (${entry.projekat?.odjel || ''})`), { sticky: true, opacity: 0.9 });
       grp.addLayer(pl);
       const mid = ptAtFrac(pts, 0.5);
       if (mid && !isNaN(mid.la)) {
@@ -11459,7 +11459,7 @@ map.on('click', e => {
     const ico = L.divIcon({className:'',iconSize:[10,10],iconAnchor:[5,5],
       html:`<div style="width:10px;height:10px;border-radius:50%;background:${v.color};border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`});
     const m = L.marker([e.latlng.lat,e.latlng.lng],{icon:ico}).addTo(map);
-    m.bindTooltip(`${v.nm} P${v.pts.length}`,{opacity:0.9});
+    m.bindTooltip(_escHtml(`${v.nm} P${v.pts.length}`),{opacity:0.9});
     v.wpts.push(m);
     showToast(`📍 Tačka dodana — ${v.nm} (${v.pts.length} uk.)`);
     return;
@@ -12580,7 +12580,7 @@ async function _doCreateVlaka(br, kr) {
   const nm = kr === 0 ? `T${br}` : `T${br}.${kr}`;
   const color = kr > 0 ? getBojaKraka() : getBojaVlake();
   const poly = L.polyline([],{color,weight:4,opacity:0.9,pane:'vlakeLines',renderer:_vlakeRenderer}).addTo(map);
-  poly.bindTooltip(nm,{sticky:true,opacity:0.9});
+  poly.bindTooltip(_escHtml(nm),{sticky:true,opacity:0.9});
   attachPolyClick(poly);
   vlake.push({nm,br,kr,color,lager:'',pts:[],poly,wpts:[],sbId:null,projektId:_aktivniProjektId||null,labelMk:null,lagerMk:null,extraLabels:[],updatedAt:new Date().toISOString()});
   sbFlushVlaka(vlake.length-1);
@@ -13188,7 +13188,7 @@ function noviKrakStrana(strana, overrideNm) {
   const krakNm = overrideNm || _nextKrakNm(parentV.nm, strana);
   const color  = parentV.color;
   const poly   = L.polyline([], { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
-  poly.bindTooltip(krakNm, { sticky: true, opacity: 0.9 });
+  poly.bindTooltip(_escHtml(krakNm), { sticky: true, opacity: 0.9 });
   attachPolyClick(poly);
 
   // junctionOnParent: indeks točke na roditeljskoj vlaci gdje krak nastaje.
@@ -15175,7 +15175,7 @@ function addWP() {
   const ico=L.divIcon({className:'',iconSize:[12,12],iconAnchor:[6,6],
     html:`<div style="width:12px;height:12px;border-radius:50%;background:${v.color};border:2px solid #fff;"></div>`});
   const m=L.marker([lastP.la,lastP.lo],{icon:ico}).addTo(map);
-  m.bindTooltip(`${v.nm} WP${v.wpts.length+1}`,{opacity:0.9}); v.wpts.push(m);
+  m.bindTooltip(_escHtml(`${v.nm} WP${v.wpts.length+1}`),{opacity:0.9}); v.wpts.push(m);
 }
 function updBan() {
   if (actI === null) return;
@@ -15225,7 +15225,7 @@ function _renderVlakaRow(el, v, i, depth) {
   const isKrak = depth > 0;
   row.className = 'vrow' + (i === actI ? ' act' : '') + (isKrak ? ' vrow-krak' : '');
   if (depth > 1) row.style.marginLeft = (depth * 14) + 'px';
-  const lagerInfo    = v.lager ? ` · 🏷${v.lager}` : '';
+  const lagerInfo    = v.lager ? ` · 🏷${_escHtml(v.lager)}` : '';
   const isRecThis    = recOn && i === actI;
   const isPausedPar  = recOn && i === _recParentIdx;
   const stranaBadge  = isKrak ? _krakStranaBadge(v.strana) : '';
@@ -15251,7 +15251,7 @@ function _renderVlakaRow(el, v, i, depth) {
     <div class="vcard-stripe" style="${stripeStyle}"></div>
     <div class="vcard-info">
       <div class="vcard-top">
-        ${krakArrow}${stranaBadge}<span class="vcard-name">${v.nm}</span>
+        ${krakArrow}${stranaBadge}<span class="vcard-name">${_escHtml(v.nm)}</span>
         ${badge}
         <span class="vcard-km">${fmtL(d)}</span>
         ${sbUser ? `<span class="vsync-icon" data-vi="${i}" title="${v.sbId ? 'Sačuvano na server' : 'Čeka sync...'}" style="font-size:11px;opacity:0.7;margin-left:2px;color:${v.sbId ? '#4ade80' : '#94a3b8'};">☁</span>` : ''}
@@ -15511,19 +15511,19 @@ function showVlakaPopup(i, latlng) {
   const tipLabel = v.kr > 0 ? ' (krak)' : '';
   const brLabel  = v.br != null ? `<span style="font-size:11px;color:#64748b;margin-left:5px;">br.${v.br}</span>` : '';
   document.getElementById('vp-nm').innerHTML =
-    `<span style="color:${v.color};">${v.nm}</span>${brLabel}<span style="color:#64748b;font-size:11px;">${tipLabel}</span>`;
+    `<span style="color:${v.color};">${_escHtml(v.nm)}</span>${brLabel}<span style="color:#64748b;font-size:11px;">${tipLabel}</span>`;
   const proj = v.projektId ? (_projekti || []).find(p => p.id === v.projektId) : null;
   const projRow = proj
-    ? `<div class="vp-row">📁 Projekat: <b>${proj.odjel || '—'}</b>${proj.gj ? ' · ' + proj.gj : ''}</div>`
+    ? `<div class="vp-row">📁 Projekat: <b>${_escHtml(proj.odjel || '—')}</b>${proj.gj ? ' · ' + _escHtml(proj.gj) : ''}</div>`
     : '';
   document.getElementById('vp-info').innerHTML = `
     ${projRow}
     <div class="vp-row">🔢 Broj vlake: <b>${v.br ?? '—'}</b>${v.kr > 0 ? `&nbsp;(krak ${v.kr})` : ''}</div>
     <div class="vp-row">📏 Dužina: <b>${fmtL(len)}</b></div>
     <div class="vp-row">📍 Tačaka GPS: <b>${v.pts.length}</b></div>
-    <div class="vp-row">👤 Projektant: <b>${ime}</b></div>
+    <div class="vp-row">👤 Projektant: <b>${_escHtml(ime)}</b></div>
     <div class="vp-row">📅 Ažurirano: <b>${dat}</b></div>
-    ${v.lager ? `<div class="vp-row">🪵 Lager: <b style="color:#f59e0b;">${v.lager}</b></div>` : ''}
+    ${v.lager ? `<div class="vp-row">🪵 Lager: <b style="color:#f59e0b;">${_escHtml(v.lager)}</b></div>` : ''}
   `;
   _positionPopup(latlng);
 }
@@ -16350,7 +16350,7 @@ async function refKartaImportDetected() {
     const nm = `T${br}`;
     const pts = latlngs.map(([la, lo]) => ({ la, lo, al: 0 }));
     const poly = L.polyline(latlngs, { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
-    poly.bindTooltip(nm, { sticky: true, opacity: 0.9 });
+    poly.bindTooltip(_escHtml(nm), { sticky: true, opacity: 0.9 });
     attachPolyClick(poly);
     vlake.push({ nm, br, kr: 0, strana: null, color, lager: '', pts, poly, wpts: [], sbId: null, projektId: _aktivniProjektId, projektantIme: getIme(), labelMk: null, lagerMk: null, extraLabels: [], updatedAt: new Date().toISOString() });
     const idx = vlake.length - 1;
