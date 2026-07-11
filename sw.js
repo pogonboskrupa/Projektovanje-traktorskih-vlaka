@@ -2,7 +2,7 @@
 // Service Worker — ŠPD Unsko-sanske šume
 // Promijeni APP_VERSION pri svakom deploymentu → okida update
 // =====================================================================
-const APP_VERSION = '3.28.7';
+const APP_VERSION = '3.29.0';
 const APP_CACHE   = 'tvlake-app-v' + APP_VERSION;
 const TILE_CACHE  = 'tvlake-tiles-v1';
 const LIB_CACHE   = 'tvlake-lib-v1';
@@ -15,6 +15,7 @@ const NV_CACHE    = 'tvlake-nv-v1';     // Open-Meteo elevation (statički, mož
 const APP_SHELL = [
   './',
   './index.html',
+  './static/js/offline-layer.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
