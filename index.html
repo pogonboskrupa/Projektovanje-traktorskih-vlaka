@@ -946,6 +946,8 @@ input:focus { outline:none; border-color:#3b82f6; }
 .stil-row input[type=checkbox] { width:18px; height:18px; accent-color:#38bdf8; margin-left:auto; }
 .stil-dash { flex:1; padding:6px 4px; background:#1e293b; border:1px solid #334155; border-radius:8px; color:#94a3b8; font-size:11px; cursor:pointer; }
 .stil-dash.on { border-color:#4ade80; color:#4ade80; }
+.boja-dash-btn { padding:5px 8px; background:#1e293b; border:1px solid #334155; border-radius:7px; color:#94a3b8; font-size:11px; cursor:pointer; }
+.boja-dash-btn.on { border-color:#60a5fa; color:#60a5fa; }
 #edp-proj b { color:#334155; font-weight:700; }
 #edp-rename {
   background:#fef3c7; border:none; color:#d97706; width:26px; height:26px;
@@ -3631,6 +3633,21 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
               <input type="color" id="boja-kr-pick" style="width:30px;height:26px;border:1px solid #334155;border-radius:5px;cursor:pointer;padding:0;background:none;" oninput="_bojaKrChange(this.value)" onchange="_bojaKrChange(this.value)">
             </div>
           </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span style="font-size:13px;color:#e2e8f0;">Debljina linije</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <input type="range" min="2" max="8" step="1" value="4" id="boja-weight" oninput="_bojaWChange(+this.value)" style="width:90px;">
+              <b id="boja-weight-v" style="font-size:12px;color:#94a3b8;min-width:14px;">4</b>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span style="font-size:13px;color:#e2e8f0;">Vrsta linije</span>
+            <div style="display:flex;gap:4px;">
+              <button class="boja-dash-btn" data-d="solid" onclick="_bojaDashChange('solid')">━ Puna</button>
+              <button class="boja-dash-btn" data-d="dash" onclick="_bojaDashChange('dash')">╌ Crtice</button>
+              <button class="boja-dash-btn" data-d="dot" onclick="_bojaDashChange('dot')">· Tačke</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -4369,7 +4386,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.30.3';
+const APP_VER = 'v3.30.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -6647,7 +6664,7 @@ async function startManualVlakaDraw() {
   }
 
   const color = kr > 0 ? getBojaKraka() : getBojaVlake();
-  const poly = L.polyline([], { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
+  const poly = L.polyline([], { color, weight: getVlakaWeight(), dashArray: getVlakaDashArray(), opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
   poly.bindTooltip(_escHtml(nm), { sticky: true, opacity: 0.9 });
   attachPolyClick(poly);
   const strVal = kr > 0 ? (kr % 2 !== 0 ? 'L' : 'D') : null;
@@ -7026,7 +7043,7 @@ async function impVlakaConfirm() {
     const br = m ? parseInt(m[1]) : (Math.max(0, ...vlake.map(v => v.br)) + 1);
     const kr = m && m[2] ? parseInt(m[2]) : 0;
     const color = kr > 0 ? getBojaKraka() : getBojaVlake();
-    const poly = L.polyline(t.pts.map(p => [p.la, p.lo]), { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
+    const poly = L.polyline(t.pts.map(p => [p.la, p.lo]), { color, weight: getVlakaWeight(), dashArray: getVlakaDashArray(), opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
     poly.bindTooltip(t.nm, { sticky: true, opacity: 0.9 });
     attachPolyClick(poly);
     vlake.push({ nm: t.nm, br, kr, strana: kr > 0 ? t.strana : null, color, lager: '', pts: t.pts.map(p => ({...p})), poly, wpts: [], sbId: null, projektId: projId, projektantIme: getIme(), labelMk: null, lagerMk: null, extraLabels: [], updatedAt: new Date().toISOString() });
@@ -7285,7 +7302,7 @@ function _applyVlakeRows(rows) {
     // Also skip if same nm exists WITHOUT a projektId (legacy dedup)
     if (vlake.find(v => v.nm === row.nm && !v.projektId && !row.projekt_id)) return;
     const color = row.boja || '#4ade80';
-    const poly  = L.polyline([], { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
+    const poly  = L.polyline([], { color, weight: getVlakaWeight(), dashArray: getVlakaDashArray(), opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
     poly.bindTooltip(_escHtml(row.nm), { sticky: true, opacity: 0.9 });
     const v = { nm: row.nm, br: row.br, kr: row.kr, strana: row.strana || null, color, lager: row.lager || '', lagerPt: row.lager_pt || null, pts: row.pts || [], poly, wpts: row.wpts || [], sbId: row.id || null, projektId: row.projekt_id || null, projektantIme: row.projektant_ime || null, labelMk: null, lagerMk: null, extraLabels: [], updatedAt: row.updated_at || null, rev: row.rev != null ? row.rev : null };
     v.pts.forEach(p => poly.addLatLng([p.la, p.lo]));
@@ -10169,6 +10186,15 @@ function _loadBoje() {
 function _saveBoje(b) { localStorage.setItem(_BOJA_KEY, JSON.stringify(b)); }
 function getBojaVlake() { return _loadBoje().vlaka || '#60a5fa'; }
 function getBojaKraka()  { return _loadBoje().krak  || '#f87171'; }
+// Debljina/stil linije vlaka — za razliku od boje (fiksirana po vlaci u trenutku
+// crtanja), ovo je čisto vizuelna postavka bez semantike, pa se — isto kao Stil
+// linija za tragove/mjerenja — primjenjuje ODMAH i na već nacrtane vlake/krakove.
+function getVlakaWeight() { return _loadBoje().weight || 4; }
+function getVlakaDash()   { return _loadBoje().dash   || 'solid'; }
+function getVlakaDashArray() {
+  const d = getVlakaDash();
+  return d === 'dot' ? '2 6' : (d === 'dash' ? '8 4' : null);
+}
 function _bojaVlChange(col) {
   const b = _loadBoje(); b.vlaka = col; _saveBoje(b);
   document.getElementById('boja-vl-pick').value = col;
@@ -10178,6 +10204,22 @@ function _bojaKrChange(col) {
   const b = _loadBoje(); b.krak = col; _saveBoje(b);
   document.getElementById('boja-kr-pick').value = col;
   _rndBojaPresets();
+}
+function _bojaWChange(val) {
+  const b = _loadBoje(); b.weight = val; _saveBoje(b);
+  const v = document.getElementById('boja-weight-v'); if (v) v.textContent = val;
+  _vlakaStilApply();
+}
+function _bojaDashChange(val) {
+  const b = _loadBoje(); b.dash = val; _saveBoje(b);
+  document.querySelectorAll('.boja-dash-btn').forEach(btn => btn.classList.toggle('on', btn.dataset.d === val));
+  _vlakaStilApply();
+}
+// Live primjena debljine/stila na sve trenutno nacrtane VLASTITE vlake/krakove
+// (boja kolega ima namjernu semantiku — isprekidano za tuđe — pa se tu ne dira).
+function _vlakaStilApply() {
+  const weight = getVlakaWeight(), dashArray = getVlakaDashArray();
+  try { (vlake || []).forEach(v => { if (v.poly) v.poly.setStyle({ weight, dashArray }); }); } catch(e) {}
 }
 function _rndBojaPresets() {
   const vlCol = getBojaVlake(), krCol = getBojaKraka();
@@ -10192,6 +10234,10 @@ function _rndBojaPresets() {
   krEl.innerHTML = _BOJA_PRESETS.map(c =>
     `<span onclick="_bojaKrChange('${c}')" style="width:20px;height:20px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${c===krCol?'#fff':'transparent'};flex-shrink:0;"></span>`
   ).join('');
+  const wEl = document.getElementById('boja-weight'), wvEl = document.getElementById('boja-weight-v');
+  if (wEl) { wEl.value = getVlakaWeight(); if (wvEl) wvEl.textContent = getVlakaWeight(); }
+  const dash = getVlakaDash();
+  document.querySelectorAll('.boja-dash-btn').forEach(btn => btn.classList.toggle('on', btn.dataset.d === dash));
 }
 
 function buildC() {
@@ -12536,7 +12582,7 @@ function vcCancel() {
 async function _doCreateVlaka(br, kr) {
   const nm = kr === 0 ? `T${br}` : `T${br}.${kr}`;
   const color = kr > 0 ? getBojaKraka() : getBojaVlake();
-  const poly = L.polyline([],{color,weight:4,opacity:0.9,pane:'vlakeLines',renderer:_vlakeRenderer}).addTo(map);
+  const poly = L.polyline([],{color,weight:getVlakaWeight(),dashArray:getVlakaDashArray(),opacity:0.9,pane:'vlakeLines',renderer:_vlakeRenderer}).addTo(map);
   poly.bindTooltip(_escHtml(nm),{sticky:true,opacity:0.9});
   attachPolyClick(poly);
   vlake.push({nm,br,kr,color,lager:'',pts:[],poly,wpts:[],sbId:null,projektId:_aktivniProjektId||null,labelMk:null,lagerMk:null,extraLabels:[],updatedAt:new Date().toISOString()});
@@ -13144,7 +13190,7 @@ function noviKrakStrana(strana, overrideNm) {
 
   const krakNm = overrideNm || _nextKrakNm(parentV.nm, strana);
   const color  = parentV.color;
-  const poly   = L.polyline([], { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
+  const poly   = L.polyline([], { color, weight: getVlakaWeight(), dashArray: getVlakaDashArray(), opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
   poly.bindTooltip(_escHtml(krakNm), { sticky: true, opacity: 0.9 });
   attachPolyClick(poly);
 
@@ -16317,7 +16363,7 @@ async function refKartaImportDetected() {
     const br = _nextMainBr();
     const nm = `T${br}`;
     const pts = latlngs.map(([la, lo]) => ({ la, lo, al: 0 }));
-    const poly = L.polyline(latlngs, { color, weight: 4, opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
+    const poly = L.polyline(latlngs, { color, weight: getVlakaWeight(), dashArray: getVlakaDashArray(), opacity: 0.9, pane: 'vlakeLines', renderer: _vlakeRenderer }).addTo(map);
     poly.bindTooltip(_escHtml(nm), { sticky: true, opacity: 0.9 });
     attachPolyClick(poly);
     vlake.push({ nm, br, kr: 0, strana: null, color, lager: '', pts, poly, wpts: [], sbId: null, projektId: _aktivniProjektId, projektantIme: getIme(), labelMk: null, lagerMk: null, extraLabels: [], updatedAt: new Date().toISOString() });
