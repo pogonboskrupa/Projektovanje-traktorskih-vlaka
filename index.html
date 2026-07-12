@@ -2452,10 +2452,27 @@ select:focus { outline:none; border-color:#3b82f6; }
     white-space:nowrap;
   }
   #print-legend .pl-sym { width:18mm; height:4mm; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  #print-north {
+    display:flex !important; flex-direction:column; align-items:center;
+    position:absolute; top:6mm; left:6mm; z-index:9000;
+    background:rgba(255,255,255,0.85); border-radius:2px; padding:1mm 1.5mm;
+  }
+  #print-north .pn-lbl { font-family:Arial,sans-serif; font-weight:bold; font-size:7pt; color:#000; margin-top:0.3mm; }
+  #print-scalebar {
+    display:block !important;
+    position:absolute; bottom:8mm; left:8mm; z-index:9000;
+    background:rgba(255,255,255,0.9); border:0.5px solid #000;
+    padding:2mm 3mm; font-family:Arial,sans-serif; font-size:7pt; color:#000;
+  }
+  #print-scalebar .psb-bar { display:flex; height:2.2mm; border:0.4px solid #000; }
+  #print-scalebar .psb-seg { flex:1; height:100%; }
+  #print-scalebar .psb-labels { display:flex; justify-content:space-between; margin-top:1mm; gap:3mm; white-space:nowrap; }
 }
 #print-header { display:none; }
 #print-footer { display:none; }
 #print-legend { display:none; }
+#print-north { display:none; }
+#print-scalebar { display:none; }
 
 /* ── Custom dialog sheet — iOS style ─────────────────────── */
 #dlg-overlay {
@@ -4019,6 +4036,15 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
       <div id="dem-legend" style="display:none;"></div>
       <!-- Print legenda — sloj PREKO karte (vidljivo samo pri štampanju, @media print) -->
       <div id="print-legend" style="display:none;"></div>
+      <!-- Print sjever/razmjerna traka — Leaflet karta se ne rotira, sjever je uvijek gore -->
+      <div id="print-north" style="display:none;">
+        <svg width="7mm" height="9mm" viewBox="0 0 20 26"><polygon points="10,0 17,26 10,20 3,26" fill="#000"/></svg>
+        <div class="pn-lbl">S</div>
+      </div>
+      <div id="print-scalebar" style="display:none;">
+        <div class="psb-bar"><div class="psb-seg" style="background:#000;"></div><div class="psb-seg" style="background:#fff;"></div></div>
+        <div class="psb-labels"><span>0</span><span id="psb-mid"></span><span id="psb-full"></span></div>
+      </div>
 
       <!-- Center crosshair dot (visible only in full-map / MAP mode) -->
       <div id="map-center-dot" style="display:none;">
@@ -4340,7 +4366,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.7';
+const APP_VER = 'v3.29.8';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -22662,6 +22688,28 @@ function _buildPrintLegend() {
   el.innerHTML = html;
 }
 
+// ─── PRINT SCALE BAR ──────────────────────────────────────────
+// Zaokruži na "lijep" broj (1/2/5 × 10^n) tako da traka na papiru bude čitljiva.
+function _niceScaleLen(maxM) {
+  const mag = Math.pow(10, Math.floor(Math.log10(maxM)));
+  const res = maxM / mag;
+  if (res >= 5) return 5 * mag;
+  if (res >= 2) return 2 * mag;
+  return mag;
+}
+function _fmtScaleLen(m) {
+  return m >= 1000 ? ((m / 1000).toFixed(m % 1000 === 0 ? 0 : 1) + ' km') : (Math.round(m) + ' m');
+}
+function _buildScaleBar() {
+  const targetMM = 40; // željena širina trake na papiru
+  const maxRealM = targetMM * printScale / 1000;
+  const niceM = _niceScaleLen(maxRealM);
+  const barMM = niceM * 1000 / printScale;
+  document.getElementById('print-scalebar').querySelector('.psb-bar').style.width = barMM + 'mm';
+  document.getElementById('psb-mid').textContent = _fmtScaleLen(niceM / 2);
+  document.getElementById('psb-full').textContent = _fmtScaleLen(niceM);
+}
+
 function doPrint() {
   const p = PAPER[paperFmt];
 
@@ -22708,11 +22756,18 @@ function doPrint() {
   document.getElementById('ph-datum').textContent = datum;
   document.getElementById('ph-scale-lbl').textContent = `Razmjera 1 : ${printScale.toLocaleString('bs')}`;
 
-  const totalM = Math.round(calcL(vlake.flatMap(v => v.pts)));
-  document.getElementById('pf-left').textContent = `${ime ? 'Projektant: ' + ime + ' · ' : ''}Ukupno vlaka: ${fmtL(totalM)}`;
+  // Dužina PO vlaki pa sabrano — ne smiju se spajati tačke različitih vlaka u
+  // jedan niz (calcL bi tad dodao lažnu udaljenost između kraja jedne i početka
+  // druge vlake, jer bi ih tretirao kao jednu neprekinutu liniju).
+  const totalM = Math.round(vlake.reduce((s, v) => s + calcL(v.pts), 0));
+  const brVlaka = vlake.filter(v => !v.kr).length;
+  const brLager = vlake.filter(v => !v.kr && v.lager).length;
+  document.getElementById('pf-left').textContent =
+    `${ime ? 'Projektant: ' + ime + ' · ' : ''}Vlaka: ${brVlaka}${brLager ? ' · Lageri: ' + brLager : ''} · Ukupno: ${fmtL(totalM)}`;
   document.getElementById('pf-right').textContent = `Razmjera 1 : ${printScale.toLocaleString('bs')} · ${p.label}`;
 
   _buildPrintLegend();
+  _buildScaleBar();
 
   closePrintModal();
 
