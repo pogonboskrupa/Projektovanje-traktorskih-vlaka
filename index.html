@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.5';
+const APP_VER = 'v3.29.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -19940,13 +19940,25 @@ async function _wxFetch(la, lo, cacheKey) {
   return { data, cachedTs };
 }
 
+// Lokalni datum (YYYY-MM-DD) — poredi se sa Open-Meteo dnevnim datumima (timezone=auto)
+function _wxLocalDateStr(d) {
+  d = d || new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
 // In-app upozorenja za 7 dana → [{i, kind, txt}] (kiša / mraz / vjetar)
 function _wxAlerts(dy) {
   if (!dy || !dy.time) return [];
   const dani = ['ned','pon','uto','sri','čet','pet','sub'];
+  const todayS = _wxLocalDateStr();
+  const tomS = _wxLocalDateStr(new Date(Date.now() + 86400000));
   const out = [];
   for (let i = 0; i < dy.time.length; i++) {
-    const dan = i === 0 ? 'danas' : (i === 1 ? 'sutra' : dani[new Date(dy.time[i]).getDay()]);
+    const ds = dy.time[i];
+    // Oznaka "danas"/"sutra" prati STVARNI datum iz podataka, ne indeks —
+    // spriječava da zastarjeli keš (npr. kad mreža nije dostupna) bude prikazan
+    // kao "danas" iako pripada drugom danu.
+    const dan = ds === todayS ? 'danas' : (ds === tomS ? 'sutra' : dani[new Date(ds).getDay()]);
     const pp = dy.precipitation_probability_max?.[i] ?? 0;
     const ps = dy.precipitation_sum?.[i] ?? 0;
     const tmin = dy.temperature_2m_min?.[i];
@@ -20125,15 +20137,23 @@ async function _wxRenderList() {
   const results = await Promise.all(items.map(it => _wxFetch(it.la, it.lo, it.cacheKey)));
 
   // Konsolidovana upozorenja
+  const todayS = _wxLocalDateStr();
   let allAlerts = '';
+  let stale = false;
   items.forEach((it, idx) => {
     const dy = results[idx].data?.daily;
     const al = _wxAlerts(dy).slice(0, 4);
     if (al.length) allAlerts += `<div style="margin-bottom:5px;"><div style="font-size:11px;color:#93c5fd;font-weight:600;">${_escHtml(it.name)}</div>${al.map(a => `<div style="font-size:12px;color:#cbd5e1;">${a.txt}</div>`).join('')}</div>`;
+    // Ako je podatak iz keša (mreža nedostupna) i njegov dan-0 nije stvarni "danas" → upozori,
+    // jer je onda cijela lista dana pomjerena unazad (npr. "danas" u prikazu je zapravo jučer/prekjučer).
+    if (results[idx].cachedTs && dy?.time?.[0] && dy.time[0] !== todayS) stale = true;
   });
-  const alertBox = allAlerts
+  const staleBox = stale
+    ? `<div style="background:#3b1f0a;border:1px solid #b45309;border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:12px;color:#fbbf24;">⚠ Prognoza je iz keša (nema veze sa internetom) i može biti zastarjela — dani prikazani kao "danas"/"sutra" možda ne odgovaraju stvarnom datumu.</div>`
+    : '';
+  const alertBox = staleBox + (allAlerts
     ? `<div style="background:#1e293b;border:1px solid #3b82f6;border-radius:10px;padding:10px 12px;margin-bottom:12px;"><div style="font-size:11px;color:#60a5fa;font-weight:700;margin-bottom:6px;">⚠ UPOZORENJA (7 DANA)</div>${allAlerts}</div>`
-    : `<div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:12px;color:#64748b;">✓ Nema značajnih upozorenja za sljedećih 7 dana.</div>`;
+    : `<div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:12px;color:#64748b;">✓ Nema značajnih upozorenja za sljedećih 7 dana.</div>`);
 
   // Kartice mjesta
   const cards = items.map((it, idx) => {
