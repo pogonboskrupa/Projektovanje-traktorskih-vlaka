@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.6';
+const APP_VER = 'v3.29.7';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -14251,7 +14251,7 @@ const _LSTYLE_KEY = 'tvlake_stil_linija';
 let _lineStyle = {
   tragW: 4, tragOp: 85, tragDash: 'solid', tragCol: '', tragLen: false,
   msrW: 4, msrFillOp: 18, msrArea: true, msrLen: false,
-  tackaScale: 100
+  tackaScale: 100, vlakaDotScale: 100, lagerScale: 100
 };
 try { Object.assign(_lineStyle, JSON.parse(localStorage.getItem(_LSTYLE_KEY) || '{}')); } catch(e) {}
 function _lineStyleSave() { try { localStorage.setItem(_LSTYLE_KEY, JSON.stringify(_lineStyle)); } catch(e) {} }
@@ -14263,6 +14263,8 @@ function openStilLinija() {
   g('stil-msrW').value = _lineStyle.msrW;         g('stil-msrW-v').textContent = _lineStyle.msrW;
   g('stil-msrFillOp').value = _lineStyle.msrFillOp; g('stil-msrFillOp-v').textContent = _lineStyle.msrFillOp + '%';
   g('stil-tackaScale').value = _lineStyle.tackaScale; g('stil-tackaScale-v').textContent = _lineStyle.tackaScale + '%';
+  g('stil-vlakaDotScale').value = _lineStyle.vlakaDotScale; g('stil-vlakaDotScale-v').textContent = _lineStyle.vlakaDotScale + '%';
+  g('stil-lagerScale').value = _lineStyle.lagerScale; g('stil-lagerScale-v').textContent = _lineStyle.lagerScale + '%';
   g('stil-tragLen').checked = !!_lineStyle.tragLen;
   g('stil-msrArea').checked = !!_lineStyle.msrArea;
   g('stil-msrLen').checked = !!_lineStyle.msrLen;
@@ -14290,6 +14292,7 @@ function _stilApply() {
   try { (_tragRegistry || []).forEach(t => _tragRegAddLayer(t)); } catch(e) {}
   try { if (typeof _msrDrawAllSaved === 'function') _msrDrawAllSaved(); } catch(e) {}
   try { (_tacke || []).forEach((t, i) => { if (t.marker) t.marker.setIcon(_tačkaIcon(i + 1, t.nm)); }); } catch(e) {}
+  try { (vlake || []).forEach((v, i) => updateVlakaLabel(i)); } catch(e) {}
 }
 
 let _tragLenMk = {};  // id → L.marker s tekstom dužine na sredini traga
@@ -15647,10 +15650,13 @@ function updateVlakaLabel(i) {
   // Startna tačkica kraka je klikabilna: na spoju s roditeljskom vlakom se linije
   // preklapaju i klik zavisi od poretka slojeva na canvasu — tačkica garantovano
   // razrješava na taj krak (traži se po referenci objekta, ne po indeksu).
+  // Bazna veličina je namjerno sitna (6px) — skalira se preko "Stil linija" panela
+  // (Tačke vlake/krak: Veličina), da se ne gubi vlaka/krak ispod krupne tačkice.
+  const _dotSz = Math.round(6 * ((_lineStyle.vlakaDotScale || 100) / 100));
   const _mkEndDot = (pt, col, onClick) => {
     const mk = L.marker([pt.la, pt.lo], {
-      icon: L.divIcon({ className: '', iconSize: [10, 10], iconAnchor: [5, 5],
-        html: `<div style="width:10px;height:10px;border-radius:50%;background:${col};border:2px solid #fff;box-shadow:0 0 0 2px ${col}55,0 1px 3px rgba(0,0,0,0.5);"></div>` }),
+      icon: L.divIcon({ className: '', iconSize: [_dotSz, _dotSz], iconAnchor: [_dotSz/2, _dotSz/2],
+        html: `<div style="width:${_dotSz}px;height:${_dotSz}px;border-radius:50%;background:${col};border:1.5px solid #fff;box-shadow:0 0 0 1.5px ${col}55,0 1px 2px rgba(0,0,0,0.5);"></div>` }),
       interactive: !!onClick, zIndexOffset: 480, pane: 'vlakeLabels'
     }).addTo(map);
     if (onClick) mk.on('click', onClick);
@@ -15669,14 +15675,15 @@ function updateVlakaLabel(i) {
 
   if (v.kr === 0 && v.lager) {
     const pFirst = v.lagerPt || v.pts[0];
-    const LW = 28, LH = 13; // pravougaon, plosnat
+    const _lgS = (_lineStyle.lagerScale || 100) / 100;
+    const LW = Math.round(28 * _lgS), LH = Math.round(13 * _lgS); // pravougaon, plosnat
     const svgSym = `<svg width="${LW}" height="${LH}" xmlns="http://www.w3.org/2000/svg" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.9))">
       <rect x="0" y="0" width="${LW}" height="${LH}" fill="white"/>
       <polygon points="0,0 ${LW},0 ${LW},${LH}" fill="black"/>
       <line x1="0" y1="0" x2="${LW}" y2="${LH}" stroke="white" stroke-width="1.5"/>
       <rect x="0.5" y="0.5" width="${LW-1}" height="${LH-1}" fill="none" stroke="#888" stroke-width="0.5"/>
     </svg>
-    <div style="color:#fbbf24;font-weight:bold;font-size:9px;text-align:center;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,1);margin-top:1px;pointer-events:none;">${v.lager}</div>`;
+    <div style="color:#fbbf24;font-weight:bold;font-size:${Math.round(9 * _lgS)}px;text-align:center;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,1);margin-top:1px;pointer-events:none;">${v.lager}</div>`;
     v.lagerMk = L.marker([pFirst.la, pFirst.lo], {
       icon: L.divIcon({
         className: 'vlaka-lager-mk', iconSize: [LW, LH+11], iconAnchor: [LW/2, LH/2],
@@ -30623,9 +30630,16 @@ if (typeof AndroidDownload !== 'undefined') {
       <div class="stil-row"><span>Dužina na liniji</span><input type="checkbox" id="stil-msrLen" onchange="_stilSet('msrLen',this.checked)"></div>
     </div>
 
-    <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:12px;">
+    <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:12px;margin-bottom:10px;">
       <div style="font-size:13px;font-weight:700;color:#38bdf8;margin-bottom:10px;">📌 Tačke</div>
       <div class="stil-row"><span>Veličina</span><input type="range" min="50" max="200" step="10" value="100" id="stil-tackaScale" oninput="_stilSet('tackaScale',+this.value,this)"><b id="stil-tackaScale-v">100%</b></div>
+    </div>
+
+    <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:12px;">
+      <div style="font-size:13px;font-weight:700;color:#a3e635;margin-bottom:10px;">🟢🔴 Vlaka/krak — početak i kraj</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px;">Početak = sitna zelena tačka, kraj = sitna crvena tačka.</div>
+      <div class="stil-row"><span>Veličina tačke</span><input type="range" min="50" max="200" step="10" value="100" id="stil-vlakaDotScale" oninput="_stilSet('vlakaDotScale',+this.value,this)"><b id="stil-vlakaDotScale-v">100%</b></div>
+      <div class="stil-row"><span>Veličina lagera</span><input type="range" min="50" max="200" step="10" value="100" id="stil-lagerScale" oninput="_stilSet('lagerScale',+this.value,this)"><b id="stil-lagerScale-v">100%</b></div>
     </div>
   </div>
 </div>
