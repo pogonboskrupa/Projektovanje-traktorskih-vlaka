@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.1';
+const APP_VER = 'v3.29.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -11559,6 +11559,10 @@ function toggleMenuDropdown(e) {
     dd.style.top = (r.bottom + 4) + 'px';
     dd.style.left = left + 'px';
     dd.style.right = 'auto';
+    // Skrolabilno unutar stvarno dostupnog prostora do dna ekrana — na manjim
+    // telefonima je lista stavki duža od visine ekrana, pa bez ovoga dno menija
+    // ispada van vidljivog dijela i nema način da se dođe do njega.
+    dd.style.maxHeight = Math.max(150, window.innerHeight - r.bottom - 12) + 'px';
     dd.style.pointerEvents = 'none';
     dd.style.display = 'block';
     setTimeout(() => { dd.style.pointerEvents = ''; }, 400);
@@ -30522,7 +30526,7 @@ if (typeof AndroidDownload !== 'undefined') {
   display:none;position:fixed;top:0;right:0;
   background:#16213e;border:1px solid #0f3460;border-radius:8px;
   min-width:220px;z-index:99000;box-shadow:0 8px 24px rgba(0,0,0,0.6);
-  touch-action:manipulation;">
+  touch-action:manipulation;max-height:80vh;overflow-y:auto;overscroll-behavior:contain;">
   <div class="mdrop-item" style="color:#60a5fa;font-weight:700;" onclick="closeMenuDropdown();showWeatherPanel()">🌧 Prognoza</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showExport()">⬆ KML Export</div>
