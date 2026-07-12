@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.2';
+const APP_VER = 'v3.29.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -10230,7 +10230,7 @@ async function _crashCheck() {
       if (_tragLine) { map.removeLayer(_tragLine); _tragLine = null; }
       _tragLiveClear();
       _tragLine = L.polyline(_tragPts.map(p => [p[0], p[1]]),
-        { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85 }).addTo(map);
+        { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85, pane: 'tragMsrLines' }).addTo(map);
       _tragOn = true; _tragPaused = false;
       const b = document.getElementById('btrag');
       if (b) b.classList.add('active');
@@ -10475,6 +10475,14 @@ setTimeout(() => { _appStarted = true; }, 4000);
 // Zasebni pane za vlake — omogućava brzo sakrivanje svih vlaka + labela odjednom
 map.createPane('vlakeLines');  map.getPane('vlakeLines').style.zIndex  = 400;
 map.createPane('vlakeLabels'); map.getPane('vlakeLabels').style.zIndex = 401;
+// Tragovi i mjerenja MORAJU biti iznad vlakeLines: vlakeLines je CANVAS (jedan
+// <canvas> element preko cijelog vidljivog dijela karte — hvata klik svugdje u
+// svom pravougaoniku, ne samo tačno gdje je nešto nacrtano) i bio je stackovan
+// iznad default overlayPane-a (isti zIndex 400, ali kreiran kasnije = na vrhu),
+// pa je gotovo svaki klik na trag/mjerenje (SVG, bez pane-a) hvatao canvas prije
+// nego što stigne do njih ispod. SVG blokira klik samo tačno na svojoj liniji
+// (ne cijeli pravougaonik), pa ovo ne pravi obrnut problem za vlake.
+map.createPane('tragMsrLines'); map.getPane('tragMsrLines').style.zIndex = 410;
 // Labele su DOM markeri — sakrij ih tokom pana/zooma radi glatkijeg skrolanja (kao AlpineQuest).
 // Statične su tokom pokreta pa korisnik ne primijeti, a kompozitor ne mora repozicionirati svaki čvor.
 (function(){
@@ -14296,9 +14304,10 @@ function _tragRegAddLayer(t) {
   const line = L.polyline(lls, {
     color: _lineStyle.tragCol || t.color || '#f97316',
     weight: t.weight || _lineStyle.tragW,
-    opacity: (_lineStyle.tragOp || 85) / 100, dashArray, interactive: false
+    opacity: (_lineStyle.tragOp || 85) / 100, dashArray, interactive: false,
+    pane: 'tragMsrLines'
   });
-  const hit = L.polyline(lls, { weight: 24, opacity: 0.001, color: '#000', interactive: true });
+  const hit = L.polyline(lls, { weight: 24, opacity: 0.001, color: '#000', interactive: true, pane: 'tragMsrLines' });
   const lenM = _tragCalcLen(t.pts);
   line.bindPopup(() => _tragPopupHtml(t, lenM), { maxWidth: 260 });
   hit.on('click', e => {
@@ -14866,7 +14875,7 @@ function fabSnimTrag() {
     _tragLastT = 0;
     if (_tragLine) { map.removeLayer(_tragLine); _tragLine = null; }
     _tragLiveClear();
-    _tragLine = L.polyline([], { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85 }).addTo(map);
+    _tragLine = L.polyline([], { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85, pane: 'tragMsrLines' }).addTo(map);
     const bt = document.getElementById('btrag');
     if (bt) bt.classList.add('active');
     // Ako je snimanje pokrenuto iz Tragovi panela, prebaci na kartu da se vidi trag uživo
@@ -14987,7 +14996,7 @@ function _addTragPoint(la, lo, ac, al) {
     const segLatLngs = [[last[0], last[1]], [la, lo]];
     if (!_tragLiveSeg) {
       _tragLiveSeg = L.polyline(segLatLngs,
-        { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85, interactive: false }).addTo(map);
+        { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85, interactive: false, pane: 'tragMsrLines' }).addTo(map);
     } else {
       _tragLiveSeg.setLatLngs(segLatLngs);
     }
@@ -21621,11 +21630,11 @@ function _msrRedraw() {
     // Zatvorene koordinate ako je površina (≥3 tačaka)
     const drawLL = (pts.length >= 3 && _msrMode === 'area') ? [...latlngs, latlngs[0]] : latlngs;
     // Nevidljivi hit-zone za lakše tapanje na mobilnom
-    _msrLayer.addLayer(L.polyline(drawLL, {color:'#000', weight:28, opacity:0.001, lineCap:'round', lineJoin:'round', interactive:true}));
+    _msrLayer.addLayer(L.polyline(drawLL, {color:'#000', weight:28, opacity:0.001, lineCap:'round', lineJoin:'round', interactive:true, pane:'tragMsrLines'}));
     // Bijela pozadinska linija (outline kontrast)
-    _msrLayer.addLayer(L.polyline(drawLL, {color:'#fff', weight:7, opacity:0.85, lineCap:'round', lineJoin:'round', interactive:false}));
+    _msrLayer.addLayer(L.polyline(drawLL, {color:'#fff', weight:7, opacity:0.85, lineCap:'round', lineJoin:'round', interactive:false, pane:'tragMsrLines'}));
     // Obojena linija
-    _msrLayer.addLayer(L.polyline(drawLL, {color:_msrColor, weight:4, opacity:1.0, lineCap:'round', lineJoin:'round', interactive:false}));
+    _msrLayer.addLayer(L.polyline(drawLL, {color:_msrColor, weight:4, opacity:1.0, lineCap:'round', lineJoin:'round', interactive:false, pane:'tragMsrLines'}));
 
     // Poligon (≥3 tačaka)
     if (pts.length >= 3) {
@@ -22049,7 +22058,7 @@ function _msrDrawAllSaved() {
       const poly = L.polygon(latlngs, {
         color: color, weight: gw,
         fillColor: color, fillOpacity: m.fillOpacity ?? ((_lineStyle.msrFillOp ?? 18) / 100),
-        opacity: 0.9, interactive: true
+        opacity: 0.9, interactive: true, pane: 'tragMsrLines'
       });
       poly.bindPopup(buildPopup, {maxWidth: 260});
       poly.on('click', _msrOpenPopup(poly));
@@ -22061,9 +22070,9 @@ function _msrDrawAllSaved() {
       }
     } else {
       const drawLL = mode === 'area' ? [...latlngs, latlngs[0]] : latlngs;
-      const hit = L.polyline(drawLL, {color:'#000', weight:28, opacity:0.001, lineCap:'round', lineJoin:'round', interactive:true});
-      const bg  = L.polyline(drawLL, {color:'#fff', weight:gw+3, opacity:0.7, lineCap:'round', lineJoin:'round', interactive:false});
-      const fg  = L.polyline(drawLL, {color, weight:gw, opacity:1.0, lineCap:'round', lineJoin:'round', interactive:false});
+      const hit = L.polyline(drawLL, {color:'#000', weight:28, opacity:0.001, lineCap:'round', lineJoin:'round', interactive:true, pane:'tragMsrLines'});
+      const bg  = L.polyline(drawLL, {color:'#fff', weight:gw+3, opacity:0.7, lineCap:'round', lineJoin:'round', interactive:false, pane:'tragMsrLines'});
+      const fg  = L.polyline(drawLL, {color, weight:gw, opacity:1.0, lineCap:'round', lineJoin:'round', interactive:false, pane:'tragMsrLines'});
       hit.bindPopup(buildPopup, {maxWidth: 260});
       hit.on('click', _msrOpenPopup(hit));
       _msrSavedLayer.addLayer(hit);
