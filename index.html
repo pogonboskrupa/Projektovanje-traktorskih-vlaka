@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.4';
+const APP_VER = 'v3.29.5';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5960,7 +5960,7 @@ function _renderProjGroup(list) {
           ${p._pendingSync ? '<span style="font-size:10px;color:#f59e0b;margin-left:4px;">⏳ čeka sync</span>' : ''}
         </div>
         <div class="proj-card-sub">
-          ${p.datum ? fmtDate(p.datum) : '—'}${p.povrsina ? ' &nbsp;|&nbsp; ' + p.povrsina + ' ha' : ''}${nClan ? ' &nbsp;|&nbsp; 👥 ' + nClan : ''}
+          ${p.datum ? fmtDate(p.datum) : '—'}${p.povrsina ? ' &nbsp;|&nbsp; ' + fmtHa(p.povrsina) : ''}${nClan ? ' &nbsp;|&nbsp; 👥 ' + nClan : ''}
         </div>
         ${vChip}
       </div>`;
@@ -6158,7 +6158,7 @@ function showProjektDetalji(id) {
   const pdGust  = (p.povrsina > 0 && pdLen > 0) ? Math.round(pdLen / p.povrsina) + ' m/ha' : null;
   document.getElementById('pd-info').innerHTML = [
     p.gj       ? `<b style="color:#e2e8f0;">G.J.:</b> ${p.gj}` : '',
-    p.povrsina ? `<b style="color:#e2e8f0;">Površina:</b> ${p.povrsina} ha` : '',
+    p.povrsina ? `<b style="color:#e2e8f0;">Površina:</b> ${fmtHa(p.povrsina)}` : '',
     p.datum    ? `<b style="color:#e2e8f0;">Datum početka:</b> ${fmtDate(p.datum)}` : '',
     `<b style="color:#e2e8f0;">Vlasnik:</b> ${isVlasnik ? 'Ti' : (kolegeMap[p.korisnik_id]?.ime || p.korisnik_id.slice(0,8))}`,
     pdVlake.length ? `<b style="color:#4ade80;">Vlake:</b> ${pdVlake.length} · ${fmtL(pdLen)}${pdGust ? ' · ' + pdGust : ''}` : '',
@@ -14642,7 +14642,7 @@ function _tragoviRender() {
         let detail = _msrFmt(lenM);
         if (mode === 'area' && m.pts.length >= 3) {
           const aM2 = _msrSphericalArea(m.pts);
-          detail = (aM2/10000).toFixed(4)+' ha · obim '+_msrFmt(lenM);
+          detail = fmtHa(aM2/10000)+' · obim '+_msrFmt(lenM);
         }
         const meta = [dt, modeLabel, detail, m.pts.length+' tač.', m.gj?'GJ: '+_escHtml(m.gj):'', m.odjel?'Odj: '+_escHtml(m.odjel):''].filter(Boolean).join(' · ');
         return `<div class="treg-row" style="margin-bottom:8px;border-left:3px solid ${m.color||'#fbbf24'};">
@@ -18420,6 +18420,10 @@ function calcSTD(vlakeList) {
   return { rows, avg, count, totalDist };
 }
 function fmtL(m){return m<1000?`${Math.round(m)} m`:`${(m/1000).toFixed(2)} km`;}
+// Hektari se svugdje prikazuju na TAČNO 2 decimale — prije je bilo šareno
+// (0/1/2/3/4 decimale zavisno od mjesta), pa je npr. "2 ha" i "2.3451 ha"
+// za istu vrijednost izgledalo kao potpuno drugačiji podatak.
+function fmtHa(v) { return (Number(v) || 0).toFixed(2) + ' ha'; }
 
 // === KML EXPORT ===
 function _escXml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -19079,7 +19083,7 @@ function _pmRenderList() {
     ${skpi(_projekti.length, 'Projekata')}
     ${skpi(sumVlaka, 'Vlaka')}
     ${skpi((sumLen / 1000).toFixed(1) + ' km', 'Ukupno vlaka')}
-    ${skpi(sumPov > 0 ? Math.round(sumPov) + ' ha' : '—', 'Površina')}
+    ${skpi(sumPov > 0 ? fmtHa(sumPov) : '—', 'Površina')}
     ${skpi(allDesigners.size, 'Projektanata')}
     ${skpi(allDays.size || '—', 'Radnih dana')}
   </div><div id="pm-list-inner"></div>`;
@@ -19155,7 +19159,7 @@ function _pmRenderAdminList(el) {
     ${skpi(totMa, 'Vlaka')}
     ${skpi(totKr, 'Krakova')}
     ${skpi((totM / 1000).toFixed(1) + ' km', 'Ukupno vlaka')}
-    ${skpi(totPov > 0 ? Math.round(totPov) + ' ha' : '—', 'Površina')}
+    ${skpi(totPov > 0 ? fmtHa(totPov) : '—', 'Površina')}
   </div><div id="pm-list-inner"></div>`;
   el = document.getElementById('pm-list-inner');
 
@@ -19206,8 +19210,8 @@ function _pmRenderAdminList(el) {
           ${stChip(d.status)}
         </div>
         <div class="pm-card-meta">
-          <span>📐 <b>${Number(d.known_area_ha || 0).toFixed(1)}</b> ha</span>
-          <span>🗺 <b>${d.zona_n}</b> zona · ${Number(d.zona_ha || 0).toFixed(1)} ha${pokr}</span>
+          <span>📐 <b>${fmtHa(d.known_area_ha)}</b></span>
+          <span>🗺 <b>${d.zona_n}</b> zona · ${fmtHa(d.zona_ha)}${pokr}</span>
           <span>👣 <b>${Number(d.tacaka || 0).toLocaleString('bs')}</b> tač.</span>
           <span>👥 <b>${d.clanova}</b></span>
           <span>✍ ${_esc(d.kreirao || '—')}</span>
@@ -19611,7 +19615,7 @@ tbody tr:nth-child(even) td{background:#f9fafb}
   <div><div class="il">Odjel</div><div class="iv">${_esc(p.odjel || '—')}</div></div>
   <div><div class="il">G.J.</div><div class="iv">${_esc(p.gj || '—')}</div></div>
   <div><div class="il">Datum kreiranja</div><div class="iv">${fmtD(p.datum)}</div></div>
-  <div><div class="il">Površina</div><div class="iv">${pov ? pov + ' ha' : '—'}</div></div>
+  <div><div class="il">Površina</div><div class="iv">${pov ? fmtHa(pov) : '—'}</div></div>
   <div><div class="il">Gustoća mreže</div><div class="iv">${gustoca}</div></div>
   <div><div class="il">Vlasnik</div><div class="iv">${_esc(_pmUserName(p.korisnik_id))}</div></div>
   <div><div class="il">Radnih dana</div><div class="iv">${nDays || '—'}</div></div>
@@ -20380,7 +20384,7 @@ function _pmBuildDetail(p, vlakeRows, logRows) {
     <div class="pm-sec-t">📋 Osnovni podaci</div>
     ${row('Gospodarska jedinica', p.gj ? _esc(p.gj) : '—')}
     ${row('Odjel', _esc(p.odjel || '—'))}
-    ${row('Površina', pov > 0 ? pov.toLocaleString('bs-BA') + ' ha' : '—')}
+    ${row('Površina', pov > 0 ? fmtHa(pov) : '—')}
     ${row('Vlasnik projekta', _esc(_pmUserName(p.korisnik_id)))}
     ${row('Datum kreiranja', fmtDate(p.datum))}
   </div>`;
@@ -20505,7 +20509,7 @@ function updProjStats() {
     <div class="stat-row"><span class="stat-name">Početak</span><span class="stat-val blue">${datum?fmtDate(datum):'—'}</span></div>
     <div class="stat-row"><span class="stat-name">Projektanata</span><span class="stat-val">${Object.keys(allP).length}</span></div>
     <div class="stat-row"><span class="stat-name">Dana rada</span><span class="stat-val">${nDana}</span></div>
-    <div class="stat-row"><span class="stat-name">Površina</span><span class="stat-val blue">${pov>0?pov+' ha'+(_pv.src==='KML'?' <span style="font-size:9px;color:#64748b;font-weight:normal;">(iz KML)</span>':''):'—'}</span></div>
+    <div class="stat-row"><span class="stat-name">Površina</span><span class="stat-val blue">${pov>0?fmtHa(pov)+(_pv.src==='KML'?' <span style="font-size:9px;color:#64748b;font-weight:normal;">(iz KML)</span>':''):'—'}</span></div>
     <div class="stat-card-title" style="margin-top:10px;">Dužine po projektantu</div>
     ${projRows||'<div style="color:#475569;font-size:12px;">—</div>'}
     <div class="stat-row" style="border-top:1px solid #334155;margin-top:4px;padding-top:6px;">
@@ -20684,7 +20688,7 @@ function updTerenStats() {
       ${row('Prosječan nagib', fSlope(s.avgSlope), s.avgSlope > 25 ? 'red' : s.avgSlope > 15 ? 'orange' : '', 'Ponderirani prosj. nagib po dužini segmenta')}
 
       <div class="stat-section">Mreža</div>
-      ${row('Površina odjela', s.pov > 0 ? s.pov + ' ha' : '—', 'blue')}
+      ${row('Površina odjela', s.pov > 0 ? fmtHa(s.pov) : '—', 'blue')}
       ${row('Gustoća mreže', s.gustoca != null ? s.gustoca + ' m/ha' : '—', s.gustoca > 300 ? 'orange' : 'blue', 'Ukupna dužina / površina odjela')}
     </div>
 
@@ -21113,7 +21117,7 @@ tbody tr:nth-child(even) td{background:#f9fafb}
   <div><div class="il">Odjel</div><div class="iv">${proj.odjel || '—'}</div></div>
   <div><div class="il">G.J.</div><div class="iv">${proj.gj || '—'}</div></div>
   <div><div class="il">Datum početka</div><div class="iv">${fmtD(proj.datum)}</div></div>
-  <div><div class="il">Površina odjela</div><div class="iv">${pov ? pov + ' ha' : '—'}</div></div>
+  <div><div class="il">Površina odjela</div><div class="iv">${pov ? fmtHa(pov) : '—'}</div></div>
   <div><div class="il">Gustoća mreže</div><div class="iv">${gustoca}</div></div>
 </div>
 
@@ -22017,7 +22021,7 @@ function _msrDrawAllSaved() {
       } else if (mode === 'area' && m.pts.length >= 3) {
         const aM2 = _msrSphericalArea(m.pts);
         html += `<div style="font-size:13px;color:#374151;">📏 Obim: ${_msrFmt(totalDist)}</div>`;
-        html += `<div style="font-size:13px;color:#374151;">◻ ${Math.round(aM2).toLocaleString('bs')} m²  (${(aM2/10000).toFixed(4)} ha)</div>`;
+        html += `<div style="font-size:13px;color:#374151;">◻ ${Math.round(aM2).toLocaleString('bs')} m²  (${fmtHa(aM2/10000)})</div>`;
         const fop = Math.round((m.fillOpacity||0.18)*100);
         html += `<div style="margin-top:8px;font-size:12px;color:#64748b;">Transparentnost ispune:
           <span id="mfop-lbl-${m.id}" style="font-weight:700;color:#374151;">${fop}%</span><br>
@@ -22509,8 +22513,8 @@ function onPrintOdjelChange() {
   const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
   const wM = Math.abs(ne.lng - sw.lng) * 111320 * Math.cos(((ne.lat+sw.lat)/2) * Math.PI/180);
   const hM = Math.abs(ne.lat - sw.lat) * 111320;
-  const ha = Math.round(wM * hM / 10000);
-  info.textContent = `≈ ${Math.round(wM)} m × ${Math.round(hM)} m · ${ha} ha`;
+  const ha = wM * hM / 10000;
+  info.textContent = `≈ ${Math.round(wM)} m × ${Math.round(hM)} m · ${fmtHa(ha)}`;
   updatePrintInfo();
 }
 function closePrintModal() {
@@ -22552,7 +22556,7 @@ function updatePrintInfo() {
   const realH_m  = (p.h / 1000) * printScale;
   const realW_km = (realW_m / 1000).toFixed(2);
   const realH_km = (realH_m / 1000).toFixed(2);
-  const areaHa   = Math.round(realW_m * realH_m / 10000);
+  const areaHa   = realW_m * realH_m / 10000;
 
   // Prikaz info za "trenutni prikaz" mod
   if (printMode === 'view') {
@@ -22571,9 +22575,9 @@ function updatePrintInfo() {
 
   document.getElementById('print-info').innerHTML =
     `Razmjera: <b>1 : ${printScale.toLocaleString('bs')}</b> · Format: <b>${p.label}</b> (${p.w} × ${p.h} mm)<br>` +
-    `Isječak: <b>${realW_km} km × ${realH_km} km</b> · <b>≈ ${areaHa} ha</b>${lokacija}`;
+    `Isječak: <b>${realW_km} km × ${realH_km} km</b> · <b>≈ ${fmtHa(areaHa)}</b>${lokacija}`;
   document.getElementById('pi-dims').textContent = `${p.w} × ${p.h} mm`;
-  document.getElementById('pi-area').textContent = `≈ ${areaHa} ha`;
+  document.getElementById('pi-area').textContent = `≈ ${fmtHa(areaHa)}`;
 }
 
 // ─── PRINT LEGEND ─────────────────────────────────────────────
@@ -28567,7 +28571,7 @@ function dozRenderOdjeli() {
     return `<div class="doz-odjel-card${_dozSelId===o.id?' selected':''}" onclick="dozSelectOdjel('${o.id}')">
       <div class="doz-odjel-name">${o.name}</div>
       <div class="doz-odjel-meta">
-        ${o.known_area_ha ? `<span>📐 ${parseFloat(o.known_area_ha).toFixed(1)} ha</span>` : ''}
+        ${o.known_area_ha ? `<span>📐 ${fmtHa(o.known_area_ha)}</span>` : ''}
         <span class="doz-status-chip ${status}">${label}</span>
         <span>${fmtDateShort(o.created_at)}</span>
       </div>
@@ -28648,7 +28652,7 @@ async function dozSelectOdjel(id) {
   document.getElementById('doz-panel-detail').style.display = 'flex';
   document.getElementById('doz-detail-name').textContent = odjel.name;
   document.getElementById('doz-detail-area').textContent =
-    odjel.known_area_ha ? `${parseFloat(odjel.known_area_ha).toFixed(1)} ha` : '';
+    odjel.known_area_ha ? fmtHa(odjel.known_area_ha) : '';
   _dozRenderStatusRow();
   await dozLoadLayers(id);
   _dozAutoLinkVlake(odjel);
@@ -28820,7 +28824,7 @@ function dozRenderMapLayers() {
         .bindPopup(`<div style="min-width:160px;">
           <b style="font-size:13px;">${t.emoji} ${m.label || t.label}</b>
           ${m.note ? `<br><span style="color:#888;font-size:11px;">${m.note}</span>` : ''}
-          <br><span style="color:#64748b;font-size:11px;">${m.area_ha ? parseFloat(m.area_ha).toFixed(3)+' ha' : ''}</span>
+          <br><span style="color:#64748b;font-size:11px;">${m.area_ha ? fmtHa(m.area_ha) : ''}</span>
           <br><button onclick="dozDeleteMarking('${m.id}')" style="margin-top:6px;background:#2d0a0a;color:#f87171;border:1px solid #7f1d1d;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;">🗑 Briši</button>
         </div>`)
         .addTo(_dozMarkingsLayer);
@@ -29353,9 +29357,9 @@ function dozRenderDetail() {
     const kpi = (val, lbl, col) => `<div class="pm-kpi"><div class="pm-kpi-val" style="font-size:14px;${col ? 'color:' + col + ';' : ''}">${val}</div><div class="pm-kpi-lbl">${lbl}</div></div>`;
     statsEl.innerHTML = `
       <div class="pm-kpi-grid" style="grid-template-columns:repeat(3,1fr);">
-        ${kpi((totalHa || bndHa).toFixed(1) + ' ha', 'Površina')}
-        ${kpi(bandHa.toFixed(1) + ' ha', 'Pojasevi (' + bandPct + '%)', '#4ade80')}
-        ${kpi(_dozMarkings.length, 'Zone · ' + markedHa.toFixed(1) + ' ha')}
+        ${kpi(fmtHa(totalHa || bndHa), 'Površina')}
+        ${kpi(fmtHa(bandHa), 'Pojasevi (' + bandPct + '%)', '#4ade80')}
+        ${kpi(_dozMarkings.length, 'Zone · ' + fmtHa(markedHa))}
         ${kpi(_dozMembers.length, 'Projektanata')}
         ${kpi(fmtL(totalTrackLen), 'GPS trag · ' + nPts + ' tač.')}
         ${kpi(created, 'Kreiran')}
@@ -29866,12 +29870,12 @@ function dozFinishDraw() {
   }
 
   _dozPendingSavePolygon = { type:'Polygon', coordinates:[coords] };
-  const areaHa = (_dozCalcArea(_dozDrawPts) / 10000).toFixed(4);
+  const areaHa = _dozCalcArea(_dozDrawPts) / 10000;
   const t = DOZ_TYPES[_dozDrawType];
   document.getElementById('doz-save-title').textContent = `${t.emoji} Sačuvaj — ${t.label}`;
   document.getElementById('doz-save-label').value = '';
   document.getElementById('doz-save-note').value  = '';
-  document.getElementById('doz-save-area').textContent = `Površina: ~${areaHa} ha`;
+  document.getElementById('doz-save-area').textContent = `Površina: ~${fmtHa(areaHa)}`;
   document.getElementById('doz-save-modal').style.display = 'flex';
 }
 
@@ -30023,7 +30027,7 @@ function dozShowCreateOdjel(restore) {
       document.getElementById('doz-create-no-poly').style.display = 'none';
       document.getElementById('doz-create-poly-ok').style.display = 'block';
       document.getElementById('doz-create-poly-area').textContent =
-        `${(savedAreaHa||0).toFixed(1)} ha ucrtano`;
+        `${fmtHa(savedAreaHa)} ucrtano`;
     } else {
       document.getElementById('doz-create-poly-ok').style.display = 'none';
       document.getElementById('doz-create-no-poly').style.display = savedOdjel ? 'block' : 'none';
@@ -30140,7 +30144,7 @@ function _dozCreateOnOdjelChange() {
     _dozCreateBoundary = _dozMergeOdsjeci(odsjeci);
     _dozCreateAreaHa   = _dozCalcGeomAreaHa(_dozCreateBoundary);
     polyOk.style.display = 'block';
-    document.getElementById('doz-create-poly-area').textContent = `${_dozCreateAreaHa.toFixed(1)} ha`;
+    document.getElementById('doz-create-poly-area').textContent = fmtHa(_dozCreateAreaHa);
     noPoly.style.display = 'none';
   } else if (_dozCreateBoundary) {
     // Granica ucrtana ručno
@@ -30286,7 +30290,7 @@ function _dozKmlSelUpdateInfo() {
       } catch(e) {}
     });
   }
-  document.getElementById('doz-kmlsel-info').textContent = `${n} poligon${n===1?'':'a'} · ${ha.toFixed(1)} ha`;
+  document.getElementById('doz-kmlsel-info').textContent = `${n} poligon${n===1?'':'a'} · ${fmtHa(ha)}`;
 }
 
 function _dozKmlLayerToGeoJSON(layer) {
@@ -31860,7 +31864,7 @@ if (typeof AndroidDownload !== 'undefined') {
 <div id="doz-kmlsel-banner">
   <div id="doz-kmlsel-row1">
     <span id="doz-kmlsel-label">📌 Izaberi KML poligone</span>
-    <span id="doz-kmlsel-info">0 poligona · 0.0 ha</span>
+    <span id="doz-kmlsel-info">0 poligona · 0.00 ha</span>
   </div>
   <div id="doz-kmlsel-row2">
     <button class="dks confirm" onclick="dozConfirmKmlSel()">
