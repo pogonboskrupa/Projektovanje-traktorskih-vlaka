@@ -4386,7 +4386,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.30.6';
+const APP_VER = 'v3.30.7';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -22016,6 +22016,7 @@ function _mqmOpen() {
   if (odj) odj.value = entry.odjel;
   const title = document.getElementById('mqm-title');
   if (title) title.textContent = '📏 Mjerenje završeno — spremi opis (opciono)';
+  document.getElementById('mqm-delete-btn').style.display = 'none';  // novo mjerenje — ništa za brisanje
   document.getElementById('msr-quick-meta').style.display = '';
 }
 function _mqmSave() {
@@ -22034,13 +22035,24 @@ function _mqmSave() {
   _mjtrgTab('msr');
 }
 function _mqmClose() {
+  // KLJUČNO: msrStop() se nikad nije zvao ovdje — nakon Spremi/Preskoči je klik na
+  // mapu i dalje dodavao nove tačke (map.on('click', _msrMapClick) ostajao aktivan
+  // iz msrStart() pozvanog u _msrRegZoom), kursor ostajao crosshair, a dugme i dalje
+  // pisalo "⏹ Završi". Iz korisničke perspektive: "ne mogu završiti mjerenje".
+  msrStop(true);
   document.getElementById('msr-quick-meta').style.display = 'none';
+  document.getElementById('mqm-delete-btn').style.display = 'none';
   _mqmId = null;
   // Očisti aktivni edit layer (tačke + linije) da ne ostane dupla linija
   _msrPts = [];
   if (_msrLayer) { _msrLayer.clearLayers(); try { map.removeLayer(_msrLayer); } catch(e){} _msrLayer = null; }
   _msrUpdPanel();
   _msrDrawAllSaved();
+}
+function _mqmDelete() {
+  if (!_mqmId) return;
+  document.getElementById('msr-quick-meta').style.display = 'none';
+  _msrAskDelete(_mqmId);  // _msrConfirmDelete → _msrRegDelete već čisti _mqmId/_msrPts/msrStop preko msrClear()
 }
 
 // =====================================================================
@@ -22276,6 +22288,7 @@ function _msrRegZoom(id) {
   if (odj) odj.value = m.odjel || '';
   const title = document.getElementById('mqm-title');
   if (title) title.textContent = '✏️ Edituj mjerenje — vuci tačke ili dodaj nove';
+  document.getElementById('mqm-delete-btn').style.display = '';  // postojeće mjerenje — nudi brisanje odmah
   document.getElementById('msr-quick-meta').style.display = '';
 
   // Uđi u aktivni mod snimanja
@@ -32294,6 +32307,7 @@ if (typeof AndroidDownload !== 'undefined') {
     </div>
   </div>
   <div style="display:flex;gap:10px;">
+    <button id="mqm-delete-btn" onclick="_mqmDelete()" style="display:none;flex:0 0 auto;background:#fef2f2;color:#dc2626;border:1.5px solid #fecaca;border-radius:12px;padding:12px 14px;font-size:14px;cursor:pointer;">🗑</button>
     <button onclick="_mqmSave()"
       style="flex:1;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;border:none;border-radius:12px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(37,99,235,0.3);transition:filter 0.15s,transform 0.1s;"
       onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform=''">✓ Spremi</button>
