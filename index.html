@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.0';
+const APP_VER = 'v3.29.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -22031,13 +22031,24 @@ function _msrDrawAllSaved() {
         html: `<div class="vlaka-lbl" style="color:#fff;font-size:11px;font-weight:bold;pointer-events:none;white-space:nowrap;text-shadow:0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;">${txt}</div>` }),
       interactive: false, pane: 'vlakeLabels'
     });
+    // Klik otvara popup preko EKSPLICITNOG handlera (ne oslanjanjem na bindPopup-ov
+    // automatski click) + zaustavlja DOM propagaciju — isti obrazac koji je popravio
+    // identičan problem kod tragova (v3.28.2): bez originalEvent.stopPropagation(),
+    // map-level klik handler (zatvara popupove, proximity-fallback na vlake) zna
+    // pregaziti tek otvoren popup istog takta.
+    const _msrOpenPopup = (layer) => (e) => {
+      L.DomEvent.stopPropagation(e);
+      if (e.originalEvent) e.originalEvent.stopPropagation();
+      layer.setPopupContent(buildPopup()).openPopup(e.latlng);
+    };
     if (mode === 'area' && latlngs.length >= 3) {
       const poly = L.polygon(latlngs, {
         color: color, weight: gw,
         fillColor: color, fillOpacity: m.fillOpacity ?? ((_lineStyle.msrFillOp ?? 18) / 100),
-        opacity: 0.9
+        opacity: 0.9, interactive: true
       });
       poly.bindPopup(buildPopup, {maxWidth: 260});
+      poly.on('click', _msrOpenPopup(poly));
       _msrSavedLayer.addLayer(poly);
       if (_lineStyle.msrArea) {
         const c = poly.getBounds().getCenter();
@@ -22046,10 +22057,11 @@ function _msrDrawAllSaved() {
       }
     } else {
       const drawLL = mode === 'area' ? [...latlngs, latlngs[0]] : latlngs;
-      const hit = L.polyline(drawLL, {color:'#000', weight:28, opacity:0.001, lineCap:'round', lineJoin:'round'});
+      const hit = L.polyline(drawLL, {color:'#000', weight:28, opacity:0.001, lineCap:'round', lineJoin:'round', interactive:true});
       const bg  = L.polyline(drawLL, {color:'#fff', weight:gw+3, opacity:0.7, lineCap:'round', lineJoin:'round', interactive:false});
       const fg  = L.polyline(drawLL, {color, weight:gw, opacity:1.0, lineCap:'round', lineJoin:'round', interactive:false});
       hit.bindPopup(buildPopup, {maxWidth: 260});
+      hit.on('click', _msrOpenPopup(hit));
       _msrSavedLayer.addLayer(hit);
       _msrSavedLayer.addLayer(bg);
       _msrSavedLayer.addLayer(fg);
