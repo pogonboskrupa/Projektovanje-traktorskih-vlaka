@@ -3944,6 +3944,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
           </div>
           <div id="doz-gps-export" style="display:none;margin-top:6px;">
             <button class="btn b" onclick="dozExportGPX()" style="font-size:11px;padding:5px 10px;margin:0;">📥 Export GPX</button>
+            <button class="btn b" onclick="dozShareQR()" style="font-size:11px;padding:5px 10px;margin:0;">📤 Pošalji QR</button>
           </div>
         </div>
 
@@ -3964,6 +3965,13 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
               <input type="checkbox" id="doz-cross-warn" checked onchange="dozCrossWarnToggle()" style="accent-color:#fbbf24;"> Upozorenje na prelaz pojasa
             </label>
           </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-t">📶 Dijeljenje pojasa bez interneta</div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:8px;">Kolega bez signala? Pošalji svoj upravo snimljeni pojas preko QR koda — radi potpuno offline (nema veze sa serverom).</div>
+          <button class="btn b" onclick="dozScanQR()" style="width:100%;margin:0 0 8px;">📷 Primi pojas (skeniraj QR)</button>
+          <div id="doz-qr-received-list"></div>
         </div>
 
         <div class="sec">
@@ -4386,7 +4394,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.31.0';
+const APP_VER = 'v3.32.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5824,6 +5832,7 @@ async function sbInitData() {
   if (navigator.onLine) _processOfflineQueue(); // flush any queued ops from offline sessions
   _retryOrphanVlake();            // vlake bez sbId (npr. ranije trajno odbačene iz reda) — probaj opet
   _trnSharedRestore();            // teren: vrati projekte učitane šifrom (localStorage keš)
+  _dozQrRestore();                // doznaka: vrati pojaseve primljene preko QR-a (localStorage keš)
   _updSyncBadge();               // prikaži badge ako ima pending ops iz prošle sesije
   if (sbProfile?.is_admin) _adminCheckPending().catch(() => {}); // badge+toast: registracije na čekanju
   setTimeout(_crashCheck, 1500); // provjeri nedovršena snimanja (odgodi da se mapa inicijalizira)
@@ -28979,6 +28988,7 @@ async function dozSelectOdjel(id) {
   // Šifru za teren smije napraviti samo vlasnik doznake (isto pravilo kao na serveru).
   const _dozShareBtn = document.getElementById('doz-share-code-btn');
   if (_dozShareBtn) _dozShareBtn.style.display = (odjel.created_by && odjel.created_by === sbUser?.id) ? '' : 'none';
+  _dozQrRenderReceived();
   _dozRenderStatusRow();
   await dozLoadLayers(id);
   _dozAutoLinkVlake(odjel);
@@ -29889,6 +29899,213 @@ function dozExportGPX() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('📥 GPX exportovan');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// === DIJELJENJE POJASA PREKO QR KODA (potpuno offline, bez servera) ═════════
+// ═══════════════════════════════════════════════════════════════════════════
+// Zašto QR a ne Bluetooth: app je Android WebView (WebViewAssetLoader), a Web
+// Bluetooth API tu praktično ne radi (nema nativne podrške bez custom native
+// mosta), i namijenjen je za GATT periferije, ne za phone-to-phone prijenos
+// proizvoljnih podataka. Kamera je već dostupna svuda, QR generisanje/čitanje
+// je čisto klijentski (nula mreže potrebno na bilo kojoj strani) i radi
+// pouzdano čak i kad NIJEDAN od dva telefona nema signal — najbrža i
+// najpouzdanija opcija za ovaj kontekst.
+const _DOZ_QR_KEY = 'tvlake_doz_qr_received';
+let _qrLibsLoaded = false;
+
+function _loadQrLibs() {
+  if (_qrLibsLoaded && window.qrcode && window.jsQR) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let remaining = 2, failed = false;
+    function done(err) {
+      if (err) failed = true;
+      if (--remaining === 0) {
+        if (failed || !window.qrcode || !window.jsQR) reject(new Error('QR biblioteke nisu učitane'));
+        else { _qrLibsLoaded = true; resolve(); }
+      }
+    }
+    const s1 = document.createElement('script'); s1.src = 'static/libs/qrcode-gen.js';
+    s1.onload = () => done(null); s1.onerror = () => done(1); document.head.appendChild(s1);
+    const s2 = document.createElement('script'); s2.src = 'static/libs/jsQR.js';
+    s2.onload = () => done(null); s2.onerror = () => done(1); document.head.appendChild(s2);
+  });
+}
+
+// ─── SLANJE (generiši QR) ────────────────────────────────────────────────
+async function dozShareQR() {
+  // Preferiraj tek završeni GPS pojas (lakši — samo lat/lng); ako ga nema,
+  // ponudi moj posljednji sinhronizovani pojas za ovaj odjel (isti fallback
+  // obrazac kao dozExportGPX).
+  let raw = _dozGpsPts.length ? _dozGpsPts.slice()
+    : _dozTracks.filter(p => p.user_id === (sbUser?.id || '')).map(p => [p.latitude, p.longitude]);
+  if (!raw.length) { showToast('Nema snimljenog pojasa za slanje'); return; }
+
+  const odjel = _dozOdjeli.find(o => o.id === _dozSelId);
+  const ime = sbProfile ? (sbProfile.ime + ' ' + sbProfile.prezime) : 'Projektant';
+  const boja = sbProfile?.boja || '#38bdf8';
+
+  // Adaptivna simplifikacija — cilj je da payload stane u JEDAN QR kod (pouzdano
+  // skeniranje kamerom na terenu je bitnije od savršene preciznosti linije;
+  // pojas je uglavnom prava linija pa i agresivna tolerancija ne kvari oblik).
+  let tol = 3, payload, json;
+  do {
+    const simp = _rdpSimplify(raw.map(([la, lo]) => ({ la, lo })), tol);
+    payload = {
+      v: 1, t: 'pojas',
+      odjel: odjel?.name || '', gj: odjel?.gj || '',
+      ime, boja, ts: Date.now(),
+      pts: simp.map(p => [Math.round(p.la * 1e6) / 1e6, Math.round(p.lo * 1e6) / 1e6])
+    };
+    json = JSON.stringify(payload);
+    tol += 4;
+  } while (json.length > 1800 && tol < 60 && payload.pts.length > 2);
+
+  try {
+    await _loadQrLibs();
+  } catch (e) {
+    showToast('⚠ QR biblioteke nisu dostupne (provjeri static/libs fajlove)');
+    return;
+  }
+  _dozShowQrModal(json, payload, raw.length);
+}
+
+function _dozShowQrModal(json, payload, rawPtCount) {
+  const box = document.getElementById('doz-qr-show-canvas');
+  const info = document.getElementById('doz-qr-show-info');
+  box.innerHTML = '';
+  try {
+    const qr = qrcode(0, 'M');
+    qr.addData(json);
+    qr.make();
+    box.innerHTML = qr.createSvgTag(5, 8);
+  } catch (e) {
+    box.innerHTML = '<div style="color:#dc2626;font-size:12px;">⚠ Pojas je prevelik za QR — skrati snimanje ili pošalji u dva dijela.</div>';
+    console.error('QR generate', e);
+  }
+  info.innerHTML = `${_escHtml(payload.odjel || 'Bez odjela')} · ${payload.pts.length} tačaka${rawPtCount > payload.pts.length ? ` (pojednostavljeno sa ${rawPtCount})` : ''} · ${_escHtml(payload.ime)}`;
+  document.getElementById('doz-qr-show-modal').style.display = 'flex';
+}
+function closeDozQrShow() {
+  document.getElementById('doz-qr-show-modal').style.display = 'none';
+}
+
+// ─── PRIJEM (skeniraj QR preko kamere) ───────────────────────────────────
+let _dozQrStream = null;
+let _dozQrScanning = false;
+
+async function dozScanQR() {
+  try {
+    await _loadQrLibs();
+  } catch (e) {
+    showToast('⚠ QR biblioteke nisu dostupne (provjeri static/libs fajlove)');
+    return;
+  }
+  const video = document.getElementById('doz-qr-video');
+  const statusEl = document.getElementById('doz-qr-scan-status');
+  statusEl.textContent = 'Usmjeri kameru na QR kod...';
+  document.getElementById('doz-qr-scan-modal').style.display = 'flex';
+  try {
+    _dozQrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  } catch (e) {
+    closeDozQrScan();
+    showToast('⚠ Nema pristupa kameri (provjeri dozvolu u postavkama)');
+    return;
+  }
+  video.srcObject = _dozQrStream;
+  await video.play().catch(() => {});
+  _dozQrScanning = true;
+  _dozQrScanTick();
+}
+
+function _dozQrScanTick() {
+  if (!_dozQrScanning) return;
+  const video = document.getElementById('doz-qr-video');
+  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+    if (!_dozQrScanTick._canvas) {
+      _dozQrScanTick._canvas = document.createElement('canvas');
+      _dozQrScanTick._ctx = _dozQrScanTick._canvas.getContext('2d', { willReadFrequently: true });
+    }
+    const canvas = _dozQrScanTick._canvas, ctx = _dozQrScanTick._ctx;
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    try {
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(img.data, img.width, img.height);
+      if (code && code.data) { _dozQrHandleScanned(code.data); return; }
+    } catch (e) {}
+  }
+  requestAnimationFrame(_dozQrScanTick);
+}
+
+function closeDozQrScan() {
+  _dozQrScanning = false;
+  if (_dozQrStream) { _dozQrStream.getTracks().forEach(t => t.stop()); _dozQrStream = null; }
+  document.getElementById('doz-qr-scan-modal').style.display = 'none';
+}
+
+function _dozQrHandleScanned(text) {
+  closeDozQrScan();
+  let payload;
+  try { payload = JSON.parse(text); } catch (e) { showToast('⚠ Ovo nije validan pojas-QR'); return; }
+  if (!payload || payload.t !== 'pojas' || !Array.isArray(payload.pts) || payload.pts.length < 2) {
+    showToast('⚠ Ovo nije validan pojas-QR'); return;
+  }
+  const entry = {
+    id: 'qr_' + Date.now(),
+    odjel: payload.odjel || '', gj: payload.gj || '',
+    ime: payload.ime || 'Kolega', boja: payload.boja || '#38bdf8',
+    ts: payload.ts || Date.now(), receivedAt: new Date().toISOString(),
+    pts: payload.pts
+  };
+  const arr = _dozQrLoad();
+  arr.unshift(entry);
+  _dozQrSave(arr);
+  _dozQrRenderReceived();
+  const b = L.latLngBounds(entry.pts.map(p => [p[0], p[1]]));
+  if (b.isValid()) { switchTab('karta'); map.fitBounds(b, { padding: [30, 30] }); }
+  showToast(`✅ Primljen pojas: ${entry.ime}${entry.odjel ? ' (' + entry.odjel + ')' : ''}`);
+}
+
+// ─── Prikaz/upravljanje primljenim pojasevima (localStorage, per-uređaj) ──
+let _dozQrLayers = {};
+function _dozQrLoad() { try { return JSON.parse(localStorage.getItem(_DOZ_QR_KEY) || '[]'); } catch { return []; } }
+function _dozQrSave(arr) { try { localStorage.setItem(_DOZ_QR_KEY, JSON.stringify(arr)); } catch(e) {} }
+
+function _dozQrDraw(entry) {
+  if (_dozQrLayers[entry.id]) { try { map.removeLayer(_dozQrLayers[entry.id]); } catch(e) {} }
+  const latlngs = entry.pts.map(p => [p[0], p[1]]);
+  const pl = L.polyline(latlngs, { color: entry.boja, weight: 4, opacity: 0.85, dashArray: '3,7', pane: 'tragMsrLines' });
+  pl.bindTooltip(_escHtml(`📥 ${entry.ime}${entry.odjel ? ' — ' + entry.odjel : ''}`), { sticky: true, opacity: 0.9 });
+  pl.addTo(map);
+  _dozQrLayers[entry.id] = pl;
+}
+function _dozQrRestore() {
+  try { _dozQrLoad().forEach(e => _dozQrDraw(e)); _dozQrRenderReceived(); } catch(e) {}
+}
+function _dozQrRemove(id) {
+  if (_dozQrLayers[id]) { try { map.removeLayer(_dozQrLayers[id]); } catch(e) {} delete _dozQrLayers[id]; }
+  _dozQrSave(_dozQrLoad().filter(e => e.id !== id));
+  _dozQrRenderReceived();
+}
+function _dozQrZoom(id) {
+  const e = _dozQrLoad().find(x => x.id === id);
+  if (!e) return;
+  const b = L.latLngBounds(e.pts.map(p => [p[0], p[1]]));
+  if (b.isValid()) { switchTab('karta'); map.fitBounds(b, { padding: [30, 30] }); }
+}
+function _dozQrRenderReceived() {
+  const el = document.getElementById('doz-qr-received-list');
+  if (!el) return;
+  const arr = _dozQrLoad();
+  if (!arr.length) { el.innerHTML = ''; return; }
+  el.innerHTML = arr.map(e => `<div style="display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:7px 9px;margin-top:6px;border-left:3px solid ${e.boja};">
+    <div style="flex:1;min-width:0;cursor:pointer;" onclick="_dozQrZoom('${e.id}')">
+      <div style="font-size:12px;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📥 ${_escHtml(e.ime)}${e.odjel ? ' · ' + _escHtml(e.odjel) : ''}</div>
+      <div style="font-size:10px;color:#64748b;">${fmtDateShort(e.receivedAt)} · ${e.pts.length} tač.</div>
+    </div>
+    <button onclick="_dozQrRemove('${e.id}')" style="background:none;border:none;color:#f87171;font-size:15px;cursor:pointer;padding:2px 6px;">✕</button>
+  </div>`).join('');
 }
 
 let _dozGpsPoly = null;        // perzistentna polilinija (inkrementalno crtanje)
@@ -32265,6 +32482,30 @@ if (typeof AndroidDownload !== 'undefined') {
       <button class="btn" style="background:#2d0a0a;color:#f87171;border:1px solid #7f1d1d;flex:0 0 auto;" onclick="dozCancelSave()">✕</button>
     </div>
   </div>
+</div>
+
+<!-- DOZNAKA — QR DIJELJENJE POJASA (potpuno offline, bez servera) -->
+<div id="doz-qr-show-modal" style="display:none;position:fixed;inset:0;z-index:99040;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:16px;"
+  onclick="if(event.target===this)closeDozQrShow()">
+  <div style="background:#fff;border-radius:16px;width:100%;max-width:340px;padding:20px;box-shadow:0 8px 30px rgba(0,0,0,0.7);text-align:center;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <h3 style="margin:0;font-size:15px;color:#1e293b;">📤 Pošalji pojas</h3>
+      <button onclick="closeDozQrShow()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
+    </div>
+    <div id="doz-qr-show-info" style="font-size:12px;color:#475569;margin-bottom:12px;"></div>
+    <div id="doz-qr-show-canvas" style="display:flex;justify-content:center;margin-bottom:10px;"></div>
+    <div style="font-size:11px;color:#94a3b8;">Kolega otvori Doznaka → 📷 Primi pojas i uslika ovaj kod.</div>
+  </div>
+</div>
+
+<div id="doz-qr-scan-modal" style="display:none;position:fixed;inset:0;z-index:99040;background:#000;align-items:center;justify-content:center;">
+  <video id="doz-qr-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;"></video>
+  <div style="position:absolute;top:0;left:0;right:0;padding:16px;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(rgba(0,0,0,0.6),transparent);">
+    <div style="color:#fff;font-size:13px;font-weight:600;">📷 Skeniraj QR pojasa</div>
+    <button onclick="closeDozQrScan()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;width:34px;height:34px;border-radius:50%;cursor:pointer;">✕</button>
+  </div>
+  <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(70vw,280px);height:min(70vw,280px);border:3px solid rgba(255,255,255,0.7);border-radius:16px;pointer-events:none;"></div>
+  <div id="doz-qr-scan-status" style="position:absolute;bottom:24px;left:0;right:0;text-align:center;color:#fff;font-size:12px;padding:0 20px;"></div>
 </div>
 
 <!-- VODI ME DO LOKACIJE — izbor moda -->

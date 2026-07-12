@@ -49,6 +49,8 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE = 1;
     private static final int REQ_PERMS = 2;
     private static final int REQ_BG_LOC = 3;
+    private static final int REQ_CAMERA = 4;
+    private android.webkit.PermissionRequest pendingCameraRequest;
     private static final String APP_URL =
             "https://appassets.androidplatform.net/assets/index.html";
 
@@ -132,6 +134,27 @@ public class MainActivity extends Activity {
             public void onGeolocationPermissionsShowPrompt(String origin,
                     GeolocationPermissions.Callback callback) {
                 callback.invoke(origin, true, true);
+            }
+
+            // getUserMedia({video:true}) za QR skener (dijeljenje pojaseva) — bez ovog
+            // override-a WebView tiho odbija svaki kamera zahtjev, čak i ako app ima
+            // CAMERA dozvolu u manifestu. Ako runtime dozvola još nije data, zatraži je
+            // pa odgovori tek u onRequestPermissionsResult.
+            @Override
+            public void onPermissionRequest(final android.webkit.PermissionRequest request) {
+                boolean wantsCamera = false;
+                for (String res : request.getResources()) {
+                    if (android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res)) wantsCamera = true;
+                }
+                if (!wantsCamera) { request.deny(); return; }
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    request.grant(request.getResources());
+                } else {
+                    pendingCameraRequest = request;
+                    ActivityCompat.requestPermissions(MainActivity.this,
+                            new String[]{Manifest.permission.CAMERA}, REQ_CAMERA);
+                }
             }
 
             @Override
@@ -347,6 +370,20 @@ public class MainActivity extends Activity {
                             "GPS dozvola je potrebna za snimanje vlaka",
                             Toast.LENGTH_LONG).show();
                 }
+            }
+        } else if (requestCode == REQ_CAMERA) {
+            if (pendingCameraRequest != null) {
+                boolean granted = grantResults.length > 0
+                        && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+                if (granted) {
+                    pendingCameraRequest.grant(pendingCameraRequest.getResources());
+                } else {
+                    pendingCameraRequest.deny();
+                    Toast.makeText(this,
+                            "Dozvola za kameru je potrebna za skeniranje QR koda",
+                            Toast.LENGTH_LONG).show();
+                }
+                pendingCameraRequest = null;
             }
         }
     }
