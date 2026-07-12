@@ -4386,7 +4386,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.30.5';
+const APP_VER = 'v3.30.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -15791,16 +15791,22 @@ function updateVlakaLabel(i) {
     const pFirst = v.lagerPt || v.pts[0];
     const _lgS = (_lineStyle.lagerScale || 100) / 100;
     const LW = Math.round(28 * _lgS), LH = Math.round(13 * _lgS); // pravougaon, plosnat
+    // Font ne smije padati linearno sa simbolom ispod praga čitljivosti — pri npr.
+    // 60% simbol (LW/LH) i dalje ima smisla, ali round(9*0.6)=5px tekst postaje
+    // praktično nevidljiv (i "pojede" ga vlastiti text-shadow). Donji prag 8px
+    // drži oznaku čitljivom bez obzira koliko je simbol smanjen.
+    const fontPx = Math.max(8, Math.round(9 * _lgS));
+    const extraH = fontPx + 5; // prostor za red teksta ispod simbola, prati font
     const svgSym = `<svg width="${LW}" height="${LH}" xmlns="http://www.w3.org/2000/svg" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.9))">
       <rect x="0" y="0" width="${LW}" height="${LH}" fill="white"/>
       <polygon points="0,0 ${LW},0 ${LW},${LH}" fill="black"/>
       <line x1="0" y1="0" x2="${LW}" y2="${LH}" stroke="white" stroke-width="1.5"/>
       <rect x="0.5" y="0.5" width="${LW-1}" height="${LH-1}" fill="none" stroke="#888" stroke-width="0.5"/>
     </svg>
-    <div style="color:#fbbf24;font-weight:bold;font-size:${Math.round(9 * _lgS)}px;text-align:center;line-height:1;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;margin-top:1px;pointer-events:none;white-space:nowrap;">${_escHtml(v.lager)}</div>`;
+    <div style="color:#fbbf24;font-weight:bold;font-size:${fontPx}px;text-align:center;line-height:1;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 0 #000,-1px -1px 0 #000;margin-top:1px;pointer-events:none;white-space:nowrap;">${_escHtml(v.lager)}</div>`;
     v.lagerMk = L.marker([pFirst.la, pFirst.lo], {
       icon: L.divIcon({
-        className: 'vlaka-lager-mk', iconSize: [LW, LH+11], iconAnchor: [LW/2, LH/2],
+        className: 'vlaka-lager-mk', iconSize: [LW, LH + extraH], iconAnchor: [LW/2, LH/2],
         html: svgSym
       }),
       interactive: false, zIndexOffset: 600, pane: 'vlakeLabels'
