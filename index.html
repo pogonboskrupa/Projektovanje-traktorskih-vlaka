@@ -4386,7 +4386,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.30.7';
+const APP_VER = 'v3.31.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4717,21 +4717,33 @@ async function _processOfflineQueue() {
           err = error;
         } else {
           // OS-S2: idempotentnost — raniji insert je mogao uspjeti a odgovor se izgubiti.
-          // Pre-lookup po (korisnik, nm): postoji → update umjesto duplog inserta.
+          // BUG (do sada): pre-lookup + link-back su gledali t.nm, a registry objekat
+          // ima polje t.name — poređenje je UVIJEK bilo undefined===string, pa se sbId
+          // nikad nije vratio u lokalni zapis. Posljedica: svaki naknadni edit/brisanje
+          // tog traga je (a) ponovo INSERT-ovao umjesto UPDATE-a (duplikat na serveru),
+          // (b) brisanje ga nikad nije stvarno obrisalo (sbId je ostajao null zauvijek).
+          // Dodatno: ime je samo datum (bez vremena) — dva traga istog dana bi imala
+          // identično ime i pre-lookup po imenu bi drugi tiho prepisao preko prvog.
+          // Fix: prioritet ima client_uuid (pouzdano jedinstven po tragu), nm je fallback
+          // samo za zapise snimljene prije ovog fixa (nemaju .uuid).
+          const lookupCol = op.payload.client_uuid ? 'client_uuid' : 'nm';
+          const lookupVal = op.payload.client_uuid || op.payload.nm;
+          const findLocal = () => _tragRegistry.find(t =>
+            (op.payload.client_uuid ? t.uuid === op.payload.client_uuid : t.name === op.payload.nm) && !t.sbId);
           const { data: exT } = await sb.from('tragovi').select('id')
-            .eq('korisnik_id', op.payload.korisnik_id).eq('nm', op.payload.nm).maybeSingle();
+            .eq('korisnik_id', op.payload.korisnik_id).eq(lookupCol, lookupVal).maybeSingle();
           if (exT?.id) {
             const { error } = await sb.from('tragovi').update(op.payload).eq('id', exT.id);
             err = error;
             if (!err) {
-              const tr = _tragRegistry.find(t => t.nm === op.payload.nm && !t.sbId);
+              const tr = findLocal();
               if (tr) { tr.sbId = exT.id; _tragRegSave(); }
             }
           } else {
           const { data, error } = await sb.from('tragovi').insert(op.payload).select('id').single();
           err = error;
           if (!err && data) {
-            const tr = _tragRegistry.find(t => t.nm === op.payload.nm && !t.sbId);
+            const tr = findLocal();
             if (tr) { tr.sbId = data.id; _tragRegSave(); }
           }
           }
@@ -7663,6 +7675,7 @@ async function sbFlushTrag(t) {
 
 async function _sbFlushTragImpl(t, _retried) {
   if (!sbUser || !sbProfile || !t?.pts?.length) return;
+  if (!t.uuid) { t.uuid = _genUUID(); }  // stariji zapisi iz keša prije ovog fixa
   _tragRegSave();
   const kmVal = (t.pts.length > 1)
     ? Math.round(_tragCalcLen(t.pts)) / 1000
@@ -7671,6 +7684,7 @@ async function _sbFlushTragImpl(t, _retried) {
     korisnik_id: sbUser.id,
     sumarija: sbProfile.sumarija || '',
     nm: t.name,
+    client_uuid: t.uuid,
     pts: t.pts,
     datum: (t.date || new Date().toISOString()).slice(0, 10),
     km: kmVal,
@@ -14510,7 +14524,11 @@ function _tragRegAdd(pts) {
     name: 'Trag ' + fmtDateShort(new Date().toISOString()),
     gj: aktP?.gj || '',
     odjel: aktP?.odjel || '',
-    sbId: null
+    sbId: null,
+    // Pouzdan dedup ključ za offline queue — ime je samo datum (bez vremena), pa bi
+    // dva traga snimljena istog dana imala IDENTIČNO ime i pre-lookup po imenu bi
+    // drugi trag tiho prepisao preko prvog (vidi upsert_trag u _processOfflineQueue).
+    uuid: _genUUID()
   };
   _tragRegistry.unshift(t);
   _tragRegAddLayer(t);
@@ -28795,11 +28813,13 @@ async function dozLoadOdjeli() {
     _dozOdjeli = data || [];
     _OL.save(_OL.DOZ_ODJELI, _dozOdjeli);
     dozRenderOdjeli();
+    _dozRenderOverview();
   } catch(e) {
     const cached = _OL.load(_OL.DOZ_ODJELI);
     if (cached && cached.length) {
       _dozOdjeli = cached;
       dozRenderOdjeli();
+      _dozRenderOverview();
       showToast('📴 Doznaka odjeli iz keša (offline)');
     } else {
       document.getElementById('doz-odjeli-list').innerHTML =
@@ -28808,16 +28828,43 @@ async function dozLoadOdjeli() {
   }
 }
 
+// ─── Vidljivost odjela na karti (localStorage, klijentska preferencija) ─────
+// Isti obrazac kao _getHiddenProjektIds za vlake — više doznaka odjela može
+// biti prikazano na karti istovremeno (overview granice), svaki se pojedinačno
+// pali/gasi bez brisanja podataka.
+const _DOZ_HIDDEN_KEY = 'tvlake_doz_hidden_odjeli';
+function _getDozHiddenIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(_DOZ_HIDDEN_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function _setDozHidden(id, hidden) {
+  const set = _getDozHiddenIds();
+  if (hidden) set.add(id); else set.delete(id);
+  localStorage.setItem(_DOZ_HIDDEN_KEY, JSON.stringify([...set]));
+}
+function toggleDozOdjelVisible(id, ev) {
+  if (ev) ev.stopPropagation();
+  const hidden = _getDozHiddenIds();
+  _setDozHidden(id, !hidden.has(id));
+  dozRenderOdjeli();
+  _dozRenderOverview();
+}
+
 function dozRenderOdjeli() {
   const el = document.getElementById('doz-odjeli-list');
   if (!_dozOdjeli.length) {
     el.innerHTML = '<div class="doz-empty">Nema odjela. Kreiraj prvi →</div>'; return;
   }
+  const hidden = _getDozHiddenIds();
   el.innerHTML = _dozOdjeli.map(o => {
     const status = o.status || 'active';
     const label  = status === 'active' ? 'Aktivno' : status === 'completed' ? 'Završeno' : 'Pauza';
+    const isHidden = hidden.has(o.id);
     return `<div class="doz-odjel-card${_dozSelId===o.id?' selected':''}" onclick="dozSelectOdjel('${o.id}')">
-      <div class="doz-odjel-name">${o.name}</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="doz-odjel-name" style="flex:1;min-width:0;">${o.name}</div>
+        <button onclick="toggleDozOdjelVisible('${o.id}',event)" title="${isHidden ? 'Prikaži na karti' : 'Sakrij sa karte'}" style="background:none;border:none;font-size:16px;cursor:pointer;padding:2px 4px;opacity:${isHidden?'0.4':'1'};flex-shrink:0;line-height:1;">${isHidden ? '🙈' : '👁'}</button>
+      </div>
       <div class="doz-odjel-meta">
         ${o.known_area_ha ? `<span>📐 ${fmtHa(o.known_area_ha)}</span>` : ''}
         <span class="doz-status-chip ${status}">${label}</span>
@@ -28825,6 +28872,33 @@ function dozRenderOdjeli() {
       </div>
     </div>`;
   }).join('');
+}
+
+// Overview sloj — granice SVIH (ne-skrivenih) odjela istovremeno na karti, dok
+// je otvorena lista (bez detaljnog prikaza). Klik na granicu otvara taj odjel.
+let _dozOverviewLayer = null;
+function _dozClearOverview() {
+  if (_dozOverviewLayer) { try { map.removeLayer(_dozOverviewLayer); } catch(e) {} _dozOverviewLayer = null; }
+}
+function _dozRenderOverview() {
+  _dozClearOverview();
+  if (!window.map || _dozSelId) return;  // detaljni prikaz otvoren — overview se ne crta preko njega
+  const hidden = _getDozHiddenIds();
+  const grp = L.layerGroup();
+  let any = false;
+  _dozOdjeli.forEach((o, i) => {
+    if (hidden.has(o.id) || !o.boundary_geojson) return;
+    try {
+      const gj = typeof o.boundary_geojson === 'string' ? JSON.parse(o.boundary_geojson) : o.boundary_geojson;
+      const col = DOZ_ENG_COLORS[i % DOZ_ENG_COLORS.length];
+      const lyr = L.geoJSON(gj, { style: { color: col, weight: 2.5, fillColor: col, fillOpacity: 0.06, dashArray: '6,4' } });
+      lyr.bindTooltip(_escHtml(o.name), { sticky: true, opacity: 0.9 });
+      lyr.on('click', () => dozSelectOdjel(o.id));
+      grp.addLayer(lyr);
+      any = true;
+    } catch(e) {}
+  });
+  if (any) { grp.addTo(map); _dozOverviewLayer = grp; }
 }
 
 // ─── Per-project realtime subscription ───────────────────────────
@@ -28892,6 +28966,7 @@ function _dozEnsureChannel() {
 async function dozSelectOdjel(id) {
   _dozSelId = id;
   _OL.save(_OL.DOZ_SEL_ID, id);
+  _dozClearOverview();
   dozRenderOdjeli();
   _dozSubProject(id);
   const odjel = _dozOdjeli.find(o => o.id === id);
@@ -30737,6 +30812,8 @@ function dozBackToList() {
   _dozBoundaryLayer = _dozTracksLayer = _dozMarkingsLayer = _dozBandsLayer = _dozGpsTrackLayer = null;
   document.getElementById('doz-panel-list').style.display   = 'flex';
   document.getElementById('doz-panel-detail').style.display = 'none';
+  dozRenderOdjeli();
+  _dozRenderOverview();
 }
 
 // ─── HELP MODAL ───────────────────────────────────────────────────────────────
