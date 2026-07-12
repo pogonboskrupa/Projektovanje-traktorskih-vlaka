@@ -4340,7 +4340,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.3';
+const APP_VER = 'v3.29.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -21697,7 +21697,7 @@ function _msrUpdPanel() {
     const labels = totalBox.querySelectorAll('[data-lbl]');
     labels.forEach(l => {
       if (l.dataset.lbl==='up')   l.textContent = '📐 Nagib:';
-      if (l.dataset.lbl==='down') l.textContent = '📏 Kut:';
+      if (l.dataset.lbl==='down') l.textContent = '🧭 Azimut:';
     });
     return;
   }
@@ -22013,7 +22013,7 @@ function _msrDrawAllSaved() {
         const ang = (dh!=null&&d>0) ? (Math.atan(dh/d)*180/Math.PI).toFixed(1) : null;
         html += `<div style="font-size:13px;color:#374151;">📏 ${_msrFmt(d)}</div>`;
         if (pct!=null) html += `<div style="font-size:13px;color:#374151;">📐 Nagib: ${pct>0?'+':''}${pct}%</div>`;
-        if (ang!=null) html += `<div style="font-size:13px;color:#374151;">Kut: ${ang}°</div>`;
+        if (ang!=null) html += `<div style="font-size:13px;color:#374151;">🧭 Azimut: ${ang}°</div>`;
       } else if (mode === 'area' && m.pts.length >= 3) {
         const aM2 = _msrSphericalArea(m.pts);
         html += `<div style="font-size:13px;color:#374151;">📏 Obim: ${_msrFmt(totalDist)}</div>`;
