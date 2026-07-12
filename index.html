@@ -4024,6 +4024,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
         </div>
 
         <div class="sec">
+          <button class="btn" id="doz-share-code-btn" style="display:none;background:#0f172a;border:1px solid #38bdf8;color:#38bdf8;font-size:12px;margin-bottom:6px;" onclick="shareDoznakaCode()">🔑 Podijeli šifrom (teren)</button>
           <button class="btn" style="background:#2d0a0a;border:1px solid #7f1d1d;color:#f87171;font-size:12px;" onclick="dozDeleteOdjel()">🗑 Obriši odjel</button>
         </div>
       </div>
@@ -4366,7 +4367,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.29.8';
+const APP_VER = 'v3.30.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -6532,6 +6533,30 @@ async function shareProjektCode() {
     return;
   }
   await _dlgConfirm(`Šifra projekta "${p.odjel}":\n\n${data}\n\nSaopšti je terenskom radniku — u Teren panelu ukuca šifru kroz "📥 Učitaj projekat" i dobije vlake ovog odjela na karti.\n\n(Nova šifra za isti projekat poništava staru.)`, { title: '✅ Šifra napravljena', okLabel: 'U redu' });
+}
+
+// Doznaka — isti share-code mehanizam kao projekat, samo kind='doznaka'.
+// Terenski radnik učita šifru kroz isti "📥 Učitaj projekat" i dobije
+// obilježene zone (plohe/pojasevi) na karti, read-only.
+async function shareDoznakaCode() {
+  const odjel = _dozOdjeli.find(o => o.id === _dozSelId);
+  if (!odjel) { showToast('Nema odabranog odjela'); return; }
+  if (odjel.created_by !== sbUser?.id) { showToast('Samo vlasnik može podijeliti šifrom'); return; }
+  if (odjel._pendingSync || String(odjel.id || '').startsWith('local-')) {
+    showToast('⚠ Doznaka još nije sinhronizovana na server — pokušaj za koji minut'); return;
+  }
+  const sug = _predloziSifru(odjel.name, '');
+  const raw = await _dlgPrompt('Šifra za dijeljenje doznake (4–16 slova/cifara).\nMožeš je promijeniti u bilo koju:', sug, { title: '🔑 Podijeli doznaku šifrom', okLabel: 'Napravi šifru' });
+  if (raw === null) return;
+  const code = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length < 4 || code.length > 16) { showToast('Šifra mora imati 4–16 slova/cifara'); return; }
+  const { data, error } = await sb.rpc('create_share_code', { p_kind: 'doznaka', p_target_id: odjel.id, p_code: code });
+  if (error) {
+    const missing = /function .*does not exist|schema cache|PGRST202/i.test(error.message || '') || error.code === 'PGRST202';
+    showToast(missing ? '⚠ Primijeni migraciju 20260710 na Supabase (funkcija ne postoji)' : 'Greška: ' + error.message);
+    return;
+  }
+  await _dlgConfirm(`Šifra doznake "${odjel.name}":\n\n${data}\n\nSaopšti je terenskom radniku — u Teren panelu ukuca šifru kroz "📥 Učitaj projekat" i dobije obilježene zone ovog odjela na karti.\n\n(Nova šifra za istu doznaku poništava staru.)`, { title: '✅ Šifra napravljena', okLabel: 'U redu' });
 }
 
 async function aktivirajProjekt(id) {
@@ -26403,6 +26428,9 @@ async function startOfflineDownload() {
     try { sessionStorage.setItem('sw-reloaded', '1'); } catch(e) {}
     window.location.reload();
   });
+
+  // Provjeri postoji li novija objavljena verzija (nakon starta, da ne koči učitavanje).
+  setTimeout(_checkLatestVersion, 6000);
 })();
 
 function showUpdateToast() {
@@ -26433,6 +26461,62 @@ function applyUpdate() {
       window.location.reload();
     }
   });
+}
+
+// ─── PROVJERA NAJNOVIJE VERZIJE (posebno bitno za APK) ───────────────────────
+// APK servira ZAMRZNUTE assets iz appassets.androidplatform.net — service worker
+// auto-update tu ne pomaže (nema svježeg index.html), pa korisnik može mjesecima
+// raditi na staroj verziji bez ikakvog znaka. Ovdje se dohvati verzija sa žive
+// GitHub Pages objave i, ako je novija, prikaže se nenametljiv baner. GitHub
+// Pages šalje Access-Control-Allow-Origin:* pa cross-origin fetch iz APK radi.
+const _LIVE_BASE = 'https://pogonboskrupa.github.io/us-sume/';
+
+function _verCmp(a, b) {
+  const pa = String(a).split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+async function _checkLatestVersion() {
+  try {
+    const isAPK = location.hostname === 'appassets.androidplatform.net';
+    // Na webu se čita relativno (isti origin); u APK-u sa žive Pages objave.
+    const base = isAPK ? _LIVE_BASE : './';
+    const r = await fetch(base + 'sw.js?_v=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const txt = await r.text();
+    const m = txt.match(/APP_VERSION\s*=\s*['"]([\d.]+)['"]/);
+    if (!m) return;
+    const latest = m[1];
+    const local = APP_VER.replace(/^v/, '');
+    if (_verCmp(latest, local) <= 0) return;               // već na najnovijoj (ili novijoj lokalnoj)
+    if (localStorage.getItem('tvlake_ver_dismissed') === latest) return; // korisnik odbio baš ovu verziju
+    _showVersionBanner(latest, isAPK);
+  } catch(e) { /* offline / CORS / bilo šta — tiho preskoči */ }
+}
+
+function _showVersionBanner(latest, isAPK) {
+  if (document.getElementById('ver-banner')) return;
+  const b = document.createElement('div');
+  b.id = 'ver-banner';
+  b.style.cssText = `position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);
+    max-width:92vw;background:#1e3a5f;border:1px solid #38bdf8;border-radius:12px;
+    padding:9px 12px;font-size:12.5px;color:#e2e8f0;z-index:99999;
+    display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,0.5);`;
+  const txt = isAPK
+    ? `🔄 Dostupna je novija verzija <b>v${latest}</b>. Preuzmi i instaliraj novi APK.`
+    : `🔄 Dostupna je novija verzija <b>v${latest}</b>.`;
+  const btn = isAPK
+    ? ''
+    : `<button onclick="applyUpdate()" style="background:#38bdf8;color:#0f172a;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:bold;cursor:pointer;flex-shrink:0;">Ažuriraj</button>`;
+  b.innerHTML = `<span style="flex:1;">${txt}</span>${btn}
+    <button onclick="try{localStorage.setItem('tvlake_ver_dismissed','${latest}')}catch(e){};this.parentElement.remove()"
+      style="background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;padding:0 2px;flex-shrink:0;">✕</button>`;
+  document.body.appendChild(b);
 }
 
 function showToast(msg) {
@@ -28735,6 +28819,9 @@ async function dozSelectOdjel(id) {
   document.getElementById('doz-detail-name').textContent = odjel.name;
   document.getElementById('doz-detail-area').textContent =
     odjel.known_area_ha ? fmtHa(odjel.known_area_ha) : '';
+  // Šifru za teren smije napraviti samo vlasnik doznake (isto pravilo kao na serveru).
+  const _dozShareBtn = document.getElementById('doz-share-code-btn');
+  if (_dozShareBtn) _dozShareBtn.style.display = (odjel.created_by && odjel.created_by === sbUser?.id) ? '' : 'none';
   _dozRenderStatusRow();
   await dozLoadLayers(id);
   _dozAutoLinkVlake(odjel);
