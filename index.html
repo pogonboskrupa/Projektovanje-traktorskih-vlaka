@@ -3544,6 +3544,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
           <option value="_custom">Druga GJ (upiši)…</option>
         </select>
         <input class="pinput" id="np-gj-custom" placeholder="Upiši naziv GJ" style="display:none;margin-top:4px;">
+        <!-- Dropdown GJ lista je specifična za Šumariju Bos. Krupa — ostale šumarije GJ upisuju slobodno. -->
+        <input class="pinput" id="np-gj-plain" placeholder="Upišite naziv G.J." style="display:none;">
         <div style="display:flex;gap:8px;">
           <div style="flex:1;">
             <span class="lbl">Površina (ha)</span>
@@ -4367,7 +4369,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.30.2';
+const APP_VER = 'v3.30.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -6065,7 +6067,12 @@ function _npGjChange(sel) {
   else { cust.style.display = 'none'; cust.value = ''; }
 }
 
+// Fiksna GJ lista (dropdown) vrijedi samo za Šumariju Bos. Krupa — ostale
+// šumarije nemaju unaprijed definisan spisak GJ-ova pa ih projektant upisuje ručno.
+function _npIsKrupa() { return (sbProfile?.sumarija || '') === 'ŠUMARIJA BOS.KRUPA'; }
+
 function _npGjValue() {
+  if (!_npIsKrupa()) return document.getElementById('np-gj-plain').value.trim();
   const sel = document.getElementById('np-gj');
   if (sel.value === '_custom') return document.getElementById('np-gj-custom').value.trim();
   return sel.value;
@@ -6080,6 +6087,10 @@ function showNovProjektForm() {
   document.getElementById('np-gj').value = '';
   document.getElementById('np-gj-custom').style.display = 'none';
   document.getElementById('np-gj-custom').value = '';
+  document.getElementById('np-gj-plain').value = '';
+  const isKrupa = _npIsKrupa();
+  document.getElementById('np-gj').style.display = isKrupa ? '' : 'none';
+  document.getElementById('np-gj-plain').style.display = isKrupa ? 'none' : '';
   document.getElementById('np-povrsina').value = '';
   document.getElementById('np-datum').value = todayStr();
 }
