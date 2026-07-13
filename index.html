@@ -4394,7 +4394,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.32.4';
+const APP_VER = 'v3.32.5';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4404,7 +4404,16 @@ const SUPA_URL = 'https://djguplhaayjvwmdlxevx.supabase.co';
 const SUPA_KEY = 'sb_publishable_eccquEW5tzOJUmAu_TK0uw_jKOjTLrs';
 let sb;
 try {
-  sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+  // cache:'no-store' na SVAKOM Supabase pozivu — bez ovoga, GET odgovori (profil,
+  // liste korisnika/projektanata, projekti...) mogu biti keširani od browsera/WebView-a
+  // BEZ OBZIRA na Cache-Control zaglavlja (PostgREST ih ni ne šalje eksplicitno).
+  // Uzrok "novoregistrovan projektant se ne pojavljuje u dodaj projektanta" i ranije
+  // "korisnik zaglavljen na čeka se odobrenje" (v3.32.3, tamo je fix bio na Android
+  // WebView nivou) — ovo je ista klasa greške ali na nivou aplikacije, radi na SVIM
+  // platformama (Android, iOS/Safari, desktop), ne samo na Android WebView-u.
+  sb = supabase.createClient(SUPA_URL, SUPA_KEY, {
+    global: { fetch: (url, opts) => fetch(url, { ...(opts || {}), cache: 'no-store' }) }
+  });
 } catch(e) {
   console.error('Supabase init greška:', e);
   sb = null;
