@@ -3163,14 +3163,14 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
           <div class="auth-field-lbl">Ime</div>
           <div class="auth-input-wrap">
             <span class="auth-input-icon">👤</span>
-            <input id="auth-ime" placeholder="Vaše ime" autocomplete="given-name">
+            <input id="auth-ime" placeholder="Vaše ime" autocomplete="off">
           </div>
         </div>
         <div class="auth-field">
           <div class="auth-field-lbl">Prezime <span class="auth-field-hint">— prazno za org. naloge</span></div>
           <div class="auth-input-wrap">
             <span class="auth-input-icon">📋</span>
-            <input id="auth-prezime" placeholder="Vaše prezime" autocomplete="family-name">
+            <input id="auth-prezime" placeholder="Vaše prezime" autocomplete="off">
           </div>
         </div>
         <div class="auth-field">
@@ -3179,7 +3179,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
             <span class="auth-input-icon">🔐</span>
             <input id="auth-pin" type="password" inputmode="numeric"
               class="auth-pin-input" placeholder="• • • • • •" maxlength="8"
-              autocomplete="current-password"
+              autocomplete="off"
               onkeydown="if(event.key==='Enter')doLogin()">
           </div>
         </div>
@@ -4394,7 +4394,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.32.3';
+const APP_VER = 'v3.32.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5148,12 +5148,17 @@ function authShowLogin() {
   document.getElementById('auth-reg-form').style.display = 'none';
   document.getElementById('auth-err').style.display = 'none';
   _authHidePending();
-  // Popuni polja ako su zapamćeni
+  // Popuni ime/prezime ako su zapamćeni (čist tekst, lako se primijeti i ispravi
+  // ako je pogrešno). PIN se NAMJERNO ne pre-popunjava — ovaj ekran za ručnu
+  // prijavu se pokazuje baš kad auto-login NIJE uspio (istekla sesija, drugi
+  // uređaj/korisnik...), pa tihо popunjavanje PIN-a nekog PRETHODNOG korisnika
+  // na dijeljenom telefonu znači da bi trenutni korisnik mogao pritisnuti
+  // "Prijavi se" i nesvjesno se ulogovati POD TUĐIM nalogom ako ne primijeti
+  // da ime/prezime nisu njegovi. Bez PIN-a je prijava uvijek eksplicitna.
   const saved = _loadSavedUser();
   if (saved) {
     document.getElementById('auth-ime').value = saved.ime || '';
     document.getElementById('auth-prezime').value = saved.prezime || '';
-    document.getElementById('auth-pin').value = saved.pin || '';
     document.getElementById('auth-zapamti').checked = true;
     const cbxEl = document.getElementById('auth-cbx-el');
     if (cbxEl) cbxEl.classList.add('checked');
