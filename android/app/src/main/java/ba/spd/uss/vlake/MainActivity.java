@@ -92,8 +92,17 @@ public class MainActivity extends Activity {
         ws.setAllowFileAccessFromFileURLs(true);
         ws.setAllowUniversalAccessFromFileURLs(true);
         ws.setGeolocationEnabled(true);
-        // LOAD_CACHE_ELSE_NETWORK: koristi cache kad nema interneta (CDN biblioteke dostupne offline)
-        ws.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+        // LOAD_DEFAULT (ne LOAD_CACHE_ELSE_NETWORK!): LOAD_CACHE_ELSE_NETWORK koristi
+        // keširan odgovor BEZ OBZIRA na starost — ignoriše Cache-Control/no-cache
+        // zaglavlja čak i dok je internet dostupan. Za CDN biblioteke (Leaflet, turf...)
+        // to je bezopasno, ali za Supabase API pozive (npr. "da li me je admin odobrio?")
+        // znači da WebView zauvijek servira PRVI keširani odgovor umjesto svježeg —
+        // korisnik registrovan na APK-u ostaje zaglavljen na "čeka se odobrenje" i
+        // nakon što ga admin odobri na webu, jer APK nikad stvarno ne pita server
+        // ponovo. LOAD_DEFAULT poštuje stvarna cache zaglavlja sa servera: CDN fajlovi
+        // se i dalje keširaju (imaju long max-age), a Supabase odgovori (bez cache
+        // zaglavlja ili no-cache) se uvijek dohvataju svježe kad ima interneta.
+        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
         ws.setMediaPlaybackRequiresUserGesture(false);
         ws.setTextZoom(100);
 
