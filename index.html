@@ -4416,7 +4416,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.33.1';
+const APP_VER = 'v3.34.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -12944,8 +12944,8 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible') {
     if (bgWarn) bgWarn.style.display = 'none';
     // Ponovo uzmi wake lock (browser ga otpušta kad app ide u pozadinu)
-    // D4-E: i Doznaka GPS treba wake lock, ne samo glavno snimanje vlake
-    if ((recOn || _dozGpsOn) && !_wakeLock) await _acquireWakeLock();
+    // Sva tri tipa snimanja (vlaka / trag / doznaka pojas) trebaju wake lock.
+    if (_anyRecOn() && !_wakeLock) await _acquireWakeLock();
     _updWakeLockIcon();
     // Povratak u prvi plan — pokušaj sync (online event zna izostati na Androidu)
     if (navigator.onLine && sbUser) {
@@ -12972,7 +12972,11 @@ document.addEventListener('visibilitychange', async () => {
     // I pokušaj odmah poslati na server (ne samo lokalno) — inače tek nacrtana
     // vlaka ostaje nevidljiva na drugom uređaju dok se debounce ne izvrši.
     try { if (typeof _flushAllPendingVlake === 'function') _flushAllPendingVlake(); } catch(e) {}
-    if ((recOn && !recPaused) || _dozGpsOn) {
+    // Upozorenje "app u pozadini — snimanje može stati" ima smisla SAMO na
+    // iOS/PWA gdje pozadinski GPS zaista ne radi. U APK-u (AndroidGps definisan)
+    // foreground service drži snimanje živim, pa bi upozorenje bilo pogrešno.
+    const _activelyRec = (recOn && !recPaused) || (_tragOn && !_tragPaused) || (_dozGpsOn && !_dozGpsPaused);
+    if (_activelyRec && typeof AndroidGps === 'undefined') {
       if (bgWarn) bgWarn.style.display = '';
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     }
@@ -13077,14 +13081,10 @@ function stopRec() {
   _clearRecPreview();
   _kfReset(); _lastRecTime = 0;
   if (_precizActive) _precizReset();  // D3-Q: ne ostavljaj dugme zaglavljeno na "n/10"
-  if (!_dozGpsOn) _releaseWakeLock();  // D4-E: ne gasi ekran ako Doznaka GPS i dalje radi
-  _stopBgAudio();
-  _stopGpsWatchdog();
-  _stopSWHeartbeat();
-  _stopRecNotification();
-  if (typeof AndroidGps !== 'undefined') {
-    try { AndroidGps.stopRecording(); } catch(e) {}
-  }
+  _stopGpsWatchdog();   // watchdog je vlaka-specifičan — uvijek stani
+  // Wake lock / audio / SW heartbeat / notifikacija / native servis gase se tek ako
+  // NIŠTA drugo ne snima (trag ili doznaka pojas mogu i dalje raditi u pozadini).
+  _bgRecStopIfIdle();
   const b = document.getElementById('brec');
   if (b) b.classList.remove('active');
   const banner = document.getElementById('rec-banner');
@@ -14265,7 +14265,7 @@ function _stopGpsWatchdog() {
 function _startSWHeartbeat() {
   _stopSWHeartbeat();
   _heartbeatTimer = setInterval(() => {
-    if (!recOn) { _stopSWHeartbeat(); return; }
+    if (!_anyRecOn()) { _stopSWHeartbeat(); return; }
     const sw = navigator.serviceWorker?.controller;
     if (sw) sw.postMessage({ type: 'gps-heartbeat' });
   }, 25000); // svakih 25s
@@ -14277,10 +14277,16 @@ function _stopSWHeartbeat() {
 
 // ── SW NOTIFIKACIJA — Foreground Service ekvivalent ─────────────────────────
 let _lastRecNotifAt = 0;  // D3-R: vremenski prag da notifikacija ne kasni u rijetkom terenu
-function _startRecNotification() {
-  const v = actI !== null ? vlake[actI] : null;
-  const nm = v ? v.nm : '';
-  const dist = v ? fmtL(calcL(v.pts)) : '';
+function _startRecNotification(nmOverride, distOverride) {
+  let nm, dist;
+  if (typeof nmOverride === 'string') {
+    // Trag / doznaka pojas — vlastita oznaka, ne čitaj vlake[actI]
+    nm = nmOverride; dist = distOverride || '';
+  } else {
+    const v = actI !== null ? vlake[actI] : null;
+    nm = v ? v.nm : '';
+    dist = v ? fmtL(calcL(v.pts)) : '';
+  }
   // Native Android Foreground Service notification
   if (typeof AndroidGps !== 'undefined') {
     try { AndroidGps.updateNotification('GPS Snimanje — ' + (nm || 'vlaka'), dist ? 'Snimljeno: ' + dist : 'GPS snimanje aktivno'); } catch(e) {}
@@ -14306,12 +14312,43 @@ function _stopRecNotification() {
   if (sw) sw.postMessage({ type: 'hide-rec-notification' });
 }
 
+// ── ZAJEDNIČKO POZADINSKO SNIMANJE (vlaka / trag / doznaka pojas) ────────────
+// Sva tri tipa snimanja dijele JEDAN Android foreground service (GpsService) +
+// wake lock + tihi audio + SW heartbeat. Foreground service je jedino što
+// pouzdano drži GPS živ kad app ode u pozadinu — bez njega Android suspenduje
+// WebView i trag/pojas prestanu da se snimaju (vlaka je to imala, trag i pojas
+// nisu). Servis se pokreće na PRVO aktivno snimanje i gasi tek kad se ZADNJE
+// zaustavi (_anyRecOn referentno stanje), pa istovremeno snimanje jednog tipa
+// ne ugasi servis drugom.
+function _anyRecOn() { return recOn || _tragOn || _dozGpsOn; }
+
+function _bgRecStart(label) {
+  _iosBgRecWarn();          // iPhone: jednom upozori da pozadina ne radi na iOS-u
+  _acquireWakeLock();
+  _startBgAudio();
+  _startSWHeartbeat();
+  if (typeof AndroidGps !== 'undefined') {
+    try { AndroidGps.startRecording(label || 'GPS Snimanje'); } catch(e) {}
+  }
+  _startRecNotification(label || 'snimanje', '');
+}
+
+function _bgRecStopIfIdle() {
+  if (_anyRecOn()) return;   // još nešto snima — drži servis/lock živim
+  _releaseWakeLock();
+  _stopBgAudio();
+  _stopSWHeartbeat();
+  _stopRecNotification();
+  if (typeof AndroidGps !== 'undefined') {
+    try { AndroidGps.stopRecording(); } catch(e) {}
+  }
+}
+
 // ── PRIJEM AKCIJA IZ NOTIFIKACIJE ────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', evt => {
     if (evt.data?.type === 'rec-action') {
-      if (evt.data.action === 'stop')  stopRec();
-      if (evt.data.action === 'pause') toggleRecPause();
+      _nativeRecAction(evt.data.action);   // route na tip koji trenutno snima
     }
     // Klik na share-loc notifikaciju — centriraj mapu na dijeljenu lokaciju
     if (evt.data?.type === 'pan-to' && evt.data.la && evt.data.lo) {
@@ -14324,10 +14361,19 @@ if ('serviceWorker' in navigator) {
     }
   });
 }
-// Android native notification actions (pause/stop from Foreground Service)
+// Android native notification actions (pause/stop from Foreground Service).
+// Jedan foreground service opslužuje sva tri tipa snimanja — Stop/Pauza iz
+// notifikacije se rutira na ono što je trenutno aktivno.
 function _nativeRecAction(action) {
-  if (action === 'stop')  stopRec();
-  if (action === 'pause') toggleRecPause();
+  if (action === 'stop') {
+    if (recOn)          stopRec();
+    else if (_tragOn)   fabSnimTrag();
+    else if (_dozGpsOn) dozStopGPS();
+  } else if (action === 'pause') {
+    if (recOn)          toggleRecPause();
+    else if (_tragOn)   togTragPause();
+    else if (_dozGpsOn) dozPauseGPS();
+  }
 }
 
 function centerMap() {
@@ -15078,6 +15124,7 @@ function fabSnimTrag() {
     _tragLastT = 0;
     _crashStopTimer();
     _crashClearTrag();  // normalno sačuvan
+    _bgRecStopIfIdle(); // otpusti pozadinski servis ako ništa drugo ne snima
   } else {
     if (!gpsOn) startGPS();
     _setFreeView(false);
@@ -15097,6 +15144,7 @@ function fabSnimTrag() {
     if (typeof _terenUpdTragUI === 'function') _terenUpdTragUI();
     _updTragStats();
     _crashStartTimer();   // auto-save svakih 30s
+    _bgRecStart('trag');  // pozadinsko snimanje — nastavi i kad app ode u pozadinu
   }
 }
 
@@ -30228,7 +30276,7 @@ async function dozStartGPS() {
   document.getElementById('doz-gps-export').style.display = 'none';
   document.getElementById('doz-gps-elev').style.display = 'none';
   _dozUpdGpsStats(null);
-  _acquireWakeLock();
+  _bgRecStart('pojas doznake');  // wake lock + foreground service — snima i u pozadini
 
   _dozGpsWatchId = navigator.geolocation.watchPosition(async pos => {
     if (!_dozGpsOn || !_dozGpsProjId || !_dozGpsUserId) return;
@@ -30354,7 +30402,7 @@ function dozStopGPS() {
   _dozGpsOn = false;
   _dozGpsProjId = null; _dozGpsUserId = null;
   _dozGpsPaused = false; _dozGpsPausedTime = 0; _dozGpsPauseStart = 0;
-  if (!recOn) _releaseWakeLock();
+  _bgRecStopIfIdle();  // otpusti pozadinski servis/lock ako ništa drugo ne snima
   try { localStorage.removeItem(_DOZ_LIVE_KEY); } catch {}
   const btn = document.getElementById('doz-gps-btn');
   if (btn) { btn.textContent = '📍 Počni GPS'; btn.style.background=''; btn.style.color=''; btn.style.borderColor=''; }
