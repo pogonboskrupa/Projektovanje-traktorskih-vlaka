@@ -4394,7 +4394,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.32.5';
+const APP_VER = 'v3.32.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4496,6 +4496,7 @@ const _OP_LABELS = {
   upsert_log:         '↑ Dnevni log',
   insert_projekt:     '+ Novi projekat',
   upsert_odjel:       '↑ Odjel',
+  insert_doz_project: '+ Novi doznaka odjel',
   insert_doz_marking: '+ Doznaka oznaka',
   delete_doz_marking: '✕ Briši doznaka oznaku',
   upsert_doz_status:  '↑ Status odjela',
@@ -4726,6 +4727,41 @@ async function _processOfflineQueue() {
           _OL.save(_OL.PROJEKTI, _projekti);
           _updVlakeMapVisibility();
           rndProjektiList();
+        }
+      } else if (op.type === 'insert_doz_project') {
+        const { _tempId, ...insertPayload } = op.payload;
+        let { data: dp, error } = await sb.from('doz_projects').insert(insertPayload).select('id').single();
+        // OS-S2: 23505 s klijentskim ID-jem = odjel je već upisan u ranijem pokušaju
+        if (error && error.code === '23505' && insertPayload.id) { error = null; dp = { id: insertPayload.id }; }
+        err = error;
+        if (!err && dp) {
+          const realId = dp.id;
+          // Swap tempId → realId u preostalim redovima čekanja (npr. zona nacrtana
+          // na ovom odjelu prije nego što je sam odjel stigao na server) — isti
+          // obrazac kao insert_projekt za vlake.
+          q.forEach(qOp => { if (qOp.payload?.project_id === _tempId) qOp.payload.project_id = realId; });
+          const lq = _OL.loadQueue();
+          lq.forEach(qOp => { if (qOp.payload?.project_id === _tempId) qOp.payload.project_id = realId; });
+          localStorage.setItem(_OL.QUEUE, JSON.stringify(lq));
+          // Update in-memory zone (_dozMarkings) + keš ako je ovaj odjel trenutno otvoren
+          (_dozMarkings || []).forEach(m => { if (m.project_id === _tempId) m.project_id = realId; });
+          const oi = _dozOdjeli.findIndex(o => o.id === _tempId);
+          if (oi >= 0) _dozOdjeli[oi] = { ..._dozOdjeli[oi], id: realId, _pendingSync: false };
+          if (_dozSelId === _tempId) {
+            _dozSelId = realId;
+            _OL.save(_OL.DOZ_SEL_ID, realId);
+          }
+          _OL.save(_OL.DOZ_ODJELI, _dozOdjeli);
+          // Kreator kao manager-član — best effort, ne blokira (created_by RLS ionako
+          // već daje kreatoru pun pristup i bez ovog reda; vidi dozSaveOdjel).
+          try {
+            await sb.from('doz_project_members').insert({
+              project_id: realId, user_id: sbUser.id, role: 'manager',
+              track_color: DOZ_ENG_COLORS[0], order_index: 0, is_active: true
+            });
+          } catch(e) {}
+          if (typeof dozRenderOdjeli === 'function') dozRenderOdjeli();
+          if (typeof _dozRenderOverview === 'function') _dozRenderOverview();
         }
       } else if (op.type === 'upsert_trag') {
         if (op.payload.id) {
@@ -28892,6 +28928,7 @@ function dozRenderOdjeli() {
         ${o.known_area_ha ? `<span>📐 ${fmtHa(o.known_area_ha)}</span>` : ''}
         <span class="doz-status-chip ${status}">${label}</span>
         <span>${fmtDateShort(o.created_at)}</span>
+        ${o._pendingSync ? '<span style="font-size:10px;color:#f59e0b;margin-left:4px;">⏳ čeka sync</span>' : ''}
       </div>
     </div>`;
   }).join('');
@@ -30948,16 +30985,43 @@ async function dozSaveOdjel() {
   if (!odjel) { err.textContent = 'Unesite odjel'; return; }
   if (!_dozCreateBoundary) { err.textContent = 'Učitajte GeoJSON ili ucrtajte granicu odjela'; return; }
   err.textContent = '';
+
+  const payload = {
+    name: `${gj} · ${odjel}`,
+    description: null,
+    created_by: sbUser.id,
+    boundary_geojson: _dozCreateBoundary,
+    known_area_ha: _dozCreateAreaHa || null,
+    status: 'active'
+  };
+
+  // Offline (ili mreža trenutno pod pritiskom) — kreiraj lokalno s privremenim
+  // ID-jem, isti obrazac kao saveNovProjekt() za vlake. Odjel je odmah upotrebljiv
+  // (moguće odmah ucrtati zone/pojaseve), a insert_doz_project handler u
+  // _processOfflineQueue() po sinhronizaciji zamijeni privremeni ID pravim i
+  // migrira sve što je nastalo u međuvremenu (zone, aktivni odabir).
+  const createLocal = () => {
+    const tempId = _genUUID();
+    const novi = { ...payload, id: tempId, created_at: new Date().toISOString(), _pendingSync: true };
+    _dozOdjeli.unshift(novi);
+    _OL.save(_OL.DOZ_ODJELI, _dozOdjeli);
+    _OL.enqueue({ type: 'insert_doz_project', payload: { ...payload, _tempId: tempId } });
+    dozCloseCreateOdjel();
+    dozRenderOdjeli();
+    _dozRenderOverview();
+    showToast('📋 Odjel kreiran — sinhronizuje se kad bude interneta');
+  };
+
+  if (!navigator.onLine) { createLocal(); return; }
+
   try {
-    const { data: novi, error } = await sb.from('doz_projects').insert({
-      name: `${gj} · ${odjel}`,
-      description: null,
-      created_by: sbUser.id,
-      boundary_geojson: _dozCreateBoundary,
-      known_area_ha: _dozCreateAreaHa || null,
-      status: 'active'
-    }).select('id').single();
-    if (error) throw error;
+    const { data: novi, error } = await sb.from('doz_projects').insert(payload).select('id').single();
+    if (error) {
+      // OS-S1: onLine=true ali zahtjev pao (mrtva/špotava veza) — ne gubi odjel,
+      // isti postupak kao offline grana.
+      if (_isNetworkErr(error)) { createLocal(); return; }
+      throw error;
+    }
     // Kreator je automatski manager-član — RLS i lista članova ga uključuju
     if (novi?.id) {
       await sb.from('doz_project_members').insert({
