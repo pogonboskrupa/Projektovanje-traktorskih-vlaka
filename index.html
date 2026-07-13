@@ -4394,7 +4394,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.32.1';
+const APP_VER = 'v3.32.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -30966,7 +30966,9 @@ async function dozAddMember() {
       .select('id,ime,prezime,boja').eq('sumarija', me.sumarija).neq('id', sbUser.id).order('prezime');
     if (!users?.length) { showToast('Nema projektanata u šumariji'); return; }
     const vecClanovi = new Set(_dozMembers.map(m => m.user_id));
-    const dostupni = users.filter(u => !vecClanovi.has(u.id));
+    // Vodeći Projektant je nadzorni nalog (isti obrazac kao kod dodavanja u vlake
+    // projekat) — ne snima doznaku, ne treba se nuditi kao kandidat za tim.
+    const dostupni = users.filter(u => !vecClanovi.has(u.id) && !/^vode[cć]i\s+projektant$/i.test((u.ime || '').trim()));
     if (!dostupni.length) { showToast('Svi projektanti su već dodani'); return; }
     _dozShowMemberPicker(dostupni);
   } catch(e) { showToast('Greška: ' + e.message); }
