@@ -4435,7 +4435,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.34.1';
+const APP_VER = 'v3.35.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -7994,10 +7994,16 @@ async function sbLoadKolegeVlake() {
 
   let dbData = null;
   try {
+    // Filtriraj SAMO po projektu + članovima. Raniji dodatni `.eq('sumarija', ...)`
+    // filter je bio redundantan (projekt_id + memberIds + RLS već sve ograničavaju)
+    // i AKTIVNO štetan: ako su dva člana istog projekta u različitim šumarijama
+    // (npr. admin premjestio nekoga, ili saradnja preko šumarija), vlake dijeljene
+    // kroz projekat su ispadale iz prikaza jer im je sumarija ≠ mojoj. Zato
+    // "kolega ne vidi podijeljeni projekat" — dijeljenje radi na serveru (RLS), ali
+    // klijent ih je tiho odfiltrirao. Uklonjeno.
     let q = sb.from('vlake')
       .select('nm, korisnik_id, pts, boja, kr')
       .in('korisnik_id', memberIds)
-      .eq('sumarija', sbProfile.sumarija)
       .eq('projekt_id', akt.id);
     const { data } = await q;
     dbData = data || [];
