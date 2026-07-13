@@ -3286,6 +3286,28 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
   </div>
 </div>
 
+<!-- Spriječi "flash" login ekrana za korisnika koji je već prijavljen: #auth-screen
+     je u CSS-u display:flex PO DEFAULTU (vidljiv čim se HTML parsira), a stvarna
+     initAuth() logika koja odlučuje šta prikazati radi se na SAMOM KRAJU glavnog
+     JS bloka — tek pošto se sve biblioteke (Leaflet, Supabase, Turf...)
+     potpuno učitaju i izvrše. Na sporijoj vezi/uređaju to zna potrajati, pa bi
+     inače SVAKI ulazak u app (ne samo prvo pokretanje) kratko pokazao formu za
+     prijavu prije nego što se app stvarno otvori. Ovaj sinhroni skript se izvrši
+     ODMAH (prije bilo kakvog crtanja), pa ako postoje keširan profil I zapamćeni
+     korisnik (isti signal koji initAuth() koristi za "hasLocalData"), sakrij
+     auth-screen odmah — initAuth() kasnije svejedno radi punu provjeru i po
+     potrebi ga vrati (npr. istekla/opozvana prijava), ovo je čisto kozmetička
+     optimizacija protiv nepotrebnog treptaja. -->
+<script>
+(function() {
+  try {
+    if (localStorage.getItem('tvlake_ol_profile') && localStorage.getItem('tvlake_saved_user')) {
+      document.getElementById('auth-screen').style.display = 'none';
+    }
+  } catch(e) {}
+})();
+</script>
+
 <div id="wrapper" style="display:none;">
 
   <div id="tab-bar">
@@ -4394,7 +4416,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.33.0';
+const APP_VER = 'v3.33.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
