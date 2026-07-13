@@ -10,8 +10,8 @@ android {
         applicationId "ba.spd.uss.vlake"
         minSdk 24
         targetSdk 34
-        versionCode 172
-        versionName "3.32.6"
+        versionCode 173
+        versionName "3.33.0"
     }
 
     signingConfigs {
@@ -41,7 +41,7 @@ android {
     }
 
     aaptOptions {
-        noCompress "html", "js", "css", "json", "png", "svg", "kml", "geojson"
+        noCompress "html", "js", "css", "json", "png", "svg", "kml", "geojson", "wasm"
     }
 }
 

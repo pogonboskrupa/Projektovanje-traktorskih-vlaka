@@ -4394,7 +4394,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.32.6';
+const APP_VER = 'v3.33.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -23865,18 +23865,37 @@ const _SQL_LARGE     = 20 * 1024 * 1024;
 const _SQL_CRASH_KEY = 'tvlake_sqlmap_loading';
 const _SQLJS_CDN     = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/';
 const _S3_CDN        = 'https://cdn.jsdelivr.net/npm/@sqlite.org/sqlite-wasm@3.46.1-build1/sqlite-wasm/jswasm/';
+// Lokalna rezerva (static/libs/sql-wasm.js + .wasm) za slučaj da CDN ne uspije —
+// apsolutni URL se mora izračunati OVDJE (na glavnoj niti, protiv location.href)
+// jer se unutar Worker-a (kreiranog iz blob: URL-a) relativni put ne razrješava
+// prema stranici, već prema samom blob-u. Bez ovoga: ako se Worker kreira (ili
+// ponovo kreira nakon greške) dok je uređaj offline, importScripts(CDN) baci
+// grešku i CIJELI SQLite/MBTiles sloj ostaje prazan dok se signal ne vrati —
+// čak i za već preuzete offline karte, jer im čitanje pločica ide kroz isti
+// Worker/sql.js most.
+const _SQLJS_LOCAL   = new URL('static/libs/', location.href).href;
 let _sqlW = null, _sqlWSeq = 0, _sqlWCbs = {};
 
 // ── Worker source ─────────────────────────────────────────────────────────────
 const _SQL_WORKER_SRC = `
 const SQLCDN = '${_SQLJS_CDN}';
+const SQLLOCAL = '${_SQLJS_LOCAL}';
 let sqlJs = null;
+let _sqlBase = SQLCDN;
 const dbs = {};
 
 async function getSqlJs() {
   if (sqlJs) return sqlJs;
-  importScripts(SQLCDN + 'sql-wasm.js');
-  return sqlJs = await initSqlJs({ locateFile: f => SQLCDN + f });
+  try {
+    importScripts(SQLCDN + 'sql-wasm.js');
+    _sqlBase = SQLCDN;
+  } catch (e) {
+    // CDN nedostupan (offline, ili Worker se baš sad ponovo kreira bez signala) —
+    // lokalna kopija radi 100% bez mreže.
+    importScripts(SQLLOCAL + 'sql-wasm.js');
+    _sqlBase = SQLLOCAL;
+  }
+  return sqlJs = await initSqlJs({ locateFile: f => _sqlBase + f });
 }
 
 // ── MiniSqlite: async B-tree čitač za OPFS fajlove ───────────────────────────
