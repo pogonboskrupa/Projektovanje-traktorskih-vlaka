@@ -347,6 +347,16 @@ html, body { height:100%; font-family: Arial, sans-serif; background:#1a1a2e; co
 /* MAIN */
 #main { display:flex; flex:1; overflow:hidden; position:relative; }
 
+/* PERF: momentum-skrol + izolacija za sve pune tab-panele koji nisu imali te
+   postavke (Teren/Postavke/Tragovi) — bez -webkit-overflow-scrolling touch skrol
+   u WebView-u zna biti trom/isprekidan. overscroll-behavior:contain sprječava da
+   skrol panela "procuri" u pozadinsku kartu. */
+#teren-panel, #postavke-panel, #tragovi-panel {
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  touch-action:pan-y;
+}
+
 /* PANEL */
 #panel {
   width:270px; flex-shrink:0;
@@ -454,6 +464,15 @@ input:focus { outline:none; border-color:#3b82f6; }
 }
 .vrow:hover { border-color:#3b82f6; background:#0f1f3a; }
 .vrow.act   { border-color:#fbbf24; background:#151200; }
+/* PERF: svaki red vlake je težak (5 akcijskih dugmadi s krugovima) — na dužim
+   listama (30+ vlaka) to su stotine elemenata koje browser boji i van ekrana.
+   content-visibility:auto preskače render/layout redova koji nisu vidljivi →
+   glatko skrolanje bez obzira na broj vlaka. 'auto 150px' pamti stvarnu visinu
+   reda nakon prvog prikaza pa nema skakanja scrollbara. Isto za trag/doznaka
+   redove. scrollIntoView (aktivni red, selI) i dalje radi — forsira render. */
+.vrow { content-visibility:auto; contain-intrinsic-size:auto 150px; }
+.treg-row { content-visibility:auto; contain-intrinsic-size:auto 90px; }
+.doz-odjel-card { content-visibility:auto; contain-intrinsic-size:auto 74px; }
 .vcard-stripe { width:4px; flex-shrink:0; }
 .vcard-info { flex:1; padding:5px 8px; min-width:0; }
 .vcard-top { display:flex; align-items:baseline; justify-content:space-between; gap:5px; }
@@ -4416,7 +4435,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.34.0';
+const APP_VER = 'v3.34.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
