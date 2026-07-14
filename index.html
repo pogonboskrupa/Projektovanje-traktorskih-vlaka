@@ -3508,10 +3508,28 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
                      oninput="document.getElementById('refkarta-minlen-val').textContent=this.value+'px'">
               <span id="refkarta-minlen-val" style="font-size:11px;color:#f97316;min-width:28px;text-align:right;">25px</span>
             </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+              <span style="font-size:11px;color:#64748b;white-space:nowrap;" title="Zadrži samo deblje (olovkom) crtane linije — izbaci tanke štampane izohipse i tekst.">Debljina olovke:</span>
+              <input type="range" id="refkarta-bold" min="0" max="3" value="1" style="flex:1;accent-color:#22c55e;"
+                     oninput="document.getElementById('refkarta-bold-val').textContent=this.value==0?'sve':this.value">
+              <span id="refkarta-bold-val" style="font-size:11px;color:#22c55e;min-width:24px;text-align:right;">1</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+              <span style="font-size:11px;color:#64748b;white-space:nowrap;" title="Spoji krajeve linija koji su blizu i približno u istom smjeru — vlaka prekinuta na presjeku postaje jedna.">Spoji prekide:</span>
+              <input type="range" id="refkarta-join" min="0" max="40" value="14" style="flex:1;accent-color:#38bdf8;"
+                     oninput="document.getElementById('refkarta-join-val').textContent=this.value==0?'ne':this.value+'px'">
+              <span id="refkarta-join-val" style="font-size:11px;color:#38bdf8;min-width:28px;text-align:right;">14px</span>
+            </div>
             <button class="btn g" style="width:100%;font-size:12px;" id="refkarta-detect-btn"
                     onclick="refKartaRunDetect()">🔍 Detektuj vlake (beta)</button>
-            <button class="btn" style="width:100%;margin-top:5px;font-size:12px;background:#1e293b;color:#c084fc;border:1px solid #6b21a8;"
-                    onclick="nacrtajVlaku()">✏ Precrtaj novu vlaku</button>
+            <div style="border-top:1px dashed #1e293b;margin:8px 0 6px;padding-top:8px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:#cbd5e1;margin-bottom:6px;cursor:pointer;">
+                <input type="checkbox" id="refkarta-chain" checked style="width:14px;height:14px;accent-color:#c084fc;">
+                <span>🔗 Lančano trasiranje (auto sljedeća vlaka)</span>
+              </label>
+              <button class="btn" style="width:100%;font-size:12px;background:#1e293b;color:#c084fc;border:1px solid #6b21a8;"
+                      onclick="_refStartTrace()" title="Tapaj tačke duž vlake preko slike; dupli tap = kraj i (ako je lančano) odmah počni sljedeću.">✏ Trasiraj vlake preko slike</button>
+            </div>
           </div>
           <button id="refkarta-save-btn" class="btn" style="display:none;width:100%;margin-top:6px;background:#164e63;color:#38bdf8;border:1px solid #0e7490;font-size:12px;"
                   onclick="refKartaSaveToServer()">☁ Sačuvaj na server</button>
@@ -4435,7 +4453,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.35.0';
+const APP_VER = 'v3.36.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -11617,7 +11635,9 @@ map.on('dblclick', e => {
     if (actI !== null && vlake[actI].pts.length < 2) return;
     _dblClickGuard = true;
     setTimeout(() => { _dblClickGuard = false; }, 300);
-    stopAddLine();
+    // Lančano trasiranje: umjesto izlaska, sačuvaj i odmah počni sljedeću vlaku.
+    if (_chainTraceOn) _traceFinishAndNext();
+    else stopAddLine();
   }
 });
 
@@ -11836,7 +11856,16 @@ function toggleOvl() {}
 function setActiveTool(tool) {
   const prev = activeTool;
   // Stop previous tool internals without triggering setActiveTool again
-  if (prev === 'addline') _stopAddLine(false);
+  if (prev === 'addline') {
+    const leavingDraw = tool !== 'addline';
+    _stopAddLine(false);
+    // Napuštanje crtanja mimo "✓ Završi" (drugi alat/tab) — ugasi lančano trasiranje
+    // i odbaci zadnju praznu vlaku.
+    if (leavingDraw && _chainTraceOn) {
+      if (actI !== null && vlake[actI] && (vlake[actI].pts?.length || 0) < 2) _dropEmptyVlaka(actI);
+      _chainTraceOn = false;
+    }
+  }
   else if (prev === 'edit' || prev === 'delnode') _stopEdit(false);
   else if (prev === 'merge' && tool !== 'merge') _cancelMergeInternal();
 
@@ -11955,6 +11984,17 @@ function _stopAddLine(fromUser) {
   drawUndoStack = [];
   _updFabVisibility();
   if (fromUser) {
+    // Kraj lančanog trasiranja: zadnja (prazna) vlaka je auto-kreirana ali nikad
+    // nije trasirana — odbaci je da ne ostane prazan zapis.
+    const wasChain = _chainTraceOn;
+    _chainTraceOn = false;
+    if (wasChain && actI !== null && vlake[actI] && (vlake[actI].pts?.length || 0) < 2) {
+      _dropEmptyVlaka(actI);
+      if (bufLayers.length > 0) drawBuffers();
+      setActiveTool('select');
+      rndList();
+      return;
+    }
     if (actI !== null) { updateVlakaLabel(actI); sbFlushVlaka(actI); }
     if (bufLayers.length > 0) drawBuffers();
     setActiveTool('select');
@@ -12602,6 +12642,45 @@ function nacrtajVlaku() {
       }
     }, 30);
   });
+}
+
+// ── LANČANO TRASIRANJE PREKO REFERENTNE SLIKE ────────────────────────────────
+// Cilj: brzo prevesti ručno ucrtane vlake sa (poravnate) slike u prave vlake bez
+// izlaska iz crtanja poslije svake. Tapaš tačke duž vlake, dupli tap = kraj te
+// vlake; ako je lančano uključeno, ODMAH se kreira i aktivira sljedeća vlaka.
+let _chainTraceOn = false;
+
+function _refStartTrace() {
+  if (isReadOnly()) { showToast('Pregledni nalog — samo čitanje'); return; }
+  if (!_aktivniProjektId) { showToast('⚠ Prvo aktiviraj projekat'); return; }
+  _chainTraceOn = document.getElementById('refkarta-chain')?.checked !== false;
+  switchTab('karta');
+  addV().then(() => {
+    if (actI === null) return;
+    mtAddLine();
+    showToast('✏ Tapaj tačke duž vlake · dupli tap = kraj' + (_chainTraceOn ? ' → sljedeća' : ''));
+  });
+}
+
+// Tiho ukloni praznu vlaku (0–1 tačaka) — bez potvrde/servera (prazne se ni ne
+// šalju na server, vidi _sbFlushVlakaImpl). Koristi se za odbacivanje zadnje
+// (prazne) lančane vlake kad korisnik završi trasiranje.
+function _dropEmptyVlaka(i) {
+  const v = vlake[i];
+  if (!v || (v.pts && v.pts.length >= 2)) return false;
+  [v.poly, v.labelMk, v.lagerMk, ...(v.extraLabels || []), ...(v.wpts || [])]
+    .filter(Boolean).forEach(l => { try { map.removeLayer(l); } catch(e) {} });
+  vlake.splice(i, 1);
+  if (actI === i) actI = null; else if (actI > i) actI--;
+  _saveLocalVlake();
+  return true;
+}
+
+function _traceFinishAndNext() {
+  const prevNm = actI !== null ? (vlake[actI]?.nm || '') : '';
+  if (actI !== null) { updateVlakaLabel(actI); sbFlushVlaka(actI); }
+  showToast('✓ ' + prevNm + ' — sljedeća vlaka');
+  addV().then(() => { if (actI !== null) mtAddLine(); });
 }
 
 let _addVBusy = false;
@@ -16889,6 +16968,8 @@ function refKartaRunDetect() {
   const mode = document.getElementById('refkarta-detect-mode').value;
   const threshold = parseInt(document.getElementById('refkarta-thr').value);
   const minLen    = parseInt(document.getElementById('refkarta-minlen').value);
+  const boldPasses = parseInt(document.getElementById('refkarta-bold').value) || 0;
+  const joinPx     = parseInt(document.getElementById('refkarta-join').value) || 0;
   let targetColor = null, colorTol = 70;
   if (mode === 'color') {
     const hex = document.getElementById('refkarta-detect-color').value;
@@ -16896,7 +16977,7 @@ function refKartaRunDetect() {
     colorTol = parseInt(document.getElementById('refkarta-color-tol').value);
   }
   setTimeout(() => {
-    try { _refKartaDoDetect(threshold, minLen, mode, targetColor, colorTol); }
+    try { _refKartaDoDetect(threshold, minLen, mode, targetColor, colorTol, boldPasses, joinPx); }
     catch(err) { showToast('⚠ Greška u detekciji: ' + err.message); }
     finally { btn.textContent = '🔍 Detektuj vlake (beta)'; btn.disabled = false; }
   }, 60);
@@ -16908,7 +16989,8 @@ function _colorDistRGB(r1, g1, b1, r2, g2, b2) {
   return Math.sqrt((r1-r2)**2 + (g1-g2)**2 + (b1-b2)**2);
 }
 
-function _refKartaDoDetect(threshold, minLen, mode, targetColor, colorTol) {
+function _refKartaDoDetect(threshold, minLen, mode, targetColor, colorTol, boldPasses, joinPx) {
+  boldPasses = boldPasses || 0; joinPx = joinPx || 0;
   // 1. Downsample image for performance (max 1200px wide)
   const MAX_W = 1200;
   const scale = Math.min(1, MAX_W / _refImg.width);
@@ -16965,12 +17047,22 @@ function _refKartaDoDetect(threshold, minLen, mode, targetColor, colorTol) {
   // 2c. Remove small connected components (text, numbers, kote)
   _refRemoveSmallComponents(bin, W, H, Math.max(20, Math.round(W * 0.025)));
 
+  // 2d. Filter debljine — zadrži SAMO deblje (olovkom) crtane linije, izbaci
+  // tanke štampane izohipse/tekst/sitne granice. Ključno za ovakvu podlogu gdje
+  // je ručna mreža vlaka nacrtana b: erodiraj boldPasses puta u kopiju pa zadrži
+  // samo komponente koje prežive eroziju (imaju "srž" → potez je bar 2*boldPasses+1 px debeo).
+  if (boldPasses > 0) _refBoldFilter(bin, W, H, boldPasses);
+
   // 3. Zhang-Suen morphological thinning → 1-pixel skeleton
   _zhangSuenThin(bin, W, H);
 
   // 4. Trace skeleton pixels into ordered polylines
   const scaledMinLen = Math.max(3, Math.round(minLen * scale));
-  const paths = _traceSkeleton(bin, W, H, scaledMinLen);
+  let paths = _traceSkeleton(bin, W, H, scaledMinLen);
+
+  // 4b. Spoji prekinute segmente — krajevi blizu i približno kolinearni postaju
+  // jedna linija (vlaka isprekidana na presjeku s drugom vlakom/putem).
+  if (joinPx > 0) paths = _refJoinPaths(paths, Math.max(2, Math.round(joinPx * scale)));
 
   // 5. Convert pixel [x,y] → [lat,lon]
   const [[south, west], [north, east]] = _refBounds;
@@ -16998,6 +17090,100 @@ function _refKartaDoDetect(threshold, minLen, mode, targetColor, colorTol) {
   document.getElementById('refkarta-imp-count').textContent = `(${_refDetectedLines.length})`;
   document.getElementById('refkarta-imp-vis').checked = true;
   showToast(`✓ Detektovano ${_refDetectedLines.length} linija`);
+}
+
+// Zadrži samo DEBLJE poteze (ručno crtane vlake), izbaci tanke štampane linije.
+// Erodira `passes` puta u kopiju (4-susjedstvo); komponenta u bin[] se zadrži
+// samo ako ima bar jedan preživjeli ("srž") piksel — tanke linije (1-2px:
+// izohipse, tekst) potpuno nestanu erozijom, deblji potezi olovke ostaju.
+function _refBoldFilter(bin, W, H, passes) {
+  const core = bin.slice();
+  const tmp = new Uint8Array(W * H);
+  for (let p = 0; p < passes; p++) {
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (!core[i]) { tmp[i] = 0; continue; }
+        const up = y > 0 ? core[i - W] : 0, dn = y < H - 1 ? core[i + W] : 0;
+        const lf = x > 0 ? core[i - 1] : 0, rt = x < W - 1 ? core[i + 1] : 0;
+        tmp[i] = (up && dn && lf && rt) ? 1 : 0;
+      }
+    }
+    core.set(tmp);
+  }
+  const labels = new Int32Array(W * H);
+  let nl = 1;
+  for (let s = 0; s < W * H; s++) {
+    if (!bin[s] || labels[s]) continue;
+    const q = [s]; labels[s] = nl; let head = 0, hasCore = false;
+    const comp = [s];
+    while (head < q.length) {
+      const idx = q[head++];
+      if (core[idx]) hasCore = true;
+      const cx = idx % W, cy = (idx - cx) / W;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const nx = cx + dx, ny = cy + dy;
+          if (nx >= 0 && nx < W && ny >= 0 && ny < H) {
+            const ni = ny * W + nx;
+            if (bin[ni] && !labels[ni]) { labels[ni] = nl; q.push(ni); comp.push(ni); }
+          }
+        }
+      }
+    }
+    if (!hasCore) for (const ci of comp) bin[ci] = 0;
+    nl++;
+  }
+}
+
+// Spoji krajeve traceovanih putanja koji su blizu (< maxD px) I približno u
+// istom smjeru (kut između pravaca krajeva < ~35°) — vlaka prekinuta na presjeku
+// postaje jedna neprekinuta linija. Greedy: uvijek spoji najbliži validan par.
+function _refJoinPaths(paths, maxD) {
+  paths = paths.filter(p => p.length >= 2).map(p => p.slice());
+  const _ang = (a, b) => Math.atan2(b[1] - a[1], b[0] - a[0]);
+  const _angDiff = (x, y) => { let d = Math.abs(x - y) % (2 * Math.PI); if (d > Math.PI) d = 2 * Math.PI - d; return d; };
+  const MAXANG = 35 * Math.PI / 180;
+  let merged = true, guard = 0;
+  while (merged && guard++ < 2000) {
+    merged = false;
+    let best = null, bestD = maxD + 1;
+    for (let i = 0; i < paths.length; i++) {
+      for (let j = i + 1; j < paths.length; j++) {
+        const A = paths[i], B = paths[j];
+        // 4 kombinacije kraj-kraj: A.start/A.end × B.start/B.end
+        const ends = [
+          { ai: 0, bi: 0 }, { ai: 0, bi: B.length - 1 },
+          { ai: A.length - 1, bi: 0 }, { ai: A.length - 1, bi: B.length - 1 }
+        ];
+        for (const e of ends) {
+          const pa = A[e.ai], pb = B[e.bi];
+          const d = Math.hypot(pa[0] - pb[0], pa[1] - pb[1]);
+          if (d >= bestD) continue;
+          // Smjer A na kraju e.ai i B na kraju e.bi — moraju biti suprotni (nastavak)
+          const aInner = A[e.ai === 0 ? Math.min(1, A.length - 1) : A.length - 2];
+          const bInner = B[e.bi === 0 ? Math.min(1, B.length - 1) : B.length - 2];
+          const angA = _ang(aInner, pa);   // ulazni smjer u spojnu tačku A
+          const angB = _ang(pb, bInner);   // izlazni smjer iz spojne tačke B
+          if (_angDiff(angA, angB) > MAXANG) continue;
+          best = { i, j, ...e }; bestD = d;
+        }
+      }
+    }
+    if (best) {
+      const A = paths[best.i], B = paths[best.j];
+      const aStart = best.ai === 0, bEnd = best.bi === B.length - 1;
+      let a2 = aStart ? A.slice().reverse() : A;   // spojna tačka A na kraj
+      let b2 = bEnd ? B.slice().reverse() : B;      // spojna tačka B na početak
+      const joined = a2.concat(b2);
+      paths.splice(Math.max(best.i, best.j), 1);
+      paths.splice(Math.min(best.i, best.j), 1);
+      paths.push(joined);
+      merged = true;
+    }
+  }
+  return paths;
 }
 
 // Remove small connected components from binary image (filters text, numbers, kote)
