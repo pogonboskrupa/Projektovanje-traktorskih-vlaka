@@ -166,6 +166,41 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Bez ovih override-a WebView za JS alert()/confirm() prikazuje SVOJ
+            // default dijalog sa naslovom "The page at 'https://appassets...' says:"
+            // (URL porijekla umjesto imena aplikacije) — zbunjujuće za korisnika jer
+            // app nikad ne izgleda kao da je učitana sa "web stranice". Ovdje pravimo
+            // identičan dijalog ali sa nazivom aplikacije kao naslovom.
+            @Override
+            public boolean onJsAlert(WebView view, String url, String message,
+                    final android.webkit.JsResult result) {
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle(getString(R.string.app_name))
+                        .setMessage(message)
+                        .setPositiveButton(android.R.string.ok,
+                                (dialog, which) -> result.confirm())
+                        .setOnCancelListener(dialog -> result.cancel())
+                        .setCancelable(false)
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsConfirm(WebView view, String url, String message,
+                    final android.webkit.JsResult result) {
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle(getString(R.string.app_name))
+                        .setMessage(message)
+                        .setPositiveButton(android.R.string.ok,
+                                (dialog, which) -> result.confirm())
+                        .setNegativeButton(android.R.string.cancel,
+                                (dialog, which) -> result.cancel())
+                        .setOnCancelListener(dialog -> result.cancel())
+                        .setCancelable(false)
+                        .show();
+                return true;
+            }
+
             @Override
             public boolean onShowFileChooser(WebView wv,
                     ValueCallback<Uri[]> filePathCallback,
