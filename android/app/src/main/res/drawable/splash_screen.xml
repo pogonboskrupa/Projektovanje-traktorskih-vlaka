@@ -1,7 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/colorSplash" />
-    <item>
+    <!-- splash_logo.png je u density-generičkom drawable/ folderu (bez -mdpi/-xhdpi/...
+         podfoldera), pa ga Android tretira kao mdpi baseline i crta ga na KONSTANTNIH
+         432dp (njegova stvarna piksel veličina) bez obzira na gustinu/veličinu ekrana —
+         na tipičnom telefonu (širina ekrana ~360-420dp) to je skoro cijela širina i
+         otprilike pola visine ekrana. Eksplicitna width/height na layer-list item-u
+         (podržano od API 23, minSdk ovdje je 24) fiksira stvarnu prikazanu veličinu. -->
+    <item
+        android:width="180dp"
+        android:height="180dp"
+        android:gravity="center">
         <bitmap
             android:src="@drawable/splash_logo"
             android:gravity="center" />
