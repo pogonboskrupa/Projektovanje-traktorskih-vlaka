@@ -4110,6 +4110,14 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
         </div>
 
         <div class="sec">
+          <div class="sec-t">🌳 Stabla van dohvata vitla</div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:8px;">Učitaj KML sa pozicijama doznačenih stabala (Point) — automatski se označe i prebroje ona van dosega vitla (koristi istu buffer zonu kao "Buffer zona vlaka" iznad, trenutno <span id="doz-trees-radius">80</span> m).</div>
+          <input type="file" id="doz-trees-file" accept=".kml" style="display:none;" onchange="dozTreesLoadKml(event)">
+          <button class="btn b" style="width:100%;margin:0;" onclick="document.getElementById('doz-trees-file').click()">📂 Učitaj KML sa stablima</button>
+          <div id="doz-trees-summary"></div>
+        </div>
+
+        <div class="sec">
           <button class="btn" id="doz-share-code-btn" style="display:none;background:#0f172a;border:1px solid #38bdf8;color:#38bdf8;font-size:12px;margin-bottom:6px;" onclick="shareDoznakaCode()">🔑 Podijeli šifrom (teren)</button>
           <button class="btn" style="background:#2d0a0a;border:1px solid #7f1d1d;color:#f87171;font-size:12px;" onclick="dozDeleteOdjel()">🗑 Obriši odjel</button>
         </div>
@@ -4453,7 +4461,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.42.0';
+const APP_VER = 'v3.43.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -29369,6 +29377,7 @@ async function dozSelectOdjel(id) {
   _dozSelId = id;
   _OL.save(_OL.DOZ_SEL_ID, id);
   _dozClearOverview();
+  dozTreesClear();
   dozRenderOdjeli();
   _dozSubProject(id);
   const odjel = _dozOdjeli.find(o => o.id === id);
@@ -29920,6 +29929,9 @@ function dozLinkProjektChange() {
 
 function dozBufChange() {
   _dozBufRadius = parseInt(document.getElementById('doz-buf-sel').value) / 2;
+  const lbl = document.getElementById('doz-trees-radius');
+  if (lbl) lbl.textContent = _dozBufRadius * 2;
+  if (_dozTreePts.length) dozTreesAnalyze();  // re-izračunaj sa novim radijusom
 }
 
 function dozDrawBuf() {
@@ -29971,6 +29983,153 @@ function dozClearBuf() {
   _dozBufLayers = []; _dozBufDeadLayers = [];
   const el = document.getElementById('doz-buf-status');
   if (el) el.style.display = 'none';
+}
+
+// ─── Stabla van dohvata vitla (KML uvoz + analiza dosega) ────────────────────
+// Ista logika kao "Buffer zona vlaka" (dozDrawBuf) — svaka vlaka se buffer-uje
+// za _dozBufRadius (m), a stablo je "u dosegu" ako upada u BILO KOJI od tih
+// buffera (union nije potreban, dovoljno je .some() preko svih poligona).
+let _dozTreePts   = [];  // [{lat, lon, name, desc, ext, inReach}]
+let _dozTreesLayer = null;
+
+function dozTreesLoadKml(ev) {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const doc = new DOMParser().parseFromString(e.target.result, 'text/xml');
+      const pts = [];
+      doc.querySelectorAll('Placemark').forEach(pm => {
+        const coordsEl = pm.querySelector('Point coordinates');
+        if (!coordsEl) return; // preskoči linije/poligone — ova sekcija je za pojedinačna stabla
+        const raw = (coordsEl.textContent || '').trim().split(',');
+        const lon = parseFloat(raw[0]), lat = parseFloat(raw[1]);
+        if (!isFinite(lat) || !isFinite(lon)) return;
+        pts.push({
+          lat, lon,
+          name: pm.querySelector('name')?.textContent?.trim() || '',
+          desc: pm.querySelector('description')?.textContent?.trim() || '',
+          ext: _parseKmlExtData(pm),
+          inReach: true
+        });
+      });
+      if (!pts.length) { showToast('⚠ KML nema tačaka (Point) — provjeri da li je fajl sa stablima'); return; }
+      _dozTreePts = pts;
+      dozTreesAnalyze();
+      showToast(`✅ Učitano ${pts.length} stabala iz KML-a`);
+    } catch(x) { showToast('⚠ Greška KML: ' + x.message); }
+  };
+  r.readAsText(file);
+}
+
+function dozTreesAnalyze() {
+  if (!_dozTreePts.length) return;
+  const odjel = _dozOdjeli.find(o => o.id === _dozSelId);
+  // Ne oslanjaj se na to da je korisnik ručno kliknuo "Prikaži" u sekciji Vlake —
+  // nađi vlake odjela isto kao što bi dozToggleVlake, samo bez mijenjanja UI stanja.
+  let idxs = _dozVlakeIdxs.length ? _dozVlakeIdxs
+    : (_dozLinkedProjektId
+        ? vlake.map((v,i) => v.projektId === _dozLinkedProjektId ? i : -1).filter(i => i >= 0)
+        : (odjel ? _dozFindVlakeInBoundary(odjel) : []));
+  if (!idxs.length) {
+    showToast('⚠ Nema pronađenih vlaka za ovaj odjel — poveži projekat vlaka u sekciji "Vlake" iznad');
+    return;
+  }
+  const radius = _dozBufRadius || 40;
+  const polys = [];
+  idxs.forEach(i => {
+    const v = vlake[i];
+    if (!v || v.pts.length < 2) return;
+    try {
+      const line = turf.lineString(v.pts.map(p => [p.lo, p.la]));
+      const buf = turf.buffer(line, radius, { units: 'meters', steps: 8 });
+      if (buf) polys.push(buf);
+    } catch(e) {}
+  });
+  let inCount = 0, outCount = 0;
+  _dozTreePts.forEach(t => {
+    const pt = turf.point([t.lon, t.lat]);
+    t.inReach = polys.some(p => { try { return turf.booleanPointInPolygon(pt, p); } catch(e) { return false; } });
+    if (t.inReach) inCount++; else outCount++;
+  });
+  _dozRenderTreeMarkers();
+  _dozRenderTreesSummary(inCount, outCount, radius * 2);
+}
+
+function _dozRenderTreeMarkers() {
+  if (_dozTreesLayer) { try { map.removeLayer(_dozTreesLayer); } catch(e) {} }
+  _dozTreesLayer = L.layerGroup().addTo(map);
+  _dozTreePts.forEach(t => {
+    const col = t.inReach ? '#4ade80' : '#ef4444';
+    const m = L.circleMarker([t.lat, t.lon], {
+      radius: t.inReach ? 4 : 6, color: '#fff', weight: 1, fillColor: col, fillOpacity: 0.95
+    });
+    const extRows = Object.entries(t.ext || {}).map(([k, v]) =>
+      `<div><b>${_escHtml(k)}:</b> ${_escHtml(v)}</div>`).join('');
+    m.bindPopup(`<div style="min-width:160px;font-size:12px;color:#1e293b;">
+      <b>${_escHtml(t.name || 'Stablo')}</b>
+      <div style="margin:4px 0;font-weight:600;color:${t.inReach ? '#16a34a' : '#dc2626'};">
+        ${t.inReach ? '✓ U dosegu vitla' : '⚠ VAN dosega vitla'}
+      </div>
+      ${t.desc ? `<div style="margin-bottom:4px;">${_escHtml(t.desc)}</div>` : ''}
+      ${extRows}
+    </div>`);
+    m.addTo(_dozTreesLayer);
+  });
+}
+
+function _dozRenderTreesSummary(inCount, outCount, totalWidthM) {
+  const el = document.getElementById('doz-trees-summary');
+  if (!el) return;
+  const total = inCount + outCount;
+  el.innerHTML = `
+    <div style="display:flex;gap:6px;margin:8px 0;">
+      <div style="flex:1;background:#0f172a;border:1px solid #1e3a5f;border-radius:6px;padding:8px 4px;text-align:center;">
+        <div style="font-size:18px;font-weight:700;color:#e2e8f0;">${total}</div>
+        <div style="font-size:9.5px;color:#64748b;">Ukupno stabala</div>
+      </div>
+      <div style="flex:1;background:#0f172a;border:1px solid #7f1d1d;border-radius:6px;padding:8px 4px;text-align:center;">
+        <div style="font-size:18px;font-weight:700;color:#ef4444;">${outCount}</div>
+        <div style="font-size:9.5px;color:#64748b;">Van dosega (${totalWidthM}m)</div>
+      </div>
+      <div style="flex:1;background:#0f172a;border:1px solid #14532d;border-radius:6px;padding:8px 4px;text-align:center;">
+        <div style="font-size:18px;font-weight:700;color:#4ade80;">${inCount}</div>
+        <div style="font-size:9.5px;color:#64748b;">U dosegu</div>
+      </div>
+    </div>
+    <button class="btn b" style="width:100%;font-size:11px;padding:6px;margin-bottom:6px;" onclick="dozTreesExportOut()">⬇ Izvezi listu van dosega (KML)</button>
+    <button class="btn gr" style="width:100%;font-size:11px;padding:6px;" onclick="dozTreesClear()">✕ Ukloni stabla sa karte</button>
+  `;
+}
+
+function dozTreesClear() {
+  if (_dozTreesLayer) { try { map.removeLayer(_dozTreesLayer); } catch(e) {} _dozTreesLayer = null; }
+  _dozTreePts = [];
+  const el = document.getElementById('doz-trees-summary');
+  if (el) el.innerHTML = '';
+}
+
+function dozTreesExportOut() {
+  const out = _dozTreePts.filter(t => !t.inReach);
+  if (!out.length) { showToast('Nema stabala van dosega'); return; }
+  const odjel = _dozOdjeli.find(o => o.id === _dozSelId);
+  const placemarks = out.map(t => `  <Placemark>
+    <name>${_escXml(t.name || 'Stablo')}</name>
+    <description>${_escXml(t.desc || '')}</description>
+    <Point><coordinates>${t.lon},${t.lat},0</coordinates></Point>
+  </Placemark>`).join('\n');
+  const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+<name>Van dosega vitla - ${_escXml(odjel?.name || '')}</name>
+${placemarks}
+</Document></kml>`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }));
+  a.download = `van_dosega_${(odjel?.name || 'odjel').replace(/[^a-zA-Z0-9_\-]/g, '_')}.kml`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
 // ─── Status odjela (Aktivno / Pauza / Završeno) ──────────────────
@@ -31450,6 +31609,7 @@ function dozBackToList() {
   dozCancelDraw();
   if (_dozVlakeVisible) dozToggleVlake();   // toggle sam gasi flag i skida slojeve
   dozClearBuf();
+  dozTreesClear();
   [_dozBoundaryLayer, _dozTracksLayer, _dozMarkingsLayer, _dozBandsLayer, _dozGpsTrackLayer].forEach(l => { if (l) map.removeLayer(l); });
   _dozBoundaryLayer = _dozTracksLayer = _dozMarkingsLayer = _dozBandsLayer = _dozGpsTrackLayer = null;
   document.getElementById('doz-panel-list').style.display   = 'flex';
