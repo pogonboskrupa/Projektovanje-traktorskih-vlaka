@@ -4461,7 +4461,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.44.0';
+const APP_VER = 'v3.45.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -19266,7 +19266,26 @@ let bufLayers = []; // L.polygon layers for buffers
 let deadLayers = []; // L.polygon layers for dead zones
 
 function onBufChange() {
-  bufRadius = parseInt(document.getElementById('buf-sel').value) / 2;
+  _syncBufRadiusEverywhere(parseInt(document.getElementById('buf-sel').value));
+}
+
+// Jedan zajednički buffer radijus za: (1) "Vlake" alat na karti (bufRadius/buf-sel),
+// (2) Doznaka "Buffer zona vlaka" (_dozBufRadius/doz-buf-sel), (3) analizu stabala
+// van dosega. Promjena bilo gdje se povlači svuda — inače bi korisnik morao ručno
+// ponavljati istu promjenu na dva različita mjesta, sa rizikom da se rasinhronizuju
+// (npr. stabla se broje sa 80m dok je Vlake alat već promijenjen na 100m).
+function _syncBufRadiusEverywhere(meters) {
+  bufRadius = meters / 2;
+  _dozBufRadius = meters / 2;
+  const mainSel = document.getElementById('buf-sel');
+  const dozSel  = document.getElementById('doz-buf-sel');
+  if (mainSel && +mainSel.value !== meters) mainSel.value = meters;
+  if (dozSel && +dozSel.value !== meters) dozSel.value = meters;
+  const lbl = document.getElementById('doz-trees-radius');
+  if (lbl) lbl.textContent = meters;
+  if (bufLayers.length > 0) drawBuffers();
+  if (typeof _dozBufLayers !== 'undefined' && _dozBufLayers.length > 0) dozDrawBuf();
+  if (typeof _dozTreePts !== 'undefined' && _dozTreePts.length) dozTreesAnalyze();
 }
 
 function _bufGetColor()   { return document.getElementById('buf-col-pick')?.value   || '#60a5fa'; }
@@ -29933,10 +29952,7 @@ function dozLinkProjektChange() {
 }
 
 function dozBufChange() {
-  _dozBufRadius = parseInt(document.getElementById('doz-buf-sel').value) / 2;
-  const lbl = document.getElementById('doz-trees-radius');
-  if (lbl) lbl.textContent = _dozBufRadius * 2;
-  if (_dozTreePts.length) dozTreesAnalyze();  // re-izračunaj sa novim radijusom
+  _syncBufRadiusEverywhere(parseInt(document.getElementById('doz-buf-sel').value));
 }
 
 function dozDrawBuf() {
