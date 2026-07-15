@@ -121,13 +121,17 @@ const _OL = {
 
   // Povećaj brojač pokušaja za operaciju koja je pala ne-mrežnom greškom.
   // Vraća true ako je operaciju trebalo odbaciti (prešla limit pokušaja).
-  bumpRetry(key, maxRetries) {
+  // errInfo (opciono) { code, message } se pamti na op._lastErr — bez ovoga
+  // korisnik na terenu nema način da vidi ZAŠTO nešto ne sinkronizira sve dok
+  // se ne odbaci nakon 5 pokušaja (vidi "Pending sync operacije" panel).
+  bumpRetry(key, maxRetries, errInfo) {
     try {
       const k = String(key);
       const q = this.loadQueue();
       const op = q.find(o => String(o._qid ?? o.ts) === k);   // D2-B: po _qid
       if (!op) return false;
       op._retries = (op._retries || 0) + 1;
+      if (errInfo) op._lastErr = errInfo;
       if (op._retries >= (maxRetries || 5)) {
         const nq = q.filter(o => String(o._qid ?? o.ts) !== k);
         localStorage.setItem(this.QUEUE, JSON.stringify(nq));
