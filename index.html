@@ -3941,6 +3941,12 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
         </div>
 
         <div class="sec">
+          <div class="sec-t">🌳 Doznačena stabla (KML tačke)</div>
+          <div id="doz-point-kml-list"><div class="doz-empty">Učitavam...</div></div>
+          <button class="btn" style="background:#0f172a;border:1px solid #1e3a5f;color:#94a3b8;font-size:11px;margin-top:6px;" onclick="openGraniceModal()">🗺 Upravljaj KML slojevima…</button>
+        </div>
+
+        <div class="sec">
           <div class="sec-t">🗺 Obilježi zonu na mapi</div>
           <button class="btn b" onclick="dozShowTypePicker()" style="margin-bottom:0;">✏ Nacrtaj plohu</button>
         </div>
@@ -4323,7 +4329,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.27.2';
+const APP_VER = 'v3.28.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -16787,7 +16793,12 @@ function pkmlStyled(doc, opts) {
     pm.querySelectorAll('Point').forEach(pt => {
       const cs = pcs(pt.querySelector('coordinates')?.textContent);
       if (cs.length > 0) {
-        const m = L.circleMarker(cs[0], { radius: 4, color: opts.color, fillColor: opts.color, fillOpacity: 0.8 });
+        // opts.opacity dolazi iz sačuvanog stila (loadKmlStyleFor) — bez ovoga bi tačke
+        // pri SVAKOM svježem učitavanju (reload/relogin) uvijek iscrtale fiksnih 0.8,
+        // pa bi sačuvana providnost izgledala kao da se "ne drži" dok se ručno ne dirne
+        // slider (tek applyKmlStyle je ranije ispravno primjenjivao op na fillOpacity).
+        const op = opts.opacity ?? 0.9;
+        const m = L.circleMarker(cs[0], { radius: 4, color: opts.color, opacity: op, fillColor: opts.color, fillOpacity: op });
         m._kmlIsPoint = true;
         m._kmlName = name; m._kmlDesc = desc; m._kmlExtData = extData;
         if (name) m.bindTooltip(_escHtml(name), { sticky: true });
@@ -28955,6 +28966,61 @@ function dozRenderDetail() {
       </div>`;
     }).join('');
   }
+
+  dozRenderPointKmlStyles();
+}
+
+// ─── Doznačena stabla (KML tačke) — boja/providnost, reuse setKmlColor/setKmlOpacity ──
+// Isti mehanizam kao Granice modal (kmlLs + applyKmlStyle + saveKmlStyles) — izmjena
+// se čuva lokalno po korisniku (localStorage), admin je može objaviti kao default za
+// sve preko istog "Sačuvaj kao default" dugmeta u Granice modalu. Ovdje samo filtriramo
+// na slojeve koji stvarno sadrže tačke (Point placemarks), da ne zatrpavamo doznaka tab
+// linijama/poligonima granica koje tu nisu bitne.
+function _dozPointKmlLayers() {
+  return kmlLs.map((k, i) => ({ k, i })).filter(({ k }) => {
+    if (!k.grp) return false;
+    let has = false;
+    k.grp.eachLayer(l => { if (l._kmlIsPoint) has = true; });
+    return has;
+  });
+}
+
+function dozRenderPointKmlStyles() {
+  const el = document.getElementById('doz-point-kml-list');
+  if (!el) return;
+  const items = _dozPointKmlLayers();
+  if (!items.length) {
+    el.innerHTML = '<div class="doz-empty">Nema učitanih KML tačaka. Uvezi KML sa doznačenim stablima kroz "Upravljaj KML slojevima" ispod.</div>';
+    return;
+  }
+  el.innerHTML = items.map(({ k, i }) => {
+    const op = Math.round((k.opacity ?? 0.9) * 100);
+    const shortName = k.name.includes('/') ? k.name.split('/').slice(1).join('/') : k.name;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #1e293b;">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#cbd5e1;" title="${_escHtml(k.name)}">${_escHtml(shortName)}</span>
+      <div class="gl-swatch-wrap" title="Boja tačaka">
+        <span class="gl-swatch" id="doz-pk-sw-${i}" style="width:18px;height:18px;background:${k.col};"></span>
+        <input type="color" value="${k.col}" style="width:18px;height:18px;" oninput="setDozPointKmlColor(${i},this.value)">
+      </div>
+      <input type="range" min="10" max="100" value="${op}" style="width:70px;accent-color:#4ade80;" title="Providnost tačaka"
+        oninput="setDozPointKmlOpacity(${i},this.value/100)" onchange="setDozPointKmlOpacity(${i},this.value/100)">
+      <span id="doz-pk-op-${i}" style="min-width:28px;text-align:right;font-size:10px;color:#94a3b8;">${op}%</span>
+    </div>`;
+  }).join('');
+}
+
+// Reuse postojećih setKmlColor/setKmlOpacity (perzistiraju preko saveKmlStyles) —
+// samo dodatno ažuriramo swatch/label direktno da izbjegnemo pun re-render liste
+// (i gubitak fokusa na range inputu) na svaki tick tokom prevlačenja slidera.
+function setDozPointKmlColor(i, val) {
+  setKmlColor(i, val);
+  const sw = document.getElementById('doz-pk-sw-' + i);
+  if (sw) sw.style.background = val;
+}
+function setDozPointKmlOpacity(i, val) {
+  setKmlOpacity(i, val);
+  const lbl = document.getElementById('doz-pk-op-' + i);
+  if (lbl) lbl.textContent = Math.round(val * 100) + '%';
 }
 
 // ─── GPS Tracking ─────────────────────────────────────────────────
