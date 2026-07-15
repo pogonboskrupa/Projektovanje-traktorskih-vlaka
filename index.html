@@ -4461,7 +4461,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.43.0';
+const APP_VER = 'v3.44.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -13245,6 +13245,10 @@ function stopRec() {
     }
   });
   if (bufLayers.length > 0) drawBuffers();
+  // Ako su doznaka stabla učitana za trenutno otvoreni odjel, tek snimljena vlaka
+  // može promijeniti ko je "u dosegu" — ponovo izračunaj bez traženja od korisnika
+  // da ručno klikne "Osvježi analizu".
+  if (typeof _dozTreePts !== 'undefined' && _dozTreePts.length && _dozSelId) dozTreesAnalyze();
   _updRecStatusBar();
   _showLagerDlg(actI);
   _updFabVisibility();
@@ -29435,6 +29439,7 @@ function _dozShowLinkedVlake() {
     if (btn) btn.textContent = '👁‍🗨 Sakrij';
     document.getElementById('doz-buf-section').style.display = 'block';
   }
+  if (typeof _dozTreePts !== 'undefined' && _dozTreePts.length) dozTreesAnalyze();
 }
 
 async function dozLoadLayers(projectId) {
@@ -30018,6 +30023,14 @@ function dozTreesLoadKml(ev) {
       if (!pts.length) { showToast('⚠ KML nema tačaka (Point) — provjeri da li je fajl sa stablima'); return; }
       _dozTreePts = pts;
       dozTreesAnalyze();
+      // Karta se ne pomjera sama — ako su stabla van trenutnog vidnog polja, korisnik
+      // vidi "ništa" iako su markeri stvarno nacrtani. Uvijek centriraj na njih.
+      if (_dozTreesLayer) {
+        try {
+          const b = _dozTreesLayer.getBounds();
+          if (b.isValid()) map.fitBounds(b, { padding: [30, 30] });
+        } catch(e) {}
+      }
       showToast(`✅ Učitano ${pts.length} stabala iz KML-a`);
     } catch(x) { showToast('⚠ Greška KML: ' + x.message); }
   };
@@ -30033,10 +30046,11 @@ function dozTreesAnalyze() {
     : (_dozLinkedProjektId
         ? vlake.map((v,i) => v.projektId === _dozLinkedProjektId ? i : -1).filter(i => i >= 0)
         : (odjel ? _dozFindVlakeInBoundary(odjel) : []));
-  if (!idxs.length) {
-    showToast('⚠ Nema pronađenih vlaka za ovaj odjel — poveži projekat vlaka u sekciji "Vlake" iznad');
-    return;
-  }
+  // VAŽNO: stabla se učitavaju i prikazuju NEZAVISNO od toga da li vlake već postoje —
+  // ako ih još nema, sva stabla su (ispravno) "van dosega" dok se prva vlaka ne snimi;
+  // čim se vlaka pojavi/promijeni (stopRec, dodavanje/uklanjanje krakova, promjena
+  // buffer radijusa, povezivanje projekta), dozTreesAnalyze() se zove ponovo i stabla
+  // koja upadnu u novi pojas postaju zelena — bez ponovnog učitavanja KML-a.
   const radius = _dozBufRadius || 40;
   const polys = [];
   idxs.forEach(i => {
@@ -30051,11 +30065,11 @@ function dozTreesAnalyze() {
   let inCount = 0, outCount = 0;
   _dozTreePts.forEach(t => {
     const pt = turf.point([t.lon, t.lat]);
-    t.inReach = polys.some(p => { try { return turf.booleanPointInPolygon(pt, p); } catch(e) { return false; } });
+    t.inReach = polys.length > 0 && polys.some(p => { try { return turf.booleanPointInPolygon(pt, p); } catch(e) { return false; } });
     if (t.inReach) inCount++; else outCount++;
   });
   _dozRenderTreeMarkers();
-  _dozRenderTreesSummary(inCount, outCount, radius * 2);
+  _dozRenderTreesSummary(inCount, outCount, radius * 2, !polys.length);
 }
 
 function _dozRenderTreeMarkers() {
@@ -30080,11 +30094,12 @@ function _dozRenderTreeMarkers() {
   });
 }
 
-function _dozRenderTreesSummary(inCount, outCount, totalWidthM) {
+function _dozRenderTreesSummary(inCount, outCount, totalWidthM, noVlakeYet) {
   const el = document.getElementById('doz-trees-summary');
   if (!el) return;
   const total = inCount + outCount;
   el.innerHTML = `
+    ${noVlakeYet ? `<div style="font-size:10.5px;color:#fbbf24;background:#3a2a0a;border:1px solid #78350f;border-radius:6px;padding:6px 8px;margin:8px 0 0;">⚠ Još nema snimljene vlake u ovom odjelu — sva stabla su prikazana kao "van dosega". Čim se vlaka snimi, stabla u pojasu automatski postaju zelena.</div>` : ''}
     <div style="display:flex;gap:6px;margin:8px 0;">
       <div style="flex:1;background:#0f172a;border:1px solid #1e3a5f;border-radius:6px;padding:8px 4px;text-align:center;">
         <div style="font-size:18px;font-weight:700;color:#e2e8f0;">${total}</div>
@@ -30099,6 +30114,7 @@ function _dozRenderTreesSummary(inCount, outCount, totalWidthM) {
         <div style="font-size:9.5px;color:#64748b;">U dosegu</div>
       </div>
     </div>
+    <button class="btn b" style="width:100%;font-size:11px;padding:6px;margin-bottom:6px;" onclick="dozTreesAnalyze()">↺ Osvježi analizu</button>
     <button class="btn b" style="width:100%;font-size:11px;padding:6px;margin-bottom:6px;" onclick="dozTreesExportOut()">⬇ Izvezi listu van dosega (KML)</button>
     <button class="btn gr" style="width:100%;font-size:11px;padding:6px;" onclick="dozTreesClear()">✕ Ukloni stabla sa karte</button>
   `;
