@@ -4482,7 +4482,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.48.0';
+const APP_VER = 'v3.49.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -12036,6 +12036,10 @@ function _stopAddLine(fromUser) {
     }
     if (actI !== null) { updateVlakaLabel(actI); sbFlushVlaka(actI); }
     if (bufLayers.length > 0) drawBuffers();
+    // Ručno crtana vlaka ne prolazi kroz stopRec() — ako su doznaka stabla učitana
+    // za trenutno otvoreni odjel, tek nacrtana vlaka može promijeniti ko je "u
+    // dosegu" isto kao snimljena; osvježi bez traženja ručnog klika.
+    if (typeof _dozTreePts !== 'undefined' && _dozTreePts.length && _dozSelId) dozTreesAnalyze();
     setActiveTool('select');
     if (actI !== null && vlake[actI]?.pts?.length > 0 && !vlake[actI]?.lager) _showLagerDlg(actI);
   }
@@ -30145,12 +30149,16 @@ function dozTreesLoadKml(ev) {
 function dozTreesAnalyze() {
   if (!_dozTreePts.length) return;
   const odjel = _dozOdjeli.find(o => o.id === _dozSelId);
-  // Ne oslanjaj se na to da je korisnik ručno kliknuo "Prikaži" u sekciji Vlake —
-  // nađi vlake odjela isto kao što bi dozToggleVlake, samo bez mijenjanja UI stanja.
-  let idxs = _dozVlakeIdxs.length ? _dozVlakeIdxs
-    : (_dozLinkedProjektId
-        ? vlake.map((v,i) => v.projektId === _dozLinkedProjektId ? i : -1).filter(i => i >= 0)
-        : (odjel ? _dozFindVlakeInBoundary(odjel) : []));
+  // UVIJEK svjež lookup nad vlake[] — _dozVlakeIdxs je samo UI-keš za prikaz liste
+  // u sekciji "Vlake" i ažurira se JEDINO kad se eksplicitno pozove
+  // _dozShowLinkedVlake(). Ako bismo ga koristili direktno ovdje (kao ranije),
+  // "Osvježi analizu" bi promašio SVAKU vlaku dodanu poslije prvog otvaranja liste
+  // — bez obzira da li je novododana (KML uvoz), novonacrtana (ručno crtanje, koje
+  // ne prolazi kroz stopRec) ili novosnimljena. Direktan filter po projektId je
+  // jeftin (par stotina vlaka najviše) i garantovano svjež.
+  const idxs = _dozLinkedProjektId
+    ? vlake.map((v, i) => v.projektId === _dozLinkedProjektId ? i : -1).filter(i => i >= 0)
+    : (odjel ? _dozFindVlakeInBoundary(odjel) : []);
   // VAŽNO: stabla se učitavaju i prikazuju NEZAVISNO od toga da li vlake već postoje —
   // ako ih još nema, sva stabla su (ispravno) "van dosega" dok se prva vlaka ne snimi;
   // čim se vlaka pojavi/promijeni (stopRec, dodavanje/uklanjanje krakova, promjena
