@@ -4482,7 +4482,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.47.0';
+const APP_VER = 'v3.48.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -29440,6 +29440,7 @@ async function dozSelectOdjel(id) {
   _dozRenderStatusRow();
   await dozLoadLayers(id);
   _dozAutoLinkVlake(odjel);
+  _dozTreesRestoreForOdjel(id);
   dozRenderDetail();
 }
 
@@ -30174,6 +30175,39 @@ function dozTreesAnalyze() {
   });
   _dozRenderTreeMarkers();
   _dozRenderTreesSummary(inCount, outCount, radius * 2, !polys.length);
+  _dozTreesSaveCache();
+}
+
+// ─── Trajno pamćenje učitanih stabala po odjelu (localStorage) ───────────────
+// Bez ovoga se _dozTreePts brisao svaki put kad se izađe iz detalja odjela
+// (dozBackToList/dozSelectOdjel) — korisnik je morao iznova učitavati isti KML.
+const _DOZ_TREES_DATA_KEY = 'tvlake_doz_trees_data';
+function _dozTreesSaveCache() {
+  if (!_dozSelId) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(_DOZ_TREES_DATA_KEY) || '{}');
+    if (_dozTreePts.length) {
+      all[_dozSelId] = _dozTreePts.map(t => ({ lat: t.lat, lon: t.lon, name: t.name, desc: t.desc, ext: t.ext }));
+    } else {
+      delete all[_dozSelId];
+    }
+    localStorage.setItem(_DOZ_TREES_DATA_KEY, JSON.stringify(all));
+  } catch(e) {}
+}
+function _dozTreesLoadCache(odjelId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(_DOZ_TREES_DATA_KEY) || '{}');
+    return all[odjelId] || null;
+  } catch(e) { return null; }
+}
+// Poziva se pri otvaranju detalja odjela — učita ranije snimljena stabla (ako ih ima)
+// bez traženja od korisnika da ponovo bira KML fajl.
+function _dozTreesRestoreForOdjel(odjelId) {
+  const cached = _dozTreesLoadCache(odjelId);
+  if (cached && cached.length) {
+    _dozTreePts = cached;
+    dozTreesAnalyze();
+  }
 }
 
 // ─── Stil tačaka stabala (boja/providnost) — pamti zadnje postavljeno ────────
@@ -30264,15 +30298,25 @@ function _dozRenderTreesSummary(inCount, outCount, totalWidthM, noVlakeYet) {
     </div>
     <button class="btn b" style="width:100%;font-size:11px;padding:6px;margin-bottom:6px;" onclick="dozTreesAnalyze()">↺ Osvježi analizu</button>
     <button class="btn b" style="width:100%;font-size:11px;padding:6px;margin-bottom:6px;" onclick="dozTreesExportOut()">⬇ Izvezi listu van dosega (KML)</button>
-    <button class="btn gr" style="width:100%;font-size:11px;padding:6px;" onclick="dozTreesClear()">✕ Ukloni stabla sa karte</button>
+    <button class="btn gr" style="width:100%;font-size:11px;padding:6px;" onclick="dozTreesRemoveSaved()">✕ Ukloni stabla sa karte</button>
   `;
 }
 
+// Čisti samo prikaz (mapa/panel) — koristi se interno pri prelasku na drugi odjel,
+// NE dira sačuvani keš (stabla ostaju zapamćena za odjel iz kojeg se izlazi).
 function dozTreesClear() {
   if (_dozTreesLayer) { try { map.removeLayer(_dozTreesLayer); } catch(e) {} _dozTreesLayer = null; }
   _dozTreePts = [];
   const el = document.getElementById('doz-trees-summary');
   if (el) el.innerHTML = '';
+}
+
+// Eksplicitno dugme "Ukloni stabla sa karte" — korisnik stvarno želi da ih se
+// riješi, pa se i sačuvani keš za ovaj odjel briše (inače bi se vratila pri
+// sljedećem otvaranju odjela).
+function dozTreesRemoveSaved() {
+  dozTreesClear();
+  _dozTreesSaveCache();  // _dozTreePts je sad prazan → ovo briše zapis za _dozSelId
 }
 
 function dozTreesExportOut() {
