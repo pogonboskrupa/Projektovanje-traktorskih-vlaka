@@ -4084,6 +4084,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
             </select>
             <div id="doz-link-status" style="font-size:10px;color:#52B788;margin-top:3px;"></div>
           </div>
+          <input type="file" id="doz-vlake-kml-file" accept=".kml" style="display:none;" onchange="dozVlakeLoadKml(event)">
+          <button class="btn b" style="width:100%;margin:0 0 6px;font-size:11px;padding:6px;" onclick="document.getElementById('doz-vlake-kml-file').click()">📂 Učitaj vlake (KML)</button>
           <div id="doz-vlake-list"><div class="doz-empty">Klikni "Prikaži" za vlake u odjelu</div></div>
           <div id="doz-buf-section" style="display:none;margin-top:8px;border-top:1px solid #1e293b;padding-top:8px;">
             <div style="font-size:11px;color:#94a3b8;margin-bottom:5px;font-weight:600;">📏 Buffer zona vlaka</div>
@@ -4480,7 +4482,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.46.0';
+const APP_VER = 'v3.47.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -29934,10 +29936,23 @@ function _dozRenderVlakeList() {
       <span style="width:8px;height:8px;border-radius:50%;background:${v.color};flex-shrink:0;"></span>
       <span style="color:#e2e8f0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v.nm}</span>
       <span style="color:#64748b;font-family:monospace;flex-shrink:0;">${lenStr}</span>
+      <button onclick="_dozRenameVlaka(${i})" title="Preimenuj" style="background:none;border:none;color:#64748b;font-size:12px;cursor:pointer;padding:2px 4px;flex-shrink:0;line-height:1;">✏</button>
     </div>`;
   });
   html += '</div>';
   list.innerHTML = html;
+}
+
+// Preimenuj vlaku/krak direktno iz Doznaka panela — bez potrebe da korisnik prebacuje
+// aktivni projekat na taj vlake projekat da bi mu se ta vlaka pojavila u tabu "Vlake".
+function _dozRenameVlaka(i) {
+  const v = vlake[i];
+  if (!v) return;
+  const nn = prompt('Novi naziv vlake/kraka:', v.nm);
+  if (!nn || !nn.trim() || nn.trim() === v.nm) return;
+  renameVlaka(i, nn.trim());
+  _dozRenderVlakeList();
+  if (_dozTreePts.length) dozTreesAnalyze();
 }
 
 function dozLinkProjektChange() {
@@ -29969,6 +29984,59 @@ function dozLinkProjektChange() {
     document.getElementById('doz-link-status').textContent = '';
     document.getElementById('doz-vlake-list').innerHTML = '<div class="doz-empty">Nema vlaka</div>';
   }
+}
+
+// ─── Učitaj vlake/krakove iz KML-a — pune, uređivane vlake (identično crtanju/snimanju) ──
+function dozVlakeLoadKml(ev) {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  if (!_dozLinkedProjektId) {
+    showToast('⚠ Prvo poveži odjel sa vlake projektom (padajući meni iznad)');
+    return;
+  }
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const doc = new DOMParser().parseFromString(e.target.result, 'text/xml');
+      const newIdxs = [];
+      doc.querySelectorAll('Placemark').forEach(pm => {
+        const lsEl = pm.querySelector('LineString coordinates');
+        if (!lsEl) return; // preskoči tačke (stabla) i poligone — ovo je uvoz vlaka/kraka
+        const cs = pcs(lsEl.textContent);
+        if (cs.length < 2) return;
+        const pts = cs.map(c => ({ la: c[0], lo: c[1], al: 0 }));
+        const nm = pm.querySelector('name')?.textContent?.trim() || `Vlaka ${vlake.length + 1}`;
+        const col = PAL[vlake.length % PAL.length];
+        const poly = L.polyline(pts.map(p => [p.la, p.lo]), { color: col, weight: 3 }).addTo(map);
+        // Identičan oblik objekta kao ručno crtanje/snimanje (vidi _routeToVlaka) —
+        // ista polja znače isti tretman svuda (rename, brisanje, buffer, sync, štampanje...).
+        vlake.push({
+          nm, br: vlake.length, kr: 0, strana: null, color: col, lager: '', pts, poly, wpts: [],
+          sbId: null, projektId: _dozLinkedProjektId,
+          projektantIme: typeof getIme === 'function' ? getIme() : '',
+          labelMk: null, lagerMk: null, extraLabels: [], updatedAt: new Date().toISOString()
+        });
+        newIdxs.push(vlake.length - 1);
+      });
+      if (!newIdxs.length) { showToast('⚠ KML nema linija (LineString) — provjeri da li je fajl sa vlakama'); return; }
+      newIdxs.forEach(i => updateVlakaLabel(i));
+      rndList();
+      newIdxs.forEach(i => sbFlushVlaka(i));  // isti sync kao svaka nova/izmijenjena vlaka
+      try {
+        const b = L.featureGroup(newIdxs.map(i => vlake[i].poly)).getBounds();
+        if (b.isValid()) map.fitBounds(b, { padding: [30, 30] });
+      } catch(e) {}
+      // Osvježi listu vlaka odjela (uključi nove), pokaži buffer sekciju i re-analiziraj
+      // stabla ako su učitana (_dozShowLinkedVlake to već radi preko postojeće petlje).
+      _dozShowLinkedVlake();
+      const status = document.getElementById('doz-link-status');
+      const p = _projekti.find(x => x.id === _dozLinkedProjektId);
+      if (status) status.innerHTML = `✔ Povezano: <b>${p?.odjel || '?'}</b> — ${vlake.filter(v => v.projektId === _dozLinkedProjektId).length} vlaka na mapi`;
+      showToast(`✅ Učitano ${newIdxs.length} vlaka/kraka iz KML-a — preimenuj po potrebi u tabu "Vlake"`);
+    } catch(x) { showToast('⚠ Greška KML: ' + x.message); }
+  };
+  r.readAsText(file);
 }
 
 function dozBufChange() {
