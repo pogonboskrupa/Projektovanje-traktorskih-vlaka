@@ -4329,7 +4329,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.28.0';
+const APP_VER = 'v3.28.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -27862,8 +27862,17 @@ async function _loadOneShp(bucketName, file, opts, extractOdjeli, existingPaths)
     try {
       const layer = L.geoJSON(f, {
         style: () => styleOpts,
-        pointToLayer: (_, ll) => L.circleMarker(ll, { radius: 4, ...styleOpts }),
+        // fillColor/fillOpacity eksplicitno (ne samo Leaflet default 0.2) — inače tačke
+        // pri prvom crtanju ne odražavaju sačuvanu providnost dok se slider ručno ne dirne.
+        pointToLayer: (_, ll) => L.circleMarker(ll, { radius: 4, ...styleOpts, fillColor: styleOpts.color, fillOpacity: styleOpts.opacity }),
       });
+      // Isti obrazac oznaka kao KML (pkmlStyled) — bez ovoga applyKmlStyle() (Granice
+      // modal + Doznaka "boja/providnost tačaka") tretira SVE SHP slojeve kao "liniju" i
+      // nasilno postavlja fillOpacity:0, pa tačke (npr. doznačena stabla iz .shp) izgledaju
+      // šuplje/nestaju kad se providnost dira, a novi Doznaka panel ih uopšte ne pronalazi.
+      const gType = f.geometry?.type || '';
+      if (gType === 'Point' || gType === 'MultiPoint') layer._kmlIsPoint = true;
+      else if (gType === 'Polygon' || gType === 'MultiPolygon') layer._kmlIsPolygon = true;
       if (nm) layer.bindTooltip(_escHtml(String(nm)), { sticky: true, opacity: 0.9 });
       layer.addTo(grp);
       // Permanentna labela na centru poligona
