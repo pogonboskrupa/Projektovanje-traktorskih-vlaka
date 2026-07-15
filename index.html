@@ -4307,6 +4307,9 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
           <span class="mdp-ico" style="color:#f59e0b;">🔧</span>
           <span id="edp-nm" onclick="edpRename()" title="Preimenuj vlaku">T1</span>
           <button id="edp-rename" onclick="edpRename()" title="Preimenuj vlaku">✏</button>
+          <div id="edp-color-swatch" title="Promijeni boju vlake" style="width:20px;height:20px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.35);flex-shrink:0;cursor:pointer;position:relative;overflow:hidden;">
+            <input type="color" id="edp-color-input" onchange="_edpColorPicked(this.value)" style="opacity:0;position:absolute;inset:0;width:100%;height:100%;cursor:pointer;padding:0;border:none;">
+          </div>
           <span id="edp-stats">0 m · 0 tač.</span>
         </div>
         <div id="edp-proj"></div>
@@ -4482,7 +4485,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.50.0';
+const APP_VER = 'v3.51.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -12101,6 +12104,20 @@ async function edpRename() {
   showToast('✏ Preimenovano u ' + nm);
 }
 
+// Promjena boje vlake/kraka POSLIJE snimanja/crtanja — do sada je boja bila
+// fiksna (dodijeljena samo pri kreiranju iz PAL palete po redoslijedu), bez
+// ikakvog načina da se promijeni. Radi u edit modu (🔧 Uredi), pogađa istu
+// vlaku/krak koja je trenutno otvorena za editovanje (actI).
+function _edpColorPicked(col) {
+  if (actI === null || !vlake[actI]) return;
+  const v = vlake[actI];
+  v.color = col;
+  try { v.poly.setStyle({ color: col }); } catch(e) {}
+  v.updatedAt = new Date().toISOString();
+  rndList();       // stripe boja u listi
+  sbFlushVlaka(actI);
+}
+
 function edpUndo() {
   if (actI === null || !vlake[actI] || _edUndoStack.length === 0) return;
   const snap = _edUndoStack.length > 1 ? _edUndoStack.pop() : _edUndoStack[0].map(p => ({...p}));
@@ -12124,6 +12141,10 @@ function mtEditLine() {
   map.doubleClickZoom.disable();
   document.getElementById('edit-panel').style.display = '';
   document.getElementById('edp-nm').textContent = vlake[actI].nm;
+  const _edpSw = document.getElementById('edp-color-swatch');
+  const _edpCi = document.getElementById('edp-color-input');
+  if (_edpSw) _edpSw.style.background = vlake[actI].color;
+  if (_edpCi) _edpCi.value = vlake[actI].color;
   const proj = (_projekti || []).find(p => p.id === vlake[actI].projektId);
   document.getElementById('edp-proj').innerHTML = proj
     ? '📁 <b>' + (proj.odjel || '—') + '</b>' + (proj.gj ? ' · ' + proj.gj : '')
