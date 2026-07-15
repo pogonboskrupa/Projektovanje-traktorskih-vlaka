@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -16,6 +17,11 @@ public class GpsService extends Service {
 
     private static final String CHANNEL_ID = "gps_recording";
     private static final int NOTIF_ID = 1001;
+    // CPU se ne smije uspavati dok se snima (ekran ugašen / app u pozadini) —
+    // bez ovoga Doze nakon nekog vremena zaustavi obradu GPS lokacija čak i
+    // dok foreground service formalno radi. Safety timeout 12h štiti od
+    // "zaboravljenog" lock-a ako servis ikad ne dobije "stop" akciju.
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
@@ -30,6 +36,7 @@ public class GpsService extends Service {
         String action = intent.getAction();
         if ("stop".equals(action)) {
             sendBroadcastToWeb("stop");
+            releaseWakeLock();
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
@@ -53,8 +60,23 @@ public class GpsService extends Service {
         String title = intent.getStringExtra("title");
         if (title == null) title = "GPS Snimanje";
 
+        acquireWakeLock();
         showForegroundNotification(title, "Traktorske vlake — GPS snimanje aktivno");
         return START_STICKY;
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) return;
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm == null) return;
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ussume:gps_recording");
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire(12 * 60 * 60 * 1000L);
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        wakeLock = null;
     }
 
     private void showForegroundNotification(String title, String body) {
@@ -123,5 +145,11 @@ public class GpsService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    @Override
+    public void onDestroy() {
+        releaseWakeLock();
+        super.onDestroy();
     }
 }

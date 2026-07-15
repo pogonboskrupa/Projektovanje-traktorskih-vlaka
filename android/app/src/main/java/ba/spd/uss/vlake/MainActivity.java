@@ -51,6 +51,14 @@ public class MainActivity extends Activity {
     private static final int REQ_BG_LOC = 3;
     private static final int REQ_CAMERA = 4;
     private android.webkit.PermissionRequest pendingCameraRequest;
+    // Postavlja se preko GpsBridge dok GPS snimanje (vlaka/trag/pojas) traje.
+    // WebView.onPause() je dokumentovano da "best-effort pauzira geolocation" —
+    // ako se pozove dok se snima, navigator.geolocation.watchPosition() prestaje
+    // primati nove tačke čim korisnik izađe iz app-a (ekran ugašen ili prebačen
+    // na drugu app), pa snimanje vlake/traga/pojasa izgleda "prekinuto" iako je
+    // foreground servis i dalje aktivan. Zato onPause() u Activity-ju MORA
+    // preskočiti webView.onPause() dok je snimanje u toku.
+    private volatile boolean isRecordingActive = false;
     private static final String APP_URL =
             "https://appassets.androidplatform.net/assets/index.html";
 
@@ -306,6 +314,7 @@ public class MainActivity extends Activity {
     class GpsBridge {
         @JavascriptInterface
         public void startRecording(String title) {
+            isRecordingActive = true;
             requestBackgroundLocationIfNeeded();
             Intent intent = new Intent(MainActivity.this, GpsService.class);
             intent.putExtra("title", title != null ? title : "GPS Snimanje");
@@ -318,6 +327,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void stopRecording() {
+            isRecordingActive = false;
             Intent intent = new Intent(MainActivity.this, GpsService.class);
             intent.setAction("stop");
             startService(intent);
@@ -492,7 +502,14 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        webView.onPause();
+        // Dok traje GPS snimanje NE smijemo pauzirati WebView — Android
+        // dokumentacija za WebView.onPause() eksplicitno navodi da pauzira i
+        // geolocation, što bi prekinulo watchPosition() čim korisnik izađe iz
+        // app-a. Foreground servis (GpsService) + partial wake lock drže CPU
+        // budnim, a nepauzirani WebView drži JS/GPS watch živim u pozadini.
+        if (!isRecordingActive) {
+            webView.onPause();
+        }
         super.onPause();
     }
 
