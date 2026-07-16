@@ -4307,9 +4307,6 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
           <span class="mdp-ico" style="color:#f59e0b;">🔧</span>
           <span id="edp-nm" onclick="edpRename()" title="Preimenuj vlaku">T1</span>
           <button id="edp-rename" onclick="edpRename()" title="Preimenuj vlaku">✏</button>
-          <div id="edp-color-swatch" title="Promijeni boju vlake" style="width:20px;height:20px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.35);flex-shrink:0;cursor:pointer;position:relative;overflow:hidden;">
-            <input type="color" id="edp-color-input" onchange="_edpColorPicked(this.value)" style="opacity:0;position:absolute;inset:0;width:100%;height:100%;cursor:pointer;padding:0;border:none;">
-          </div>
           <span id="edp-stats">0 m · 0 tač.</span>
         </div>
         <div id="edp-proj"></div>
@@ -4320,6 +4317,13 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
           <button class="mdp-btn done" onclick="stopActiveTool()" title="Završi editovanje">✓</button>
         </div>
         <div id="edp-hint">Povuci tačku za pomjeranje · tap između tačaka dodaje novu</div>
+        <div style="display:flex;gap:4px;margin-top:4px;">
+          <button class="mdp-btn" onclick="document.getElementById('edp-color-input').click()" title="Promijeni boju vlake" style="flex:1;background:#0f172a;color:#e2e8f0;border:1px solid #374151;font-size:11px;display:flex;align-items:center;justify-content:center;gap:7px;">
+            <span id="edp-color-dot" style="width:14px;height:14px;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.35);flex-shrink:0;display:inline-block;"></span>
+            🎨 Promijeni boju vlake
+          </button>
+          <input type="color" id="edp-color-input" onchange="_edpColorPicked(this.value)" style="position:absolute;width:0;height:0;opacity:0;pointer-events:none;">
+        </div>
         <div style="display:flex;gap:4px;margin-top:4px;">
           <button class="mdp-btn" onclick="_smoothVlakaStart()" title="Ugladi GPS trag — uklanja zigzag" style="flex:1;background:#0f172a;color:#a78bfa;border:1px solid #6b21a8;font-size:11px;">🔧 Ugladi trag</button>
         </div>
@@ -4485,7 +4489,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.51.0';
+const APP_VER = 'v3.52.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -12112,6 +12116,8 @@ function _edpColorPicked(col) {
   if (actI === null || !vlake[actI]) return;
   const v = vlake[actI];
   v.color = col;
+  const dot = document.getElementById('edp-color-dot');
+  if (dot) dot.style.background = col;
   try { v.poly.setStyle({ color: col }); } catch(e) {}
   v.updatedAt = new Date().toISOString();
   rndList();       // stripe boja u listi
@@ -12141,7 +12147,7 @@ function mtEditLine() {
   map.doubleClickZoom.disable();
   document.getElementById('edit-panel').style.display = '';
   document.getElementById('edp-nm').textContent = vlake[actI].nm;
-  const _edpSw = document.getElementById('edp-color-swatch');
+  const _edpSw = document.getElementById('edp-color-dot');
   const _edpCi = document.getElementById('edp-color-input');
   if (_edpSw) _edpSw.style.background = vlake[actI].color;
   if (_edpCi) _edpCi.value = vlake[actI].color;
