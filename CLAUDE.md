@@ -67,8 +67,6 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   Editoru (nema CI/migration runnera u ovom projektu). Nakon `ALTER TABLE`
   PostgREST keš šeme zna kasniti (`PGRST204 "could not find column"`) — riješi
   se sa `NOTIFY pgrst, 'reload schema';` ili Settings → API → Reload schema.
-  **Čeka potvrdu pokretanja: `20260713_dijeljenje_popravka.sql`** (popravka
-  dijeljenja projekata) — skini ovu napomenu kad korisnik potvrdi.
 
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
@@ -99,11 +97,13 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 
 ## Kandidati za čišćenje (nisu hitni)
 
-- `copy-assets` kopira `forwarder.png` i `FORVARDER IKONA.png` (po ~2,3 MB) u
-  APK, a UI koristi `forwarder.svg` — izbacivanjem se APK smanjuje ~5 MB.
-- Neiskorišteni fajlovi u repou: `Gemini_Generated_Image_*.png` (5 MB),
-  `images (4).jpeg` (izvor logotipa, sad uslikan kao base64 u index.html).
-- `_escHtml` definisan dva puta u index.html (~8660 i ~14756).
+- ~~`copy-assets` kopira `forwarder.png`/`FORVARDER IKONA.png`~~ — riješeno:
+  sve tri copy-assets skripte (`.sh`/`.ps1`/`build-apk.ps1`) sad kopiraju samo
+  `forwarder.svg`, koji je jedini stvarno referenciran u index.html.
+- ~~`_escHtml` definisan dva puta~~ — riješeno: uklonjena starija (nepotpuna,
+  bez quote-escaping-a) definicija na ~8696, ostala jedna kod ~14820.
+- ~~Neiskorišteni fajlovi u repou~~ — riješeno: `Gemini_Generated_Image_*.png`
+  i `images (4).jpeg` obrisani (nigdje referencirani).
 
 ## Konvencija za svaku izmjenu
 

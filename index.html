@@ -4489,7 +4489,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.52.0';
+const APP_VER = 'v3.53.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -8693,9 +8693,10 @@ function _fmtDist(m) {
   return m >= 1000 ? (m/1000).toFixed(2)+' km' : Math.round(m)+' m';
 }
 
-function _escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+// _escHtml je definisan niže (~14820, uz quote-escaping za sigurnu upotrebu u
+// HTML atributima kao title="${_escHtml(...)}") — ranije je postojala duplikat
+// definicija baš ovdje (bez quote-escaping-a), mrtva jer je kasnija hoisted
+// definicija uvijek pobjeđivala; uklonjena da ne zbunjuje.
 
 // ── Delete ──
 function deleteTacka(idx) {
@@ -29977,10 +29978,13 @@ function _dozRenderVlakeList() {
 
 // Preimenuj vlaku/krak direktno iz Doznaka panela — bez potrebe da korisnik prebacuje
 // aktivni projekat na taj vlake projekat da bi mu se ta vlaka pojavila u tabu "Vlake".
-function _dozRenameVlaka(i) {
+async function _dozRenameVlaka(i) {
   const v = vlake[i];
   if (!v) return;
-  const nn = prompt('Novi naziv vlake/kraka:', v.nm);
+  // _dlgPrompt (HTML dijalog), NE native prompt() — WebView bi za native prompt()
+  // prikazao "The page at appassets.androidplatform.net says:" (vidi onJsAlert/
+  // onJsConfirm override u MainActivity.java; onJsPrompt namjerno NIJE override-ovan).
+  const nn = await _dlgPrompt('Novi naziv vlake/kraka:', v.nm, { title: 'Preimenuj vlaku' });
   if (!nn || !nn.trim() || nn.trim() === v.nm) return;
   renameVlaka(i, nn.trim());
   _dozRenderVlakeList();

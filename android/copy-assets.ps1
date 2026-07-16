@@ -17,9 +17,10 @@ foreach ($f in @("index.html", "manifest.json", "sw.js", "icon-192.png", "icon-5
 
 # Opcioni fajlovi/folderi — ne ruši se ako fale
 function Copy-Optional($src, $dst) { if (Test-Path $src) { Copy-Item $src -Destination $dst -Recurse -Force } }
-Copy-Optional "forwarder.png"       $AssetsDir
+# forwarder.png i "FORVARDER IKONA.png" (~2.3MB svaki) NAMJERNO se ne kopiraju —
+# UI koristi isključivo forwarder.svg, PNG varijante nisu referencirane nigdje
+# u index.html. Uklonjeno da APK ne nosi ~4.6MB viška.
 Copy-Optional "forwarder.svg"       $AssetsDir
-Copy-Optional "FORVARDER IKONA.png" $AssetsDir
 Copy-Optional "GRANICE.kml"         $AssetsDir
 Copy-Optional "geo/*"        "$AssetsDir/geo/"
 Copy-Optional "doznaka/*"    "$AssetsDir/doznaka/"

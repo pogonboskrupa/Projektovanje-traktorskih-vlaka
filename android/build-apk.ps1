@@ -50,7 +50,9 @@ foreach ($f in $MainFiles) {
 }
 
 # Opcionalni fajlovi (ne grešiti ako ne postoje)
-$OptFiles = @("forwarder.png","forwarder.svg","FORVARDER IKONA.png","GRANICE.kml")
+# forwarder.png i "FORVARDER IKONA.png" (~2.3MB svaki) namjerno izostavljeni —
+# UI koristi isključivo forwarder.svg, PNG varijante se nigdje ne referenciraju.
+$OptFiles = @("forwarder.svg","GRANICE.kml")
 foreach ($f in $OptFiles) {
     $src = Join-Path $ProjectDir $f
     if (Test-Path $src) { Copy-Item $src "$AssetsDir\" }

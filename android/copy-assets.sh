@@ -23,9 +23,10 @@ cp sw.js "$ASSETS_DIR/"
 cp icon-192.png "$ASSETS_DIR/"
 cp icon-512.png "$ASSETS_DIR/"
 cp apple-touch-icon.png "$ASSETS_DIR/"
-cp forwarder.png "$ASSETS_DIR/" 2>/dev/null || true
+# forwarder.png i "FORVARDER IKONA.png" (~2.3MB svaki) NAMJERNO se ne kopiraju —
+# UI koristi isključivo forwarder.svg (grep "forwarder.svg" u index.html), PNG
+# varijante nisu referencirane nigdje. Uklonjeno da APK ne nosi ~4.6MB viška.
 cp forwarder.svg "$ASSETS_DIR/" 2>/dev/null || true
-cp "FORVARDER IKONA.png" "$ASSETS_DIR/" 2>/dev/null || true
 
 # GeoJSON / KML podaci
 cp GRANICE.kml "$ASSETS_DIR/" 2>/dev/null || true
