@@ -4489,7 +4489,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.53.0';
+const APP_VER = 'v3.54.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -15286,7 +15286,9 @@ function fabSnimTrag() {
     if (typeof _terenUpdTragUI === 'function') _terenUpdTragUI();
     if (_tragPts.length > 1) {
       const pts3d = _tragPts.map(([la, lo, al]) => ({la, lo, al}));
-      const simp  = _rdpSimplify(pts3d, 1.5);
+      // Blaga tolerancija (0.8 m) — čuva vrhove zavoja da se vijugav put ne
+      // izravna; i dalje briše najsitniji jitter na ravnim dionicama.
+      const simp  = _rdpSimplify(pts3d, 0.8);
       const final = (simp.length >= 2 ? simp : pts3d).map(p => [p.la, p.lo, p.al]);
       const saved = _tragRegAdd(final);
       if (_activeTab === 'teren') {
@@ -15394,7 +15396,11 @@ function _addTragPoint(la, lo, ac, al) {
   if (_tragPts.length > 0) {
     const last = _tragPts[_tragPts.length - 1];
     const d    = dst(last[0], last[1], mla, mlo);
-    if (d < 4) {
+    // Adaptivan prag: ~2 m pri dobrom fiksu (hvata tijesne zavoje), blago veći
+    // pri lošem fiksu da ne unosi GPS šum. Ranije fiksnih 4 m je presijecalo
+    // zavoje u ravne tetive — glavni uzrok "gubljenja stvarnog puta".
+    const minD = Math.max(2, (ac || 10) * 0.15);
+    if (d < minD) {
       commit = false;                       // premalo kretanja — ne dodaji novu tačku
     } else {
       // SPEED-GATE umjesto fiksne udaljenosti: dozvoli brzo kretanje vozila,
