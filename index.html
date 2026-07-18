@@ -4540,7 +4540,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.59.0';
+const APP_VER = 'v3.60.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -10300,7 +10300,7 @@ function terenRenderTragovi() {
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0;">
         <button onclick="_tragRegZoom('${t.id}')" style="padding:6px 8px;background:#0f3460;border:1px solid #1e3a5f;border-radius:8px;color:#60a5fa;font-size:11px;cursor:pointer;" title="Prikaži na karti">🗺</button>
-        <button onclick="_tragRegDlGpx('${t.id}')" style="padding:6px 8px;background:#0f3460;border:1px solid #1e3a5f;border-radius:8px;color:#34d399;font-size:11px;cursor:pointer;" title="Preuzmi GPX">⬇</button>
+        <button onclick="_tragRegShare('${t.id}')" style="padding:6px 8px;background:#0f3460;border:1px solid #1e3a5f;border-radius:8px;color:#34d399;font-size:11px;cursor:pointer;" title="Pošalji kao KML">📤</button>
         <button onclick="_tragRegDelete('${t.id}');terenRenderTragovi()" style="padding:6px 8px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#f87171;font-size:11px;cursor:pointer;" title="Briši">✕</button>
       </div>
     </div>`;
@@ -14903,7 +14903,7 @@ function _tragPopupHtml(t, lenM) {
     <div class="trag-popup-meta">${dt}<br>${_tragFmtLen(lenM)} · ${t.pts.length} tačaka</div>
     <div class="trag-popup-btns">
       <button onclick="_tragRegRename('${t.id}')">✏ Preimenuj</button>
-      <button onclick="_tragRegDlGpx('${t.id}')">⬇ GPX</button>
+      <button onclick="_tragRegShare('${t.id}')">📤 Pošalji</button>
       <button onclick="_tragRegToggle('${t.id}');_tragPopupRefresh('${t.id}')" id="tvis-${t.id}">${t.visible!==false?'🙈 Sakrij':'👁 Prikaži'}</button>
       <button onclick="if(confirm('Obrisati trag?'))_tragRegDelete('${t.id}')" style="color:#f87171;border-color:#7f1d1d;">✕ Briši</button>
     </div>
@@ -15070,7 +15070,7 @@ function _tragRegRender() {
         <button onclick="_tragRegZoom('${t.id}')">🗺 Zoom</button>
         <button onclick="_tragRegToggle('${t.id}')">${vis?'🙈 Sakrij':'👁 Prikaži'}</button>
         <button onclick="_tragRegEditMeta('${t.id}')">✏ Meta</button>
-        <button onclick="_tragRegDlGpx('${t.id}')">⬇ GPX</button>
+        <button onclick="_tragRegShare('${t.id}')">📤 Pošalji</button>
         <button class="del-btn" onclick="_tragRegDelete('${t.id}')">✕ Briši</button>
       </div>
     </div>`;
@@ -15228,7 +15228,7 @@ function _tragoviRowHtml(t) {
     <div class="treg-btns">
       <button onclick="_tragRegZoom('${t.id}')">🗺 Zoom</button>
       <button onclick="_tragRegToggle('${t.id}');_tragoviRender()">${vis?'🙈 Sakrij':'👁 Prikaži'}</button>
-      <button onclick="_tragRegDlGpx('${t.id}')">⬇ GPX</button>
+      <button onclick="_tragRegShare('${t.id}')">📤 Pošalji</button>
       <button class="del-btn" onclick="if(confirm('Obrisati trag?'))_tragRegDelete('${t.id}')">✕ Briši</button>
     </div>
     <div id="tred-${t.id}" style="display:none;" class="tred-row">
@@ -15344,15 +15344,43 @@ async function _tragRegRename(id) {
   }
 }
 
-function _tragRegDlGpx(id) {
+function _tragToKml(t) {
+  const coords = t.pts.map(p => `${p[1]},${p[0]},0`).join('\n              ');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document><name>${_escXml(t.name)}</name>
+  <Placemark>
+    <name>${_escXml(t.name)}</name>
+    <Style><LineStyle><color>${_hexToKmlColor(t.color||'#f97316')}</color><width>3</width></LineStyle><PolyStyle><fill>0</fill></PolyStyle></Style>
+    <LineString><tessellate>1</tessellate><coordinates>${coords}</coordinates></LineString>
+  </Placemark>
+</Document></kml>`;
+}
+
+// Dijeljenje traga kao KML preko native share sheet-a (Bluetooth/mail/mreže...).
+// Fallback na obično preuzimanje ako Web Share API ili prilog fajla nije podržan
+// (npr. desktop browser bez share targeta).
+async function _tragRegShare(id) {
   const t = _tragRegistry.find(x => x.id === id);
   if (!t) return;
-  const gpx = _tragToGpx(t.pts);
+  const fname = t.name.replace(/[^a-zA-Z0-9_\-]/g,'_') + '.kml';
+  const kml = _tragToKml(t);
+  const file = new File([kml], fname, {type:'application/vnd.google-earth.kml+xml'});
+  if (navigator.share && navigator.canShare && navigator.canShare({files:[file]})) {
+    try {
+      await navigator.share({ files: [file], title: t.name, text: `Trag: ${t.name}` });
+      return;
+    } catch(e) {
+      if (e && e.name === 'AbortError') return; // korisnik otkazao dijeljenje
+    }
+  }
+  // Fallback — preuzmi KML lokalno
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([gpx], {type:'application/gpx+xml'}));
-  a.download = t.name.replace(/[^a-zA-Z0-9_\-]/g,'_') + '.gpx';
+  a.href = URL.createObjectURL(new Blob([kml], {type:'application/vnd.google-earth.kml+xml'}));
+  a.download = fname;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  showToast('📥 KML preuzet (dijeljenje fajlova nije podržano na ovom uređaju)');
 }
 
 function _toggleLocPopup() {
@@ -15579,23 +15607,6 @@ function _addTragPoint(la, lo, ac, al, sp) {
 
 function _tragLiveClear() {
   if (_tragLiveSeg) { map.removeLayer(_tragLiveSeg); _tragLiveSeg = null; }
-}
-
-function _tragToGpx(pts) {
-  const trkpts = pts.map(p => {
-    const [la, lo, al, ts, ac] = p;
-    let inner = '';
-    if (al != null) inner += `<ele>${Number(al).toFixed(1)}</ele>`;
-    if (ts)        inner += `<time>${new Date(ts).toISOString()}</time>`;
-    if (ac != null) inner += `<hdop>${(ac / 5).toFixed(1)}</hdop>`; // hdop ≈ accuracy/5
-    return `    <trkpt lat="${la.toFixed(7)}" lon="${lo.toFixed(7)}">${inner}</trkpt>`;
-  }).join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="TVlake App">
-  <trk><name>Trag ${new Date().toLocaleString('bs-BA')}</name>
-    <trkseg>\n${trkpts}\n    </trkseg>
-  </trk>
-</gpx>`;
 }
 
 function fabSnimVlaku() {
