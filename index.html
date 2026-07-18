@@ -4540,7 +4540,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.61.0';
+const APP_VER = 'v3.62.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -10642,6 +10642,17 @@ async function _crashCheck() {
       _tragLine = L.polyline(_tragPts.map(p => [p[0], p[1]]),
         { color: '#f97316', weight: _lineStyle.tragW, opacity: 0.85, pane: 'tragMsrLines' }).addTo(map);
       _tragOn = true; _tragPaused = false;
+      _tragBuf = [];
+      // KLJUČNO: bez ovoga _tragLastT ostaje 0 (svježe učitana stranica) — prva
+      // sljedeća GPS tačka bi računala dtS kao lažnih 1s umjesto stvarnog
+      // razmaka od prekida, pa bi speed-gate (d/dtS > 35) tu i SVAKU narednu
+      // tačku trajno odbijao (distanca od "zaleđene" zadnje tačke samo raste).
+      // Trag bi izgledao kao da se snima (živi rubber-band segment ide do
+      // trenutne pozicije bez obzira na commit), ali ništa se stvarno ne bi
+      // upisivalo — pri "Završi" bi ostao spašen samo dio prije prekida.
+      const lastPt = _tragPts[_tragPts.length - 1];
+      _tragLastT = (lastPt && lastPt[3]) || Date.now();
+      _tragLastMoveT = Date.now();
       const b = document.getElementById('btrag');
       if (b) b.classList.add('active');
       _updFabVisibility();
@@ -15501,6 +15512,14 @@ function togTragPause() {
     if (btn) btn.classList.add('resuming');
     showToast('⏸ Snimanje traga pauzirano');
   } else {
+    // Baza za speed-gate mora biti "sada", ne 0 — inače prva tačka poslije
+    // pauze računa dtS kao lažnih 1s (umjesto stvarnog trajanja pauze), pa
+    // je odbija kao "nemoguć skok" ako se korisnik u međuvremenu pomjerio.
+    // Bez ovoga se ta i SVAKA naredna tačka trajno odbijaju (razdaljina od
+    // "zaleđene" zadnje tačke samo raste) — snimanje izgleda aktivno ali
+    // ništa se ne upisuje dok se ručno ne pauzira/nastavi ponovo.
+    _tragLastT = Date.now();
+    _tragLastMoveT = Date.now();
     if (ico) ico.textContent = '⏸';
     if (txt) txt.textContent = 'Pauza';
     if (btn) btn.classList.remove('resuming');
