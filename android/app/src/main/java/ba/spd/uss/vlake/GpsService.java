@@ -31,7 +31,15 @@ public class GpsService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null) return START_NOT_STICKY;
+        if (intent == null) {
+            // START_STICKY restart od sistema (proces ubijen pa vraćen) — intent
+            // je null. Bez ponovnog startForeground() + wake lock-a servis bi se
+            // vratio "gol" (na O+ i rizik 'did not call startForeground' kill-a),
+            // a snimanje u WebView-u bi tiho umrlo. Podigni oboje odmah.
+            acquireWakeLock();
+            showForegroundNotification("GPS Snimanje", "Traktorske vlake — GPS snimanje aktivno");
+            return START_STICKY;
+        }
 
         String action = intent.getAction();
         if ("stop".equals(action)) {

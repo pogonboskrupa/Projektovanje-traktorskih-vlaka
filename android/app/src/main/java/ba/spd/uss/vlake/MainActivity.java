@@ -144,6 +144,16 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
                 return true;
             }
+
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                // Reload/navigacija resetuje JS stanje (recOn/_tragOn/_dozGpsOn = false),
+                // ali native isRecordingActive bi bez ovoga ostao zaglavljen na true —
+                // onPause() bi ZAUVIJEK preskakao webView.onPause() (GPS + JS rade u
+                // pozadini trajno = prazna baterija). Nova stranica = snimanje ne postoji.
+                isRecordingActive = false;
+                super.onPageStarted(view, url, favicon);
+            }
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
@@ -182,6 +192,10 @@ public class MainActivity extends Activity {
             @Override
             public boolean onJsAlert(WebView view, String url, String message,
                     final android.webkit.JsResult result) {
+                // WebView (i JS u njemu) namjerno ostaje živ dok se Activity gasi
+                // (snimanje u pozadini) — alert() u tom prozoru bi bacio
+                // BadTokenException pri show(). Otkaži i preskoči dijalog.
+                if (isFinishing() || isDestroyed()) { result.cancel(); return true; }
                 new android.app.AlertDialog.Builder(MainActivity.this)
                         .setTitle(getString(R.string.app_name))
                         .setMessage(message)
@@ -196,6 +210,7 @@ public class MainActivity extends Activity {
             @Override
             public boolean onJsConfirm(WebView view, String url, String message,
                     final android.webkit.JsResult result) {
+                if (isFinishing() || isDestroyed()) { result.cancel(); return true; }
                 new android.app.AlertDialog.Builder(MainActivity.this)
                         .setTitle(getString(R.string.app_name))
                         .setMessage(message)

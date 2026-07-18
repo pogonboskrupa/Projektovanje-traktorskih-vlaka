@@ -4489,7 +4489,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.54.0';
+const APP_VER = 'v3.55.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -4849,6 +4849,17 @@ async function _processOfflineQueue() {
             _OL.save(_OL.DOZ_SEL_ID, realId);
           }
           _OL.save(_OL.DOZ_ODJELI, _dozOdjeli);
+          // Migriraj i keš stabala (tvlake_doz_trees_data) — ključan po ID-u
+          // odjela. Bez ovoga stabla učitana dok je odjel bio offline (tempId)
+          // "nestanu" poslije sync-a: restore traži pod realId, a zapis ostaje
+          // zauvijek orphaned pod starim temp ključem.
+          try {
+            const tk = JSON.parse(localStorage.getItem(_DOZ_TREES_DATA_KEY) || '{}');
+            if (tk[_tempId]) {
+              tk[realId] = tk[_tempId]; delete tk[_tempId];
+              localStorage.setItem(_DOZ_TREES_DATA_KEY, JSON.stringify(tk));
+            }
+          } catch(e) {}
           // Kreator kao manager-član — best effort, ne blokira (created_by RLS ionako
           // već daje kreatoru pun pristup i bez ovog reda; vidi dozSaveOdjel).
           try {
@@ -14215,7 +14226,7 @@ function onP(p) {
   lastP = { la, lo, al: filtAl ?? 0, ac };
   _lastGpsFixTime = Date.now();
   _gpsRestartCount = 0;
-  _addTragPoint(la, lo, ac, al);
+  _addTragPoint(la, lo, ac, al, gpsSpeed);
   _updMcdDist();
   if (_activeTab === 'teren') terenRender();
 
@@ -15288,7 +15299,12 @@ function fabSnimTrag() {
       const pts3d = _tragPts.map(([la, lo, al]) => ({la, lo, al}));
       // Blaga tolerancija (0.8 m) — čuva vrhove zavoja da se vijugav put ne
       // izravna; i dalje briše najsitniji jitter na ravnim dionicama.
-      const simp  = _rdpSimplify(pts3d, 0.8);
+      // try/catch: _rdpSimplify je REKURZIVAN (O(n) dubina na degenerisanom
+      // ulazu — duga glatka serpentina). Ako pukne stack, bez ovoga bi se
+      // izgubio CIJELI trag (i _bgRecStopIfIdle se ne bi pozvao → servis/
+      // wake lock cure). Vlaka ekvivalent (_simplifyRecordedPts) već ima guard.
+      let simp;
+      try { simp = _rdpSimplify(pts3d, 0.8); } catch(e) { simp = pts3d; }
       const final = (simp.length >= 2 ? simp : pts3d).map(p => [p.la, p.lo, p.al]);
       const saved = _tragRegAdd(final);
       if (_activeTab === 'teren') {
@@ -15367,7 +15383,7 @@ let _tragLiveSeg = null;// živi "rubber-band" segment do trenutne pozicije
 let _tragLastMoveT = 0; // timestamp zadnjeg stvarnog pomaka (za auto-pauzu)
 const _TRAG_AUTOPAUSE_MS = 120000; // 2 min mirovanja → auto-pauza
 
-function _addTragPoint(la, lo, ac, al) {
+function _addTragPoint(la, lo, ac, al, sp) {
   if (!_tragOn || _tragPaused) return;
 
   // 1. Odbaci samo katastrofalno loše fikseve
@@ -15396,10 +15412,14 @@ function _addTragPoint(la, lo, ac, al) {
   if (_tragPts.length > 0) {
     const last = _tragPts[_tragPts.length - 1];
     const d    = dst(last[0], last[1], mla, mlo);
-    // Adaptivan prag: ~2 m pri dobrom fiksu (hvata tijesne zavoje), blago veći
-    // pri lošem fiksu da ne unosi GPS šum. Ranije fiksnih 4 m je presijecalo
-    // zavoje u ravne tetive — glavni uzrok "gubljenja stvarnog puta".
-    const minD = Math.max(2, (ac || 10) * 0.15);
+    // Adaptivan prag zavisi od KRETANJA: dok se korisnik stvarno kreće
+    // (GPS speed > 0.4 m/s) prag je ~2 m — hvata tijesne zavoje vjerno.
+    // Dok STOJI (ili speed nije dostupan) prag je 4 m kao ranije — GPS
+    // multipath pod krošnjom drifta 2-5 m i bez ovoga bi pravio lažne
+    // commitove koji resetuju _tragLastMoveT (auto-pauza nikad ne okine)
+    // i naduvavaju dužinu traga dok korisnik npr. doznačava stabla u mjestu.
+    const moving = (typeof sp === 'number' && isFinite(sp) && sp > 0.4);
+    const minD = Math.max(moving ? 2 : 4, (ac || 10) * 0.15);
     if (d < minD) {
       commit = false;                       // premalo kretanja — ne dodaji novu tačku
     } else {
@@ -30042,6 +30062,13 @@ function dozVlakeLoadKml(ev) {
     try {
       const doc = new DOMParser().parseFromString(e.target.result, 'text/xml');
       const newIdxs = [];
+      // Dedup po imenu unutar projekta: server ima unique(korisnik, projekt, nm),
+      // pa bi dupli import (isti KML 2x, ili ime koje već postoji) na flush-u
+      // UPDATE-ovao TUĐI red i obje lokalne vlake bi dobile ISTI sbId — kasniji
+      // edit/brisanje jedne tiho pregazi/obriše drugu. Preskačemo duplikate.
+      const existingNames = new Set(
+        vlake.filter(v => v.projektId === _dozLinkedProjektId).map(v => v.nm));
+      let skipped = 0;
       doc.querySelectorAll('Placemark').forEach(pm => {
         const lsEl = pm.querySelector('LineString coordinates');
         if (!lsEl) return; // preskoči tačke (stabla) i poligone — ovo je uvoz vlaka/kraka
@@ -30049,6 +30076,8 @@ function dozVlakeLoadKml(ev) {
         if (cs.length < 2) return;
         const pts = cs.map(c => ({ la: c[0], lo: c[1], al: 0 }));
         const nm = pm.querySelector('name')?.textContent?.trim() || `Vlaka ${vlake.length + 1}`;
+        if (existingNames.has(nm)) { skipped++; return; }
+        existingNames.add(nm);
         const col = PAL[vlake.length % PAL.length];
         const poly = L.polyline(pts.map(p => [p.la, p.lo]), { color: col, weight: 3 }).addTo(map);
         // Identičan oblik objekta kao ručno crtanje/snimanje (vidi _routeToVlaka) —
@@ -30061,7 +30090,12 @@ function dozVlakeLoadKml(ev) {
         });
         newIdxs.push(vlake.length - 1);
       });
-      if (!newIdxs.length) { showToast('⚠ KML nema linija (LineString) — provjeri da li je fajl sa vlakama'); return; }
+      if (!newIdxs.length) {
+        showToast(skipped
+          ? `⚠ Sve vlake iz KML-a (${skipped}) već postoje u projektu — ništa nije uvezeno`
+          : '⚠ KML nema linija (LineString) — provjeri da li je fajl sa vlakama');
+        return;
+      }
       newIdxs.forEach(i => updateVlakaLabel(i));
       rndList();
       newIdxs.forEach(i => sbFlushVlaka(i));  // isti sync kao svaka nova/izmijenjena vlaka
@@ -30075,7 +30109,7 @@ function dozVlakeLoadKml(ev) {
       const status = document.getElementById('doz-link-status');
       const p = _projekti.find(x => x.id === _dozLinkedProjektId);
       if (status) status.innerHTML = `✔ Povezano: <b>${p?.odjel || '?'}</b> — ${vlake.filter(v => v.projektId === _dozLinkedProjektId).length} vlaka na mapi`;
-      showToast(`✅ Učitano ${newIdxs.length} vlaka/kraka iz KML-a — preimenuj po potrebi u tabu "Vlake"`);
+      showToast(`✅ Učitano ${newIdxs.length} vlaka/kraka iz KML-a${skipped ? ` (${skipped} preskočeno — već postoje)` : ''} — preimenuj po potrebi u tabu "Vlake"`);
     } catch(x) { showToast('⚠ Greška KML: ' + x.message); }
   };
   r.readAsText(file);
