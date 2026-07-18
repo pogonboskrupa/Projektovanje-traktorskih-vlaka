@@ -4540,7 +4540,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.57.0';
+const APP_VER = 'v3.58.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -15533,6 +15533,22 @@ function _addTragPoint(la, lo, ac, al, sp) {
       // odbaci samo nemoguće skokove (GPS spike). 35 m/s ≈ 126 km/h.
       const dtS = _tragLastT ? Math.max(0.5, (now - _tragLastT) / 1000) : 1;
       if (d / dtS > 35) commit = false;
+      // BEARING CHECK — nagla promjena smjera (skoro-U-okret) na malom pomaku
+      // je multipath potpis (odbijanje GPS signala od zgrada/vode — tipično uz
+      // obalu/ulicu), ne stvaran zaokret. Ista odbrana koju vlaka već koristi
+      // kao glavnu zaštitu od jittera (_gpsMaxTurn/near-reversal), trag je do
+      // sada imao samo median-of-3 koji ovo NE hvata (bočni cik-cak preko više
+      // fixeva prolazi kroz medijanu skoro nepromijenjen). Bez ovoga se
+      // povratna staza istim putem ne poklapa sa odlaznom — vidljiv "rasplet"
+      // na mjestima gdje GPS odskoči pa se odmah vrati.
+      if (commit && _tragPts.length >= 2) {
+        const p2 = _tragPts[_tragPts.length - 1];
+        const p1 = _tragPts[_tragPts.length - 2];
+        const prevBrng = _gpsBearing(p1[0], p1[1], p2[0], p2[1]);
+        const newBrng  = _gpsBearing(p2[0], p2[1], mla, mlo);
+        const turnDeg  = Math.abs(((newBrng - prevBrng + 540) % 360) - 180);
+        if (turnDeg > 110 && d < 8) commit = false;
+      }
     }
   }
 
