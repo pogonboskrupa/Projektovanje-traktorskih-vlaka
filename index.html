@@ -4489,7 +4489,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.55.0';
+const APP_VER = 'v3.56.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -13218,7 +13218,6 @@ function _iosBgRecWarn() {
 function togRec() {
   if (!recOn) {
     if (actI === null) { showToast('⚠ Prvo dodaj vlaku!'); return; }
-    _iosBgRecWarn();
     _clearNastaviMarkers();
     recOn = true; recPaused = false; _recParentIdx = null;
     _kfReset(); _lastRecTime = 0; _lastPtAcceptedAt = 0;
@@ -13236,15 +13235,9 @@ function togRec() {
     _updBanner();
     _updRecStatusBar();
     if (!gpsOn) toggleGPS();
-    _acquireWakeLock();
-    _startBgAudio();
+    _bgRecStart();  // wake lock + audio + SW heartbeat + notifikacija + native servis
     _checkBatteryOptHint();
     _startGpsWatchdog();
-    _startSWHeartbeat();
-    _startRecNotification();
-    if (typeof AndroidGps !== 'undefined') {
-      try { AndroidGps.startRecording(vlake[actI]?.name || 'GPS Snimanje'); } catch(e) {}
-    }
     _updFabVisibility();
     _crashStartTimer();   // auto-save svakih 30s
   } else {
@@ -14512,15 +14505,21 @@ function _stopRecNotification() {
 // ne ugasi servis drugom.
 function _anyRecOn() { return recOn || _tragOn || _dozGpsOn; }
 
+// Zajednički pokretač pozadinskog snimanja za sva tri tipa (vlaka/trag/doznaka
+// pojas) — wake lock, audio, SW heartbeat, notifikacija, native foreground
+// servis. Bez label-a (vlaka) ime se čita iz vlake[actI] (isto što
+// _startRecNotification() bez argumenata već radi, uključujući dužinu).
 function _bgRecStart(label) {
   _iosBgRecWarn();          // iPhone: jednom upozori da pozadina ne radi na iOS-u
   _acquireWakeLock();
   _startBgAudio();
   _startSWHeartbeat();
+  const nm = label || (actI !== null ? vlake[actI]?.nm : null) || 'GPS Snimanje';
   if (typeof AndroidGps !== 'undefined') {
-    try { AndroidGps.startRecording(label || 'GPS Snimanje'); } catch(e) {}
+    try { AndroidGps.startRecording(nm); } catch(e) {}
   }
-  _startRecNotification(label || 'snimanje', '');
+  if (label) _startRecNotification(label, '');
+  else _startRecNotification();  // vlaka — čita ime + trenutnu dužinu iz vlake[actI]
 }
 
 function _bgRecStopIfIdle() {
@@ -30068,6 +30067,10 @@ function dozVlakeLoadKml(ev) {
       // edit/brisanje jedne tiho pregazi/obriše drugu. Preskačemo duplikate.
       const existingNames = new Set(
         vlake.filter(v => v.projektId === _dozLinkedProjektId).map(v => v.nm));
+      // br/fallback-ime po BROJU VLAKA U OVOM PROJEKTU, ne po globalnom vlake.length —
+      // inače uvoz u projekat sa 3 vlake dobije npr. "Vlaka 15" (globalni indeks svih
+      // projekata) umjesto "Vlaka 4", što zbunjuje numeraciju unutar projekta.
+      let projCount = existingNames.size;
       let skipped = 0;
       doc.querySelectorAll('Placemark').forEach(pm => {
         const lsEl = pm.querySelector('LineString coordinates');
@@ -30075,15 +30078,16 @@ function dozVlakeLoadKml(ev) {
         const cs = pcs(lsEl.textContent);
         if (cs.length < 2) return;
         const pts = cs.map(c => ({ la: c[0], lo: c[1], al: 0 }));
-        const nm = pm.querySelector('name')?.textContent?.trim() || `Vlaka ${vlake.length + 1}`;
+        const nm = pm.querySelector('name')?.textContent?.trim() || `Vlaka ${projCount + 1}`;
         if (existingNames.has(nm)) { skipped++; return; }
         existingNames.add(nm);
+        projCount++;
         const col = PAL[vlake.length % PAL.length];
         const poly = L.polyline(pts.map(p => [p.la, p.lo]), { color: col, weight: 3 }).addTo(map);
         // Identičan oblik objekta kao ručno crtanje/snimanje (vidi _routeToVlaka) —
         // ista polja znače isti tretman svuda (rename, brisanje, buffer, sync, štampanje...).
         vlake.push({
-          nm, br: vlake.length, kr: 0, strana: null, color: col, lager: '', pts, poly, wpts: [],
+          nm, br: projCount, kr: 0, strana: null, color: col, lager: '', pts, poly, wpts: [],
           sbId: null, projektId: _dozLinkedProjektId,
           projektantIme: typeof getIme === 'function' ? getIme() : '',
           labelMk: null, lagerMk: null, extraLabels: [], updatedAt: new Date().toISOString()
