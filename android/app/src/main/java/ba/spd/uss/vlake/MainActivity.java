@@ -29,6 +29,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.webkit.WebViewAssetLoader;
 
 import android.content.BroadcastReceiver;
@@ -124,6 +125,7 @@ public class MainActivity extends Activity {
 
         webView.addJavascriptInterface(new DownloadBridge(), "AndroidDownload");
         webView.addJavascriptInterface(new GpsBridge(), "AndroidGps");
+        webView.addJavascriptInterface(new ShareBridge(), "AndroidShare");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -322,6 +324,57 @@ public class MainActivity extends Activity {
             if (filename.endsWith(".json")) return "application/json";
             if (filename.endsWith(".csv")) return "text/csv";
             if (filename.endsWith(".txt")) return "text/plain";
+            return "application/octet-stream";
+        }
+    }
+
+    // navigator.share() u Android WebView-u (za razliku od Chrome-a) ne otvara
+    // sistemski share-sheet za fajlove — canShare({files:[...]}) tiho vraća
+    // false, pa JS strana bez ovog mosta nema kako da ponudi Viber/Messenger/
+    // Bluetooth. Ovdje se koristi VEĆ postojeći FileProvider (isti kao za
+    // kameru) da se privremeni fajl u cache-u podijeli preko pravog
+    // Intent.ACTION_SEND chooser-a.
+    class ShareBridge {
+        @JavascriptInterface
+        public void shareFile(String filename, String dataUrl, String title, String text) {
+            try {
+                String base64 = dataUrl.substring(dataUrl.indexOf(",") + 1);
+                byte[] data = Base64.decode(base64, Base64.DEFAULT);
+
+                File dir = new File(getCacheDir(), "shared");
+                if (!dir.exists()) dir.mkdirs();
+                File file = new File(dir, filename);
+                FileOutputStream fos = new FileOutputStream(file);
+                fos.write(data);
+                fos.close();
+
+                Uri uri = FileProvider.getUriForFile(MainActivity.this,
+                        "ba.spd.uss.vlake.fileprovider", file);
+                String mime = guessMime(filename);
+
+                Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                sendIntent.setType(mime);
+                sendIntent.putExtra(Intent.EXTRA_STREAM, uri);
+                if (text != null) sendIntent.putExtra(Intent.EXTRA_TEXT, text);
+                if (title != null) sendIntent.putExtra(Intent.EXTRA_SUBJECT, title);
+                sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+                Intent chooser = Intent.createChooser(sendIntent,
+                        title != null ? title : "Pošalji");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                runOnUiThread(() -> startActivity(chooser));
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "Greška pri dijeljenju: " + e.getMessage(),
+                        Toast.LENGTH_SHORT).show());
+            }
+        }
+
+        private String guessMime(String filename) {
+            if (filename.endsWith(".kml")) return "application/vnd.google-earth.kml+xml";
+            if (filename.endsWith(".gpx")) return "application/gpx+xml";
+            if (filename.endsWith(".geojson")) return "application/geo+json";
+            if (filename.endsWith(".json")) return "application/json";
             return "application/octet-stream";
         }
     }

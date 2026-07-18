@@ -4540,7 +4540,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.60.0';
+const APP_VER = 'v3.61.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -15358,13 +15358,23 @@ function _tragToKml(t) {
 }
 
 // Dijeljenje traga kao KML preko native share sheet-a (Bluetooth/mail/mreže...).
-// Fallback na obično preuzimanje ako Web Share API ili prilog fajla nije podržan
-// (npr. desktop browser bez share targeta).
+// U APK-u navigator.share() NE otvara sistemski birač za fajlove (Android
+// WebView, za razliku od Chrome-a, ne podržava Web Share Target za priloge —
+// canShare({files}) tiho vrati false), pa se prvo pokuša native AndroidShare
+// most (pravi Intent.ACTION_SEND chooser sa Viber/Messenger/Bluetooth/mail...).
+// Web Share API i obično preuzimanje ostaju fallback za webapp (Pages)/desktop.
 async function _tragRegShare(id) {
   const t = _tragRegistry.find(x => x.id === id);
   if (!t) return;
   const fname = t.name.replace(/[^a-zA-Z0-9_\-]/g,'_') + '.kml';
   const kml = _tragToKml(t);
+  if (typeof AndroidShare !== 'undefined' && AndroidShare.shareFile) {
+    try {
+      const dataUrl = 'data:application/vnd.google-earth.kml+xml;base64,' + btoa(unescape(encodeURIComponent(kml)));
+      AndroidShare.shareFile(fname, dataUrl, t.name, `Trag: ${t.name}`);
+      return;
+    } catch(e) {}
+  }
   const file = new File([kml], fname, {type:'application/vnd.google-earth.kml+xml'});
   if (navigator.share && navigator.canShare && navigator.canShare({files:[file]})) {
     try {
