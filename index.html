@@ -357,6 +357,43 @@ html, body { height:100%; font-family: Arial, sans-serif; background:#1a1a2e; co
   touch-action:pan-y;
 }
 
+/* ── Teren tab — jedinstveni sistem dugmadi ────────────────────────────────
+   Ranije je svako dugme imalo svoj inline style, bez ikakve reakcije na dodir
+   (flat, "mrtav" osjećaj na touchscreen-u). Ovdje: konzistentan radius/sjenka
+   po nivou važnosti (primary/accent/danger/outline) + taktilni :active odziv. */
+.trn-btn {
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  width:100%; box-sizing:border-box; padding:12px; border-radius:12px;
+  font-size:13px; font-weight:600; cursor:pointer; border:none;
+  transition:transform 0.1s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.trn-btn:active { transform:scale(0.96); opacity:0.85; }
+.trn-btn-sm { padding:11px 8px; font-size:12px; }
+.trn-btn-primary {
+  background:linear-gradient(135deg,#059669,#10b981); color:#fff;
+  box-shadow:0 3px 10px rgba(16,185,129,0.28);
+}
+.trn-btn-accent {
+  background:linear-gradient(135deg,#0369a1,#0ea5e9); color:#fff;
+  box-shadow:0 3px 10px rgba(14,165,233,0.28);
+}
+.trn-btn-share {
+  background:linear-gradient(135deg,#166534,#22c55e); color:#fff;
+  box-shadow:0 3px 10px rgba(34,197,94,0.28);
+}
+.trn-btn-danger {
+  background:linear-gradient(135deg,#b91c1c,#ef4444); color:#fff;
+  box-shadow:0 3px 10px rgba(239,68,68,0.3);
+}
+.trn-btn-outline {
+  background:#0f172a; border:1px solid #334155; color:#94a3b8;
+}
+.trn-btn-outline.amber { border-color:rgba(251,191,36,0.35); color:#fbbf24; }
+.trn-btn-outline.blue  { border-color:#1e3a5f; color:#60a5fa; background:#0f3460; }
+.trn-btn-outline.green { border-color:#1e3a5f; color:#34d399; background:#0f3460; }
+.trn-btn-row { display:flex; gap:8px; }
+.trn-btn-row .trn-btn { width:auto; flex:1; }
+
 /* PANEL */
 #panel {
   width:270px; flex-shrink:0;
@@ -2716,12 +2753,12 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
   box-shadow:0 -4px 20px rgba(0,0,0,0.6);
 }
 #tnp-arrow {
-  font-size:26px;line-height:1;flex-shrink:0;
-  transition:transform 0.4s ease;display:inline-block;
+  font-size:30px;line-height:1;flex-shrink:0;
+  transition:transform 0.2s ease;display:inline-block;
 }
 #tnp-info { flex:1;min-width:0; }
 #tnp-name { font-size:13px;font-weight:700;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-#tnp-air  { font-size:12px;color:#93c5fd;margin-top:2px; }
+#tnp-air  { font-size:22px;font-weight:800;color:#38bdf8;font-family:monospace;margin-top:2px;line-height:1.15; }
 #tnp-road { font-size:12px;color:#86efac;margin-top:1px; }
 #tnp-stop { background:#7f1d1d;border:none;color:#fca5a5;border-radius:8px;
   padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0; }
@@ -3832,13 +3869,13 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
             <span style="color:#64748b;">Tačnost</span><span id="trn-acc" style="color:#94a3b8;font-family:monospace;">— m</span>
           </div>
           <div id="trn-odjel" style="margin-top:10px;padding:9px 12px;background:#0a2f1f;border:1px solid #14532d;border-radius:10px;font-size:13px;font-weight:700;color:#34d399;">🌲 Odjel: —</div>
-          <div style="display:flex;gap:8px;margin-top:12px;">
-            <button onclick="fabLokacija()" style="flex:1;padding:11px;background:linear-gradient(135deg,#059669,#10b981);border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🎯 Centriraj</button>
-            <button onclick="terenCopyCoords()" style="flex:1;padding:11px;background:#0f3460;border:1px solid #1e3a5f;border-radius:10px;color:#60a5fa;font-size:13px;font-weight:600;cursor:pointer;">📋 Kopiraj</button>
-            <button onclick="terenSendPos()" style="flex:1;padding:11px;background:#0f3460;border:1px solid #1e3a5f;border-radius:10px;color:#34d399;font-size:13px;font-weight:600;cursor:pointer;">📤 Pošalji</button>
+          <div class="trn-btn-row" style="margin-top:12px;">
+            <button class="trn-btn trn-btn-primary" onclick="fabLokacija()">🎯 Centriraj</button>
+            <button class="trn-btn trn-btn-outline blue" onclick="terenCopyCoords()">📋 Kopiraj</button>
+            <button class="trn-btn trn-btn-outline green" onclick="terenSendPos()">📤 Pošalji</button>
           </div>
-          <button onclick="switchTab('karta');setTimeout(()=>startLocPhoto(),50);" style="width:100%;margin-top:8px;padding:11px;background:#1e293b;border:1px solid rgba(251,191,36,0.35);border-radius:10px;color:#fbbf24;font-size:13px;font-weight:600;cursor:pointer;">📷 Uslikaj lokaciju</button>
-          <button id="trn-gps-btn" onclick="toggleGPS()" style="width:100%;margin-top:8px;padding:10px;background:#1e293b;border:1px solid #334155;border-radius:10px;color:#94a3b8;font-size:12px;cursor:pointer;">📡 Uključi/isključi GPS</button>
+          <button class="trn-btn trn-btn-outline amber" style="margin-top:8px;" onclick="switchTab('karta');setTimeout(()=>startLocPhoto(),50);">📷 Uslikaj lokaciju</button>
+          <button id="trn-gps-btn" class="trn-btn trn-btn-outline trn-btn-sm" style="margin-top:8px;" onclick="toggleGPS()">📡 Uključi/isključi GPS</button>
         </div>
 
         <!-- DIJELJENJE KRETANJA -->
@@ -3848,24 +3885,38 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
             <span id="trn-share-status" style="font-size:11px;color:#64748b;">isključeno</span>
           </div>
           <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Kolege i nadzor vide tvoju poziciju na karti uživo dok je dijeljenje uključeno.</div>
-          <button id="trn-share-btn" onclick="terenTogShare()" style="width:100%;padding:13px;background:linear-gradient(135deg,#166534,#22c55e);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">🔴 Dijeli moje kretanje</button>
+          <button id="trn-share-btn" class="trn-btn trn-btn-share" style="padding:13px;font-size:14px;" onclick="terenTogShare()">🔴 Dijeli moje kretanje</button>
         </div>
 
         <!-- KOMPAS -->
-        <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;display:flex;align-items:center;gap:16px;">
-          <div style="position:relative;width:84px;height:84px;flex-shrink:0;">
-            <div style="position:absolute;inset:0;border-radius:50%;border:2px solid #334155;"></div>
-            <div style="position:absolute;top:3px;left:50%;transform:translateX(-50%);font-size:9px;color:#f87171;font-weight:700;">S</div>
-            <div style="position:absolute;bottom:3px;left:50%;transform:translateX(-50%);font-size:9px;color:#64748b;">J</div>
-            <div style="position:absolute;left:4px;top:50%;transform:translateY(-50%);font-size:9px;color:#64748b;">Z</div>
-            <div style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:9px;color:#64748b;">I</div>
-            <div id="trn-compass-needle" style="position:absolute;top:50%;left:50%;width:3px;height:36px;background:linear-gradient(to top,#64748b 50%,#f87171 50%);transform-origin:bottom center;transform:translate(-50%,-100%) rotate(0deg);border-radius:2px;transition:transform 0.18s linear;"></div>
-            <div style="position:absolute;top:50%;left:50%;width:7px;height:7px;background:#e2e8f0;border-radius:50%;transform:translate(-50%,-50%);"></div>
+        <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;">
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="position:relative;width:84px;height:84px;flex-shrink:0;">
+              <div style="position:absolute;inset:0;border-radius:50%;border:2px solid #334155;"></div>
+              <div style="position:absolute;top:3px;left:50%;transform:translateX(-50%);font-size:9px;color:#f87171;font-weight:700;">S</div>
+              <div style="position:absolute;bottom:3px;left:50%;transform:translateX(-50%);font-size:9px;color:#64748b;">J</div>
+              <div style="position:absolute;left:4px;top:50%;transform:translateY(-50%);font-size:9px;color:#64748b;">Z</div>
+              <div style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:9px;color:#64748b;">I</div>
+              <div id="trn-compass-needle" style="position:absolute;top:50%;left:50%;width:3px;height:36px;background:linear-gradient(to top,#64748b 50%,#f87171 50%);transform-origin:bottom center;transform:translate(-50%,-100%) rotate(0deg);border-radius:2px;transition:transform 0.18s linear;"></div>
+              <!-- Strelica prema cilju navigacije — vidljiva samo dok je "Vodi me do tačke" aktivno.
+                   Rotira po RELATIVNOM azimutu (cilj − azimut uređaja), ne apsolutnom, pa uvijek
+                   pokazuje stvarni smjer hoda dok se korisnik okreće (vidi _updateNavArrows). -->
+              <div id="trn-compass-target" style="display:none;position:absolute;top:50%;left:50%;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:32px solid #38bdf8;transform-origin:bottom center;transform:translate(-50%,-100%) rotate(0deg);filter:drop-shadow(0 0 3px rgba(56,189,248,0.8));transition:transform 0.18s linear;"></div>
+              <div style="position:absolute;top:50%;left:50%;width:7px;height:7px;background:#e2e8f0;border-radius:50%;transform:translate(-50%,-50%);"></div>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:2px;">Kompas</div>
+              <div id="trn-heading" style="font-size:22px;font-weight:700;color:#34d399;font-family:monospace;">—°</div>
+              <div id="trn-heading-dir" style="font-size:11px;color:#64748b;">azimut uređaja</div>
+            </div>
           </div>
-          <div>
-            <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:2px;">Kompas</div>
-            <div id="trn-heading" style="font-size:22px;font-weight:700;color:#34d399;font-family:monospace;">—°</div>
-            <div id="trn-heading-dir" style="font-size:11px;color:#64748b;">azimut uređaja</div>
+          <!-- Aktivna navigacija do tačke ("🧭 Vodi") — udaljenost krupno, ista strelica (plava) -->
+          <div id="trn-nav-target" style="display:none;margin-top:12px;padding:10px 12px;background:#0a1f38;border:1px solid #1e3a5f;border-radius:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="font-size:11px;color:#60a5fa;">🎯 <span id="trn-nav-name">Cilj</span></div>
+              <button onclick="stopTackaNav()" style="background:none;border:none;color:#64748b;font-size:11px;cursor:pointer;padding:2px 4px;">✕ Prekini</button>
+            </div>
+            <div id="trn-nav-dist" style="font-size:26px;font-weight:800;color:#38bdf8;font-family:monospace;margin-top:2px;">— m</div>
           </div>
         </div>
 
@@ -3873,17 +3924,17 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
         <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;">
           <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:8px;">📥 Učitaj projekat</div>
           <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Ukucaj šifru koju ti je dao projektant (npr. RK70ABGH) — vlake odjela se prikažu na karti.</div>
-          <button onclick="terenUcitajProjekat()" style="width:100%;padding:13px;background:linear-gradient(135deg,#0369a1,#0ea5e9);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">🔑 Ukucaj šifru</button>
+          <button class="trn-btn trn-btn-accent" style="padding:13px;font-size:14px;" onclick="terenUcitajProjekat()">🔑 Ukucaj šifru</button>
           <div id="trn-shared-list" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;"></div>
         </div>
 
         <!-- KARTE I SLOJEVI -->
         <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;">
           <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:10px;">🗄 Karte i slojevi</div>
-          <button onclick="openMapManager()" style="width:100%;padding:11px;background:#0f3460;border:1px solid #1e3a5f;border-radius:10px;color:#60a5fa;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:8px;">🗂 Upravljanje offline kartama</button>
-          <button onclick="document.getElementById('kf').click()" style="width:100%;padding:11px;background:#1e293b;border:1px solid #334155;border-radius:10px;color:#94a3b8;font-size:13px;cursor:pointer;margin-bottom:8px;">📂 Dodaj KML fajl</button>
-          <button onclick="openOznakePanel()" style="width:100%;padding:11px;background:#1e293b;border:1px solid #334155;border-radius:10px;color:#94a3b8;font-size:13px;cursor:pointer;margin-bottom:8px;">≡ Prikazani slojevi i oznake</button>
-          <button onclick="_openLayerSheet()" style="width:100%;padding:11px;background:#1e293b;border:1px solid #334155;border-radius:10px;color:#94a3b8;font-size:13px;cursor:pointer;">⛰ Promijeni podlogu karte</button>
+          <button class="trn-btn trn-btn-outline blue" style="margin-bottom:8px;" onclick="openMapManager()">🗂 Upravljanje offline kartama</button>
+          <button class="trn-btn trn-btn-outline" style="margin-bottom:8px;" onclick="document.getElementById('kf').click()">📂 Dodaj KML fajl</button>
+          <button class="trn-btn trn-btn-outline" style="margin-bottom:8px;" onclick="openOznakePanel()">≡ Prikazani slojevi i oznake</button>
+          <button class="trn-btn trn-btn-outline" onclick="_openLayerSheet()">⛰ Promijeni podlogu karte</button>
         </div>
 
         <!-- TAČKE / WAYPOINTS -->
@@ -3892,7 +3943,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
             <span style="font-size:13px;font-weight:700;color:#e2e8f0;">📌 Tačke</span>
             <span id="trn-tacke-cnt" style="font-size:11px;color:#64748b;">0</span>
           </div>
-          <button onclick="terenMarkHere()" style="width:100%;padding:11px;background:linear-gradient(135deg,#0369a1,#0ea5e9);border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:10px;">📍 Označi trenutnu poziciju</button>
+          <button class="trn-btn trn-btn-accent" style="margin-bottom:10px;" onclick="terenMarkHere()">📍 Označi trenutnu poziciju</button>
           <div id="trn-tacke-list" style="display:flex;flex-direction:column;gap:6px;">
             <div style="color:#475569;font-size:12px;text-align:center;padding:8px;">Nema sačuvanih tačaka</div>
           </div>
@@ -4489,7 +4540,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.56.0';
+const APP_VER = 'v3.57.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -8615,16 +8666,17 @@ function _updateNavPanel(la, lo) {
 
   const airEl  = document.getElementById('tnp-air');
   const roadEl = document.getElementById('tnp-road');
-  const brngEl = document.getElementById('tnp-arrow');
 
   if (la != null) {
     const airDist  = _haversine(la, lo, t.la, t.lo);
     airEl.textContent = _fmtDist(airDist);
 
-
-    // Bearing arrow rotation
-    const brng = _bearing(la, lo, t.la, t.lo);
-    brngEl.style.transform = `rotate(${brng}deg)`;
+    // Apsolutni azimut do cilja — stvarna rotacija strelice (relativna na
+    // azimut uređaja) se računa u _updateNavArrows, i ponovo se primjenjuje
+    // uživo na svaku promjenu azimuta (ne samo na GPS tick, vidi
+    // _updCompassOnMarker), tako da strelica prati okretanje telefona.
+    _navLastBrng = _bearing(la, lo, t.la, t.lo);
+    _updateNavArrows();
 
     // Check if arrived
     if (airDist < 15) {
@@ -8659,6 +8711,35 @@ function _updateNavPanel(la, lo) {
   _updateNavElev();
 }
 
+// Rotira strelicu na #tacka-nav-panel (karta) i na Teren tab kompasu prema
+// RELATIVNOM azimutu (cilj − azimut uređaja) umjesto apsolutnom — bez ovoga
+// bi strelica pokazivala tačno prema cilju SAMO kad korisnik slučajno drži
+// telefon okrenut prema sjeveru; u svim ostalim slučajevima bi bila pogrešna
+// (nikad se ne mijenja dok se korisnik okreće). Poziva se i na GPS tick
+// (_updateNavPanel) i na svaku promjenu azimuta uređaja (_updCompassOnMarker),
+// pa strelica prati okretanje telefona uživo, ne samo pomjeranje pozicije.
+function _updateNavArrows() {
+  if (_tackaNavIdx === null || _navLastBrng == null) return;
+  const rel = _compassHeading != null
+    ? ((_navLastBrng - _compassHeading) + 360) % 360
+    : _navLastBrng;
+  const mapArrow = document.getElementById('tnp-arrow');
+  if (mapArrow) {
+    _navRotMap = _angContinuity(_navRotMap, rel);
+    mapArrow.style.transform = `rotate(${_navRotMap}deg)`;
+  }
+  const trnArrow = document.getElementById('trn-compass-target');
+  if (trnArrow && trnArrow.style.display !== 'none') {
+    _navRotTeren = _angContinuity(_navRotTeren, rel);
+    trnArrow.style.transform = `translate(-50%,-100%) rotate(${_navRotTeren}deg)`;
+  }
+  const distEl = document.getElementById('trn-nav-dist');
+  if (distEl && lastP) {
+    const t = _tacke[_tackaNavIdx];
+    if (t) distEl.textContent = _fmtDist(_haversine(lastP.la, lastP.lo, t.la, t.lo));
+  }
+}
+
 function _bearing(la1, lo1, la2, lo2) {
   const r = Math.PI / 180;
   const dLo = (lo2 - lo1) * r;
@@ -8687,9 +8768,11 @@ function _updateNavElev() {
 
 function stopTackaNav() {
   _tackaNavIdx = null;
+  _navLastBrng = null;
   _clearNavLayers();
   const panel = document.getElementById('tacka-nav-panel');
   if (panel) panel.style.display = 'none';
+  if (_activeTab === 'teren') _terenUpdNavTarget();  // sakrij blok/strelicu ako je Teren tab otvoren
 }
 
 // ── Helpers ──
@@ -10080,6 +10163,7 @@ function terenUpdCompass() {
   const needle = document.getElementById('trn-compass-needle');
   const hv = document.getElementById('trn-heading');
   const hd = document.getElementById('trn-heading-dir');
+  _terenUpdNavTarget();  // prikaži/sakrij strelicu+udaljenost do aktivne nav-tačke
   if (_compassHeading == null) {
     if (hv) hv.textContent = '—°';
     if (hd) hd.textContent = 'azimut nedostupan';
@@ -10093,6 +10177,25 @@ function terenUpdCompass() {
   }
   if (hv) hv.textContent = h + '°';
   if (hd) hd.textContent = _azimutSmjer(h) + ' · azimut uređaja';
+}
+
+// Prikaz/sakrivanje bloka "cilj navigacije" na Teren tab kompasu — poziva se
+// svaki put kad se kompas renderuje (terenUpdCompass), pa je uvijek u skladu
+// sa _tackaNavIdx bez obzira odakle je navigacija pokrenuta/zaustavljena.
+function _terenUpdNavTarget() {
+  const box = document.getElementById('trn-nav-target');
+  const arrow = document.getElementById('trn-compass-target');
+  if (!box) return;
+  if (_tackaNavIdx === null || !_tacke[_tackaNavIdx]) {
+    box.style.display = 'none';
+    if (arrow) arrow.style.display = 'none';
+    return;
+  }
+  box.style.display = '';
+  if (arrow) arrow.style.display = '';
+  const nameEl = document.getElementById('trn-nav-name');
+  if (nameEl) nameEl.textContent = _tacke[_tackaNavIdx].nm || ('Tačka ' + (_tackaNavIdx + 1));
+  _updateNavArrows();
 }
 
 function terenRenderTacke() {
@@ -10561,6 +10664,9 @@ let _compassHeading = null; // trenutni azimut telefona (0-360°, 0=sjever), nis
 let _compassRotCone = 0;    // neomotana (kontinuirana) rotacija kupole na karti — sprječava "odmotavanje" kroz 350° na 359°→0° granici
 let _compassRotNeedle = 0;  // isto, za iglu na terenskom kompasu
 let _compassLastUpdT = 0;   // throttle senzor-eventova
+let _navLastBrng = null;    // apsolutni azimut do aktivne nav-tačke (0-360°, 0=sjever) — postavlja _updateNavPanel
+let _navRotMap = 0;         // kontinuirana rotacija strelice na #tacka-nav-panel (karta)
+let _navRotTeren = 0;       // kontinuirana rotacija strelice na Teren tab kompasu
 let kmlLs=[], kmlCI=0, _kmlEditIdx=-1;
 let _ozLocalSearch='', _ozLocalSort='recent';
 const _ozBucketExpanded = new Set();
@@ -13925,6 +14031,7 @@ function _angContinuity(prevAccum, targetDeg) {
 
 function _updCompassOnMarker(heading) {
   if (_activeTab === 'teren') terenUpdCompass();
+  if (_tackaNavIdx !== null) _updateNavArrows();  // strelica prati okretanje telefona uživo
   if (!posMk) return;
   const el = posMk.getElement();
   if (!el) return;
@@ -33744,7 +33851,7 @@ if (typeof AndroidDownload !== 'undefined') {
 
 <!-- Tačka navigacioni panel -->
 <div id="tacka-nav-panel">
-  <span id="tnp-arrow">🧭</span>
+  <span id="tnp-arrow">⬆</span>
   <div id="tnp-info">
     <div id="tnp-name">—</div>
     <div id="tnp-air">📡 Uključi GPS</div>
