@@ -4548,7 +4548,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.68.0';
+const APP_VER = 'v3.69.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -22548,6 +22548,7 @@ function _msrToggleDraw(on) {
     if (hint) hint.innerHTML = '✍️ Crtaj uključeno — pomjeraj mapu, tačke se dodaju same.<br><small style="color:#475569">Isključi kvačicu za ručno klikanje</small>';
   } else {
     map.off('move', _onMapMoveMsr);
+    _msrRedraw(); // markeri za editovanje su bili sakriveni dok se crtalo — vrati ih odmah
   }
 }
 
@@ -22640,34 +22641,53 @@ function _msrRedraw() {
     }
   }
 
-  // Draggable markeri za tačke (crtaju se na vrhu)
-  pts.forEach((p, idx) => {
-    const ptColor = idx === 0 ? '#4ade80' : (idx === pts.length-1 ? '#f87171' : _msrColor);
-    const mk = L.marker([p.lat, p.lng], {
-      draggable: true,
-      zIndexOffset: 500,
-      icon: L.divIcon({
-        className: '',
-        html: `<div style="width:13px;height:13px;border-radius:50%;background:${ptColor};border:2.5px solid #fff;box-shadow:0 0 5px rgba(0,0,0,0.85);box-sizing:border-box;cursor:grab;"></div>`,
-        iconSize:[13,13], iconAnchor:[6,6]
-      })
+  // Draggable markeri za tačke — SAMO van "Crtaj" moda. Dok se crta (tačke se
+  // ubacuju automatski svakih par metara dok korisnik pomjera mapu), marker
+  // po svakoj tačci bi zatrpao samu liniju — u tom modu prikaži samo liniju/
+  // poligon (iznad). Van crtanja (ručno klikanje ili gotovo mjerenje spremno
+  // za korekciju) markeri se vraćaju, ali prorijeđeno bar 20%: ravnomjerno
+  // raspoređen podskup (uvijek uključuje prvu i zadnju tačku) umjesto fiksnog
+  // "svaka N-ta" — modulo-pristup ne garantuje 20% na malim nizovima (npr. na
+  // 6-10 tačaka zna ispasti ispod praga zbog zaokruživanja).
+  if (!_msrDrawOn) {
+    const n = pts.length;
+    let showIdx;
+    if (n <= 4) {
+      showIdx = new Set(pts.map((_, i) => i));
+    } else {
+      const keepCount = Math.max(3, Math.floor(n * 0.8));
+      showIdx = new Set();
+      for (let i = 0; i < keepCount; i++) showIdx.add(Math.round(i * (n - 1) / (keepCount - 1)));
+    }
+    pts.forEach((p, idx) => {
+      if (!showIdx.has(idx)) return;
+      const ptColor = idx === 0 ? '#4ade80' : (idx === pts.length-1 ? '#f87171' : _msrColor);
+      const mk = L.marker([p.lat, p.lng], {
+        draggable: true,
+        zIndexOffset: 500,
+        icon: L.divIcon({
+          className: '',
+          html: `<div style="width:13px;height:13px;border-radius:50%;background:${ptColor};border:2.5px solid #fff;box-shadow:0 0 5px rgba(0,0,0,0.85);box-sizing:border-box;cursor:grab;"></div>`,
+          iconSize:[13,13], iconAnchor:[6,6]
+        })
+      });
+      mk.bindTooltip(`Tačka ${idx+1}${p.elev != null ? ' · '+Math.round(p.elev)+' m nv' : ''}`, {permanent:false, direction:'top', offset:[0,-4]});
+      mk.on('dragend', async function(e) {
+        const ll = e.target.getLatLng();
+        _msrPts[idx] = { lat: ll.lat, lng: ll.lng, elev: null };
+        _msrRedraw(); _msrUpdPanel();
+        _msrSyncRegistry();
+        const elev = await _msrFetchElev(ll.lat, ll.lng);
+        if (_msrPts[idx]) { _msrPts[idx].elev = elev; _msrRedraw(); _msrUpdPanel(); _msrSyncRegistry(); }
+      });
+      mk.on('contextmenu', function(e) {
+        L.DomEvent.stopPropagation(e);
+        _msrPts.splice(idx, 1);
+        _msrRedraw(); _msrUpdPanel(); _msrSyncRegistry();
+      });
+      _msrLayer.addLayer(mk);
     });
-    mk.bindTooltip(`Tačka ${idx+1}${p.elev != null ? ' · '+Math.round(p.elev)+' m nv' : ''}`, {permanent:false, direction:'top', offset:[0,-4]});
-    mk.on('dragend', async function(e) {
-      const ll = e.target.getLatLng();
-      _msrPts[idx] = { lat: ll.lat, lng: ll.lng, elev: null };
-      _msrRedraw(); _msrUpdPanel();
-      _msrSyncRegistry();
-      const elev = await _msrFetchElev(ll.lat, ll.lng);
-      if (_msrPts[idx]) { _msrPts[idx].elev = elev; _msrRedraw(); _msrUpdPanel(); _msrSyncRegistry(); }
-    });
-    mk.on('contextmenu', function(e) {
-      L.DomEvent.stopPropagation(e);
-      _msrPts.splice(idx, 1);
-      _msrRedraw(); _msrUpdPanel(); _msrSyncRegistry();
-    });
-    _msrLayer.addLayer(mk);
-  });
+  }
 }
 
 function _msrUpdPanel() {
