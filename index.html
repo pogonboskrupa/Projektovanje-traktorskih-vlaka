@@ -4548,7 +4548,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.70.0';
+const APP_VER = 'v3.70.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -17767,7 +17767,9 @@ function pkml(doc, col, op) {
     pm.querySelectorAll('Polygon').forEach(pg => {
       const cs = pcs(pg.querySelector('outerBoundaryIs coordinates,coordinates')?.textContent);
       if (cs.length > 2) {
-        const l = L.polygon(cs, {color:col, weight:2, opacity:op, fillOpacity:0});
+        // fillOpacity 0.001 (ne 0) — vizuelno nevidljivo, ali fill ostaje
+        // "painted" pa klik unutar poligona radi (vidi napomenu u applyKmlStyle).
+        const l = L.polygon(cs, {color:col, weight:2, opacity:op, fillOpacity:0.001});
         l._kmlIsPolygon = true;
         l._kmlName = name; l._kmlDesc = desc; l._kmlExtData = extData;
         if (name) l.bindTooltip(_escHtml(name), {sticky:true});
@@ -18103,7 +18105,11 @@ function pkmlStyled(doc, opts) {
     pm.querySelectorAll('Polygon').forEach(pg => {
       const cs = pcs(pg.querySelector('outerBoundaryIs coordinates,coordinates')?.textContent);
       if (cs.length > 2) {
-        const polyOpts = {...opts, fillOpacity: opts.fillOpacity !== undefined ? opts.fillOpacity : 0};
+        // 0.001 umjesto 0 kad nema (ili je sačuvano kao) fill — vidi napomenu u
+        // applyKmlStyle: fill-opacity:0 u SVG-u zna ugasiti hit-test za klik
+        // unutar poligona u nekim WebView verzijama.
+        const fo = opts.fillOpacity;
+        const polyOpts = {...opts, fillOpacity: (fo === undefined || fo === 0) ? 0.001 : fo};
         const l = L.polygon(cs, polyOpts);
         l._kmlIsPolygon = true;
         l._kmlName = name; l._kmlDesc = desc; l._kmlExtData = extData;
@@ -18268,7 +18274,12 @@ function applyKmlStyle(i) {
         if (patUrl) { lo.fillColor = patUrl; lo.fillOpacity = 1; }
         else { lo.fillColor = k.fillCol || k.col; lo.fillOpacity = k.fillOpacity ?? 0.35; }
       } else {
-        lo.fillOpacity = 0;
+        // NE 0 — SVG fill-opacity:0 se u nekim WebView/Chromium verzijama tretira
+        // kao "nema fill uopšte" pa se hit-test za klik unutar poligona gasi
+        // (klik nikad ne stigne do layer-a). 0.001 je vizuelno identično
+        // nevidljivo, ali fill ostaje "painted" pa cijela unutrašnjost i dalje
+        // hvata klik (isti trik kao nevidljivi hit-sloj za linije).
+        lo.fillOpacity = 0.001;
       }
     } else {
       lo.fillColor = k.col;
