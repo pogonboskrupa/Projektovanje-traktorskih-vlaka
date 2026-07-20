@@ -4545,7 +4545,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.65.0';
+const APP_VER = 'v3.66.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -19003,6 +19003,12 @@ function openGraniceModal() {
 }
 function closeGraniceModal() {
   closeLayerSheet();
+  _kmlEditIdx = -1;
+}
+
+function _glKmlToggleEdit(i) {
+  _kmlEditIdx = _kmlEditIdx === i ? -1 : i;
+  rndGraniceModal();
 }
 
 async function reloadGraniceSlojevi() {
@@ -19093,10 +19099,11 @@ function rndGraniceModal() {
 
     if (!collapsed) {
       items.forEach(({ k, i }) => {
-        const d = k.dash || '';
-        const w = k.weight || 2;
-        const op = Math.round((k.opacity ?? 0.9) * 100);
         const shortName = k.name.includes('/') ? k.name.split('/').slice(1).join('/') : k.name;
+        const cnt  = _kmlFeatureCount(k.grp);
+        const lenM = _kmlCalcLen(k.grp);
+        const lenS = lenM > 0 ? _tragFmtLen(lenM) : '';
+        const meta = [cnt + (cnt===1?' element':' elemenata'), lenS].filter(Boolean).join(' · ');
         const hasGlobal = !!_globalKmlStyles[k._key];
         // Detect if user has a local override vs global
         let hasUserOverride = false;
@@ -19104,40 +19111,24 @@ function rndGraniceModal() {
           const um = JSON.parse(localStorage.getItem(_KML_USER_STYLES_KEY) || '{}');
           hasUserOverride = !!um[k._key];
         } catch {}
+        const isEdit = _kmlEditIdx === i;
 
-        html += `<div class="gl-row${k.vis ? '' : ' hidden-layer'}">
-          <div class="gl-name" style="display:flex;align-items:center;gap:6px;">
-            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${shortName}</span>
-            ${!isAdmin && hasGlobal && hasUserOverride ? `<button class="gl-btn" onclick="resetLayerToGlobal(${i})" title="Vrati na admin default" style="font-size:10px;padding:1px 6px;flex-shrink:0;color:#fbbf24;border-color:#92400e;">↺ default</button>` : ''}
+        // Klik na red = otvori/zatvori info + editor stila (isti obrazac kao
+        // Oznake panel — _renderKmlEditor daje ime/tag/boju/debljinu/stil/
+        // providnost/punjenje na jednom mjestu umjesto uvijek-otvorenih
+        // kontrola za svaki učitani sloj, što je postajalo nepregledno kad
+        // ima puno slojeva u jednom folderu).
+        html += `<div class="oz-row${k.vis ? '' : ' hidden-layer'}" onclick="event.stopPropagation();_glKmlToggleEdit(${i})">
+          <div class="oz-row-color" style="background:${k.col};width:5px;height:38px;border-radius:3px;flex-shrink:0;"></div>
+          <div class="oz-row-info">
+            <div class="oz-row-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(shortName)}</div>
+            <div class="oz-row-meta">${meta}</div>
           </div>
-          <div class="gl-controls">
-            <div class="gl-swatch-wrap" title="Odaberi boju">
-              <span class="gl-swatch" style="background:${k.col};"></span>
-              <input type="color" value="${k.col}" oninput="setKmlColor(${i},this.value)">
-            </div>
-            ${['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ffffff','#94a3b8','#000000'].map(c=>`<span class="gl-preset${k.col===c?' active':''}" style="background:${c};" onclick="setKmlColor(${i},'${c}')" title="${c}"></span>`).join('')}
-            <span style="width:1px;height:18px;background:#1e3a5f;flex-shrink:0;"></span>
-            <button class="gl-btn ${d===''?'on':''}" onclick="setKmlDash(${i},'')" title="Puna linija">—</button>
-            <button class="gl-btn ${d==='6 4'?'on':''}" onclick="setKmlDash(${i},'6 4')" title="Isprekidana">╌</button>
-            <button class="gl-btn ${d==='12 6'?'on':''}" onclick="setKmlDash(${i},'12 6')" title="Debela isprekidana">╍</button>
-          </div>
-          <div class="gl-controls" style="margin-top:5px;">
-            <span style="font-size:10px;color:#475569;letter-spacing:0.5px;text-transform:uppercase;font-weight:bold;flex-shrink:0;">Debljina</span>
-            <div class="gl-weight-row" title="Debljina linije">
-              ${WEIGHTS.map(ww=>`<button class="gl-wt-btn ${w===ww?'on':''}" onclick="setKmlWeight(${i},${ww})" title="${ww}px"><span class="gl-wt-line" style="height:${Math.max(1,Math.round(ww))}px;"></span></button>`).join('')}
-            </div>
-          </div>
-          <div class="gl-controls" style="margin-top:6px;">
-            <div class="gl-opacity-row">
-              <span>Providnost</span>
-              <input type="range" min="10" max="100" value="${op}" oninput="setKmlOpacity(${i},this.value/100)" onchange="setKmlOpacity(${i},this.value/100)">
-              <span style="min-width:28px;text-align:right;color:#e2e8f0;">${op}%</span>
-            </div>
-            <div class="gl-sep"></div>
-            <button class="gl-btn" onclick="togK(${i})" title="${k.vis?'Sakrij sloj':'Prikaži sloj'}" style="font-size:14px;padding:2px 8px;">${k.vis?'👁':'🚫'}</button>
-            <button class="gl-btn danger" onclick="_dlgConfirm('Ukloniti sloj?',{danger:true}).then(ok=>{if(ok)delK(${i})})" title="Ukloni sloj">✕</button>
-          </div>
-        </div>`;
+          ${!isAdmin && hasGlobal && hasUserOverride ? `<button class="gl-btn" onclick="event.stopPropagation();resetLayerToGlobal(${i})" title="Vrati na admin default" style="font-size:10px;padding:1px 6px;flex-shrink:0;color:#fbbf24;border-color:#92400e;">↺</button>` : ''}
+          <button class="oz-vis-btn${k.vis?' on':''}" onclick="event.stopPropagation();togK(${i})" title="${k.vis?'Sakrij':'Prikaži'}">${k.vis ? '👁' : '🙈'}</button>
+          <span class="oz-expand-arrow${isEdit?' open':''}">›</span>
+        </div>
+        ${isEdit ? _renderKmlEditor(i) : ''}`;
       });
     }
   });
