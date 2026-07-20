@@ -1634,6 +1634,11 @@ select:focus { outline:none; border-color:#3b82f6; }
   text-transform:uppercase; color:#64748b; margin-bottom:5px;
 }
 #dem-legend .leg-sep { border-top:1px solid #1e293b; margin:7px 0 5px; }
+/* ── Stabilizacija GPS signala prije snimanja ── */
+@keyframes gstabspin { to { transform: rotate(360deg); } }
+.gstab-m { display:flex; flex-direction:column; gap:2px; flex:1; background:#0b1220; border:1px solid #1e293b; border-radius:8px; padding:7px 4px; }
+.gstab-m span { font-size:9px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; }
+.gstab-m b { font-size:14px; }
 .leg-compass {
   display:grid; grid-template-columns:1fr 1fr;
   gap:3px; width:88px;
@@ -4540,7 +4545,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.63.0';
+const APP_VER = 'v3.64.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -12823,12 +12828,12 @@ function dodiISnimi() {
     setTimeout(() => {
       if (actI !== null) {
         switchTab('karta');
+        // Lager se na terenu imenuje ODMAH na kamionskom putu (početak snimanja), ne
+        // tek na kraju vlake duboko u šumi. _pendingLagerIdx → dijalog se otvori čim
+        // snimanje stvarno počne (poslije GPS stabilizacije). Ako se preskoči, stopRec
+        // ga ponovo nudi (guard: v.lager).
+        _pendingLagerIdx = actI;
         togRec();
-        // Lager se na terenu imenuje ODMAH na kamionskom putu (početak snimanja),
-        // ne tek na kraju vlake duboko u šumi. Dijalog ne blokira snimanje;
-        // ako se preskoči, stopRec ga ponovo nudi (guard: v.lager).
-        const _lagIdx = actI;
-        setTimeout(() => { if (recOn) _showLagerDlg(_lagIdx, true); }, 600);
       }
     }, 30);
   });
@@ -13342,9 +13347,18 @@ function _iosBgRecWarn() {
   );
 }
 
+let _pendingLagerIdx = null;   // dodiISnimi: lager dijalog čeka da snimanje stvarno počne (poslije stabilizacije)
+
 function togRec() {
   if (!recOn) {
     if (actI === null) { showToast('⚠ Prvo dodaj vlaku!'); return; }
+    _gpsStabilizeGate(_togRecBegin);
+  } else {
+    stopRec();
+  }
+}
+
+function _togRecBegin() {
     _clearNastaviMarkers();
     recOn = true; recPaused = false; _recParentIdx = null;
     _kfReset(); _lastRecTime = 0; _lastPtAcceptedAt = 0;
@@ -13367,9 +13381,12 @@ function togRec() {
     _startGpsWatchdog();
     _updFabVisibility();
     _crashStartTimer();   // auto-save svakih 30s
-  } else {
-    stopRec();
-  }
+    // dodiISnimi: lager se imenuje na startu (kamionski put) — sad kad je snimanje
+    // stvarno počelo (poslije stabilizacije signala), a ne na fiksni tajmer poslije klika.
+    if (_pendingLagerIdx != null) {
+      const li = _pendingLagerIdx; _pendingLagerIdx = null;
+      setTimeout(() => { if (recOn) _showLagerDlg(li, true); }, 500);
+    }
 }
 
 function stopRec() {
@@ -13947,6 +13964,99 @@ function _updRecSignal(ac) {
   el.textContent = txt;
 }
 
+// ─── STABILIZACIJA GPS SIGNALA PRIJE POČETKA SNIMANJA ────────────────────────
+// Terenski GPS na startu (hladan prijem, izlazak ispod krošnje/iz džepa) "luta" —
+// prvih nekoliko fikseva skače tamo-vamo. Snimanje (vlaka / doznaka pojas / trag) NE
+// počinje dok se ne skupi nekoliko UZASTOPNIH fikseva koji su i dovoljno tačni i
+// skupljeni oko iste tačke (malo rasipanje = nema lutanja). Uvijek postoji izlaz
+// "Započni svejedno" — u gustom sastojku tražena tačnost se zna nikad ne dostići.
+const GPS_STAB_ACC      = 12;    // m — tražena tačnost fiksa
+const GPS_STAB_SPREAD   = 6;     // m — najveće rasipanje zadnjih fikseva oko centra
+const GPS_STAB_NEED     = 4;     // koliko uzastopnih fikseva mora zadovoljiti uslov
+const GPS_STAB_FORCE_MS = 9000;  // poslije koliko se nudi "Započni svejedno"
+
+let _gpsStabActive  = false;
+let _gpsStabCb      = null;   // onP zove ovo sa svakim fiksom dok čekamo stabilizaciju
+let _gpsStabWasOn   = false;  // je li GPS bio uključen prije gate-a (za povratak na odustanak)
+let _gpsStabBeginFn = null;
+
+function _gpsStabilizeGate(beginFn) {
+  if (_gpsStabActive) return;                          // već čekamo stabilan signal
+  if (!navigator.geolocation) { beginFn(); return; }   // nema šta stabilizirati
+  _gpsStabActive  = true;
+  _gpsStabBeginFn = beginFn;
+  _gpsStabWasOn   = gpsOn;
+  if (!gpsOn) startGPS();                               // treba nam dotok fikseva za procjenu
+
+  const buf = [];
+  _buildGpsStabOverlay();
+
+  _gpsStabCb = (la, lo, ac) => {
+    buf.push({ la, lo, ac });
+    while (buf.length > GPS_STAB_NEED) buf.shift();
+    const cLa = buf.reduce((s, p) => s + p.la, 0) / buf.length;
+    const cLo = buf.reduce((s, p) => s + p.lo, 0) / buf.length;
+    const spread = buf.length >= 2 ? Math.max(...buf.map(p => dst(cLa, cLo, p.la, p.lo))) : null;
+    const ready = buf.length >= GPS_STAB_NEED && ac <= GPS_STAB_ACC && spread != null && spread <= GPS_STAB_SPREAD;
+    _updGpsStabOverlay(ac, spread, buf.length, ready);
+    if (ready) _gpsStabFinish(true);
+  };
+
+  setTimeout(() => {
+    const f = document.getElementById('gstab-force');
+    if (f && _gpsStabActive) f.style.display = '';
+  }, GPS_STAB_FORCE_MS);
+}
+
+function _gpsStabFinish(ok) {
+  if (!_gpsStabActive) return;
+  _gpsStabActive = false;
+  _gpsStabCb = null;
+  const ov = document.getElementById('gstab-overlay');
+  if (ov) ov.remove();
+  const fn = _gpsStabBeginFn;
+  _gpsStabBeginFn = null;
+  if (ok) { if (fn) fn(); }
+  else {
+    _pendingLagerIdx = null;             // odustao u "Dodaj i snimi" toku — ne nudi lager kasnije
+    if (!_gpsStabWasOn) stopGPS();       // GPS je bio ugašen prije gate-a — vrati u prethodno stanje
+  }
+}
+function _gpsStabForce()  { showToast('▶ Započeto uz nestabilan signal'); _gpsStabFinish(true); }
+function _gpsStabCancel() { _gpsStabFinish(false); showToast('✕ Snimanje otkazano'); }
+
+function _buildGpsStabOverlay() {
+  if (document.getElementById('gstab-overlay')) return;
+  const d = document.createElement('div');
+  d.id = 'gstab-overlay';
+  d.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(2,6,23,0.74);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;';
+  d.innerHTML = `
+    <div style="background:#0f172a;border:1.5px solid #1e3a5f;border-radius:16px;padding:22px 20px 16px;max-width:330px;width:100%;box-shadow:0 14px 44px rgba(0,0,0,0.6);text-align:center;">
+      <div style="width:50px;height:50px;margin:2px auto 14px;border:4px solid #1e3a5f;border-top-color:#38bdf8;border-radius:50%;animation:gstabspin 0.9s linear infinite;"></div>
+      <div style="font-size:15px;font-weight:bold;color:#e2e8f0;margin-bottom:4px;">📡 Stabiliziram GPS signal…</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.5;">Sačekaj da signal prestane lutati — snimanje počinje čim se smiri.</div>
+      <div id="gstab-metrics" style="display:flex;gap:6px;justify-content:center;margin-bottom:16px;">
+        <div class="gstab-m"><span>Tačnost</span><b id="gstab-acc" style="color:#475569;">—</b></div>
+        <div class="gstab-m"><span>Lutanje</span><b id="gstab-spr" style="color:#475569;">—</b></div>
+        <div class="gstab-m"><span>Fiksevi</span><b id="gstab-cnt" style="color:#475569;">0/${GPS_STAB_NEED}</b></div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="_gpsStabCancel()" style="flex:1;padding:10px;background:#1e293b;border:1px solid #334155;border-radius:9px;color:#94a3b8;font-size:13px;font-weight:600;cursor:pointer;">Odustani</button>
+        <button id="gstab-force" onclick="_gpsStabForce()" style="display:none;flex:1;padding:10px;background:#422006;border:1px solid #92400e;border-radius:9px;color:#fbbf24;font-size:13px;font-weight:600;cursor:pointer;">Započni svejedno</button>
+      </div>
+    </div>`;
+  document.body.appendChild(d);
+}
+
+function _updGpsStabOverlay(ac, spread, n, ready) {
+  const accEl = document.getElementById('gstab-acc');
+  const sprEl = document.getElementById('gstab-spr');
+  const cntEl = document.getElementById('gstab-cnt');
+  if (accEl) { accEl.textContent = `±${Math.round(ac)}m`; accEl.style.color = ac <= 8 ? '#4ade80' : ac <= GPS_STAB_ACC ? '#fbbf24' : '#f87171'; }
+  if (sprEl) { sprEl.textContent = spread == null ? '—' : `${spread.toFixed(1)}m`; sprEl.style.color = spread == null ? '#475569' : spread <= GPS_STAB_SPREAD ? '#4ade80' : '#f87171'; }
+  if (cntEl) { cntEl.textContent = `${Math.min(n, GPS_STAB_NEED)}/${GPS_STAB_NEED}`; cntEl.style.color = ready ? '#4ade80' : '#e2e8f0'; }
+}
+
 // ─── PRECIZNA TAČKA (accuracy-weighted prosjek N fikseva) ──────────────
 let _precizActive = false;
 let _precizBuf = [];  // [{la, lo, ac}]
@@ -14347,6 +14457,7 @@ function onP(p) {
   lastP = { la, lo, al: filtAl ?? 0, ac };
   _lastGpsFixTime = Date.now();
   _gpsRestartCount = 0;
+  if (_gpsStabCb) { try { _gpsStabCb(la, lo, ac); } catch(e) {} }
   _addTragPoint(la, lo, ac, al, gpsSpeed);
   _updMcdDist();
   if (_activeTab === 'teren') terenRender();
@@ -15484,6 +15595,11 @@ function fabSnimTrag() {
     _crashClearTrag();  // normalno sačuvan
     _bgRecStopIfIdle(); // otpusti pozadinski servis ako ništa drugo ne snima
   } else {
+    _gpsStabilizeGate(_fabSnimTragBegin);
+  }
+}
+
+function _fabSnimTragBegin() {
     if (!gpsOn) startGPS();
     _setFreeView(false);
     _tragOn     = true;
@@ -15503,7 +15619,6 @@ function fabSnimTrag() {
     _updTragStats();
     _crashStartTimer();   // auto-save svakih 30s
     _bgRecStart('trag');  // pozadinsko snimanje — nastavi i kad app ode u pozadinu
-  }
 }
 
 function togTragPause() {
@@ -31177,10 +31292,14 @@ let _dozGpsProjId = null;      // uhvaćen na startu — ne mijenja se tokom sni
 let _dozGpsUserId = null;
 const _DOZ_GPS_MIN_DIST = 3;   // metara — minimalni razmak između tačaka (filtrira GPS šum)
 
-async function dozStartGPS() {
+function dozStartGPS() {
   if (_dozGpsOn) return;        // već snima — spriječi dupli watch (memory leak)
   if (!_dozSelId || !sbUser) { showToast('Odaberi odjel i prijavi se'); return; }
   if (!navigator.geolocation) { showToast('GPS nije dostupan'); return; }
+  _gpsStabilizeGate(_dozStartGPSBegin);   // ne kreni dok signal ne prestane lutati
+}
+
+async function _dozStartGPSBegin() {
   if (_dozGpsWatchId !== null) { navigator.geolocation.clearWatch(_dozGpsWatchId); _dozGpsWatchId = null; }
   _dozGpsOn = true;
   _dozGpsPts = [];
@@ -31201,6 +31320,10 @@ async function dozStartGPS() {
   document.getElementById('doz-gps-elev').style.display = 'none';
   _dozUpdGpsStats(null);
   _bgRecStart('pojas doznake');  // wake lock + foreground service — snima i u pozadini
+  // Doznaka koristi VLASTITI watch (druga tabela/filtriranje). Glavni GPS je bio uključen
+  // samo privremeno radi stabilizacije — ako prije nije bio aktivan, ugasi ga da ne teku
+  // dva paralelna watch-a. (Ako je korisnik i inače imao GPS marker uključen, ostaje.)
+  if (!_gpsStabWasOn) stopGPS();
 
   _dozGpsWatchId = navigator.geolocation.watchPosition(async pos => {
     if (!_dozGpsOn || !_dozGpsProjId || !_dozGpsUserId) return;
