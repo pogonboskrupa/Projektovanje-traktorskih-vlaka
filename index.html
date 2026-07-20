@@ -4548,7 +4548,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.69.0';
+const APP_VER = 'v3.69.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -22389,6 +22389,13 @@ function switchTab(tab) {
     if (_dozGpsOn) showToast('📍 GPS snimanje nastavlja u pozadini');
   }
   if (prev === 'karta' && tab !== 'karta' && typeof _guideOn !== 'undefined' && _guideOn) _guideCancel(true);
+  // Napuštanje Izmjeri panela usred crtanja (Crtaj mod ili obično klikanje)
+  // bez "Završi" je ranije ostavljalo _msrOn/_msrDrawOn zaglavljene — tačke
+  // su ostajale nacrtane ali BEZ markera (koji se namjerno skrivaju dok traje
+  // Crtaj) i bez ikakvog načina da se izbrišu ili sačuvaju. Umjesto da se to
+  // dozvoli, tretiraj napuštanje kao da je "Završi" pritisnut — msrStop()
+  // vraća markere (isključi Crtaj), ponudi snimanje ako ima ≥2 tačke.
+  if (prev === 'mjtrg' && tab !== 'mjtrg' && typeof _msrOn !== 'undefined' && _msrOn) msrStop();
   const panel    = document.getElementById('panel');
   const pproj    = document.getElementById('proj-panel');
   const pdoz     = document.getElementById('doznaka-panel');
