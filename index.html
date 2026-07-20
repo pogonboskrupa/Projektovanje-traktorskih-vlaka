@@ -4548,7 +4548,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.69.1';
+const APP_VER = 'v3.70.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -17819,7 +17819,7 @@ function _parseKmlExtData(pm) {
 }
 
 function _bindKmlPopup(layer) {
-  layer.on('click', function(e) {
+  const _onClick = function(e) {
     L.DomEvent.stopPropagation(e);
     if (_dozKmlSelMode && layer._kmlIsPolygon) {
       _dozKmlSelToggle(layer);
@@ -17831,7 +17831,24 @@ function _bindKmlPopup(layer) {
       .setLatLng(e.latlng)
       .setContent(_kmlPopupHtml(layer, uid))
       .openOn(map);
-  });
+  };
+  layer.on('click', _onClick);
+
+  // KML granice/linije su tanke i često isprekidane — bez šireg nevidljivog
+  // hit-sloja tap prstom na terenu skoro nikad ne pogodi samu liniju (isti
+  // problem i rješenje kao attachPolyClick za vlaka linije, 24px "duh" sloj).
+  // Poligoni (fillOpacity može biti 0, ali fill hit-test i dalje radi kroz
+  // cijelu unutrašnjost) i tačke (već imaju radius) to ne trebaju.
+  if (!layer._kmlIsPolygon && !layer._kmlIsPoint && layer.getLatLngs) {
+    const hit = L.polyline(layer.getLatLngs(), {
+      weight: 20, opacity: 0.001, color: '#000',
+      pane: layer.options.pane, renderer: layer.options.renderer, interactive: true
+    });
+    layer.on('add',    () => { try { hit.addTo(map); } catch(e) {} });
+    layer.on('remove', () => { try { map.removeLayer(hit); } catch(e) {} });
+    if (layer._map) { try { hit.addTo(layer._map); } catch(e) {} }
+    hit.on('click', _onClick);
+  }
 }
 
 function _kmlPopupHtml(layer, uid) {
