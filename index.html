@@ -4545,7 +4545,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.64.1';
+const APP_VER = 'v3.65.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -22515,6 +22515,14 @@ function _msrSetMode(m) {
   };
   const hint = document.getElementById('msr-hint');
   if (hint && !_msrOn) hint.textContent = hints[m];
+  // "Crtaj" nema smisla za nagib (fiksno 2 tačke, ne kontinuiran niz) — sakrij i isključi
+  const drawRow = document.getElementById('msr-draw-row');
+  if (drawRow) drawRow.style.display = (m === 'nagib') ? 'none' : '';
+  if (m === 'nagib' && _msrDrawOn) {
+    const chk = document.getElementById('msr-draw-chk');
+    if (chk) chk.checked = false;
+    _msrToggleDraw(false);
+  }
 }
 
 function _msrSetColor(c, el) {
@@ -22527,6 +22535,37 @@ function _msrSetColor(c, el) {
 function msrAddCenter() {
   if (!_msrOn) return;
   _msrAddPoint(map.getCenter());
+}
+
+// ── "Crtaj" — kao kod crtanja vlake (toggleDrawDrag/_onMapMoveDraw): tačke se
+// dodaju automatski dok korisnik pomjera (panuje) mapu ispod fiksnog crosshair-a
+// na sredini, umjesto da tapka svaku tačku pojedinačno — brže za granice/poligone.
+let _msrDrawOn = false;
+let _msrDrawLastPt = null;
+const MSR_DRAW_MIN_M = 4; // minimalna udaljenost (m) između tačaka u crtaj modusu
+
+function _msrToggleDraw(on) {
+  _msrDrawOn = !!on;
+  _msrDrawLastPt = null;
+  if (_msrDrawOn) {
+    if (!_msrOn) msrStart(); // auto-pokreni mjerenje ako još nije aktivno
+    map.on('move', _onMapMoveMsr);
+    const hint = document.getElementById('msr-hint');
+    if (hint) hint.innerHTML = '✍️ Crtaj uključeno — pomjeraj mapu, tačke se dodaju same.<br><small style="color:#475569">Isključi kvačicu za ručno klikanje</small>';
+  } else {
+    map.off('move', _onMapMoveMsr);
+  }
+}
+
+function _onMapMoveMsr() {
+  if (!_msrDrawOn || !_msrOn) return;
+  const c = map.getCenter();
+  if (_msrDrawLastPt) {
+    const d = dst(_msrDrawLastPt.la, _msrDrawLastPt.lo, c.lat, c.lng);
+    if (d < MSR_DRAW_MIN_M) return;
+  }
+  _msrDrawLastPt = { la: c.lat, lo: c.lng };
+  _msrAddPoint(c);
 }
 
 function _mjtrgTab(t) {
@@ -22755,6 +22794,11 @@ function msrStop(skipSave) {
   map.getContainer().style.cursor = '';
   map.off('click', _msrMapClick);
   map.off('dblclick', _msrMapDblClick);
+  if (_msrDrawOn) {
+    const chk = document.getElementById('msr-draw-chk');
+    if (chk) chk.checked = false;
+    _msrToggleDraw(false);
+  }
   const btn = document.getElementById('btn-msr-start');
   if (btn) { btn.textContent='▶ Počni'; btn.style.background=''; }
   const xh = document.getElementById('msr-xhair');
@@ -33524,6 +33568,12 @@ if (typeof AndroidDownload !== 'undefined') {
             Pozicija tačke
           </button>
         </div>
+
+        <!-- Crtaj (dodaj tačke automatski dok se mapa pomjera — kao kod crtanja vlake) -->
+        <label id="msr-draw-row" style="display:flex;align-items:center;gap:7px;margin-top:8px;font-size:12px;color:#94a3b8;cursor:pointer;">
+          <input type="checkbox" id="msr-draw-chk" onchange="_msrToggleDraw(this.checked)" style="width:16px;height:16px;flex-shrink:0;">
+          ✍️ Crtaj — dodaj tačke dok pomjeraš mapu
+        </label>
 
         <!-- Rezultati (vidljivi kad je mjerenje aktivno) -->
         <div id="msr-total-box" style="display:none;background:#0f172a;border:1px solid #1e3a5f;border-radius:10px;padding:10px 12px;margin-top:10px;">
