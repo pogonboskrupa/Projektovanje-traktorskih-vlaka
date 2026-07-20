@@ -4476,7 +4476,10 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
     <!-- Razmjera -->
     <div style="margin-bottom:12px;">
-      <div class="lbl" style="margin-bottom:6px;">Razmjera karte</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div class="lbl" style="margin:0;">Razmjera karte</div>
+        <span id="pm-gps-acc" style="font-size:11px;color:#94a3b8;" title="Trenutna tačnost GPS pozicije"></span>
+      </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         <button class="scale-btn"     id="pscl-5k"   onclick="setScale(5000)">1:5 000</button>
         <button class="scale-btn sel" id="pscl-10k"  onclick="setScale(10000)">1:10 000</button>
@@ -4545,7 +4548,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.66.0';
+const APP_VER = 'v3.67.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -23556,6 +23559,20 @@ function applyCustomScale() {
 }
 
 function updatePrintInfo() {
+  // GPS preciznost — kontekst pri štampanju (npr. ako se štampa trenutni
+  // prikaz sa live pozicijom, korisnik odmah vidi koliko je ta tačka precizna).
+  const accEl = document.getElementById('pm-gps-acc');
+  if (accEl) {
+    const ac = lastP?.ac;
+    if (ac == null) {
+      accEl.textContent = '';
+    } else {
+      const col = ac <= 5 ? '#4ade80' : ac <= 10 ? '#eab308' : ac <= 15 ? '#fb923c' : '#f87171';
+      accEl.style.color = col;
+      accEl.textContent = `📡 ±${Math.round(ac)} m`;
+    }
+  }
+
   const p = PAPER[paperFmt];
   const realW_m  = (p.w / 1000) * printScale;
   const realH_m  = (p.h / 1000) * printScale;
