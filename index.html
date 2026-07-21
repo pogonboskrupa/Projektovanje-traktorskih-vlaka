@@ -3782,9 +3782,10 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
       <!-- KML DIJELJENJE -->
       <div class="sec">
         <div class="sec-t">📤 Podijeli KML Odjela</div>
-        <button class="btn g" style="margin-bottom:8px;" onclick="kmlNaMail()">✉️ POŠALJI NA MAIL</button>
-        <button class="btn b" style="margin-bottom:8px;" onclick="kmlPreuzmi()">💾 SAČUVAJ NA UREĐAJ</button>
-        <button class="btn gr" onclick="kmlKopiraj()">📋 KOPIRAJ KML TEKST</button>
+        <button class="btn g" style="margin-bottom:8px;" onclick="kmlPodijeli()">📤 POŠALJI FAJL (Viber/Mail/Bluetooth...)</button>
+        <button class="btn gr" style="margin-bottom:8px;" onclick="kmlNaMail()">✉️ Samo tekst na mail (bez fajla)</button>
+        <button class="btn gr" style="margin-bottom:8px;" onclick="kmlPreuzmi()">💾 Sačuvaj na uređaj</button>
+        <button class="btn gr" onclick="kmlKopiraj()">📋 Kopiraj KML tekst</button>
         <div id="kml-share-info" style="margin-top:8px;font-size:11px;color:#64748b;line-height:1.5;display:none;"></div>
       </div>
 
@@ -4539,8 +4540,9 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
     <h3>⬆ Export KML</h3>
     <textarea id="etxt" readonly></textarea>
     <div class="mbtns">
+      <button class="btn g" onclick="kmlModalShare()">📤 Pošalji</button>
       <button class="btn b" onclick="dlKML()">⬇ Preuzmi .kml</button>
-      <button class="btn g" onclick="cpKML()">📋 Kopiraj</button>
+      <button class="btn gr" onclick="cpKML()">📋 Kopiraj</button>
       <button class="btn gr" onclick="closeM()">Zatvori</button>
     </div>
   </div>
@@ -4548,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.70.1';
+const APP_VER = 'v3.71.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -19181,6 +19183,7 @@ function showExport(){document.getElementById('etxt').value=mkKML();document.get
 function closeM(){document.getElementById('modal').classList.remove('show');}
 function dlKML(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([mkKML()],{type:'application/vnd.google-earth.kml+xml'}));a.download='vlake.kml';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
 function cpKML(){navigator.clipboard.writeText(document.getElementById('etxt').value);showToast('Kopirano!');}
+function kmlModalShare(){ _shareKmlOrDownload('vlake.kml', mkKML(), 'Traktorske vlake', 'Traktorske vlake', dlKML); }
 
 // === PANEL MOBILE ===
 function togglePanel(){
@@ -19399,8 +19402,8 @@ function exportDnevniKml(date) {
   const toExp=vlake.filter(v=>names.has(v.nm));
   if (toExp.length===0){showToast('Nema geometrije za ovaj dan u memoriji.');return;}
   const kml=_makeKml(`Vlake ${fmtDate(date)}`,toExp);
-  _downloadKml(`vlake_${date}.kml`,kml);
-  showToast(`📥 KML: ${toExp.length} vlak${toExp.length===1?'a':'e'}`);
+  const fname=`vlake_${date}.kml`;
+  _shareKmlOrDownload(fname, kml, `Vlake ${fmtDate(date)}`, `Vlake ${fmtDate(date)}`, () => _downloadKml(fname, kml));
 }
 
 function exportProjektKml() {
@@ -19419,8 +19422,8 @@ function exportProjektKml() {
   if(toExp.length===0){showToast('Nema vlaka za izvoz.');return;}
   const kml=_makeKml(title,toExp);
   const fname=(p?.odjel||'projekat').replace(/[^a-zA-Z0-9čćžšđČĆŽŠĐ_-]/g,'_');
-  _downloadKml(`vlake_${fname}.kml`,kml);
-  showToast(`📥 KML: ${toExp.filter(v=>v.pts.length>=2).length} vlak${toExp.filter(v=>v.pts.length>=2).length===1?'a':'e'}`);
+  const outName=`vlake_${fname}.kml`;
+  _shareKmlOrDownload(outName, kml, title, title, () => _downloadKml(outName, kml));
 }
 
 rndList();
@@ -22252,6 +22255,36 @@ function kmlPreuzmi() {
   a.download=mkKMLNaziv(); a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),4000);
   showKmlInfo('💾 Fajl sačuvan: <b>'+mkKMLNaziv()+'</b>');
+}
+
+// Dijeljenje KML fajla preko native share sheet-a (Viber/Messenger/Bluetooth/
+// mail...) — isti obrazac kao _tragRegShare/_guideShareRoute: prvo native
+// AndroidShare most (APK), pa Web Share API (webapp), preuzimanje (downloadFn)
+// je STRIKTNO zadnji fallback ako dijeljenje fajlova nije podržano na uređaju.
+async function _shareKmlOrDownload(filename, kml, title, text, downloadFn) {
+  if (typeof AndroidShare !== 'undefined' && AndroidShare.shareFile) {
+    try {
+      const dataUrl = 'data:application/vnd.google-earth.kml+xml;base64,' + btoa(unescape(encodeURIComponent(kml)));
+      AndroidShare.shareFile(filename, dataUrl, title, text);
+      return;
+    } catch(e) {}
+  }
+  const file = new File([kml], filename, {type:'application/vnd.google-earth.kml+xml'});
+  if (navigator.share && navigator.canShare && navigator.canShare({files:[file]})) {
+    try {
+      await navigator.share({ files: [file], title, text });
+      return;
+    } catch(e) {
+      if (e && e.name === 'AbortError') return; // korisnik otkazao dijeljenje
+    }
+  }
+  downloadFn();
+}
+
+function kmlPodijeli() {
+  if (!vlake.length) { showToast('⚠ Nema vlaka!'); return; }
+  const odjel = getOdjel() || 'Vlake';
+  _shareKmlOrDownload(mkKMLNaziv(), mkKML(), odjel, `Traktorske vlake — ${odjel}`, kmlPreuzmi);
 }
 function kmlNaMail() {
   if (!vlake.length) { showToast('⚠ Nema vlaka!'); return; }
