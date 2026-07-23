@@ -13,6 +13,7 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.DownloadListener;
 import android.webkit.GeolocationPermissions;
@@ -43,6 +44,25 @@ import java.io.OutputStream;
 public class MainActivity extends Activity {
 
     private WebView webView;
+    // Statički — preživljava uništenje OVE Activity instance. Kad korisnik potpuno
+    // zatvori app (swipe iz recent apps) dok snimanje traje, Android zove Activity
+    // onDestroy() (task je uklonjen), ali PROCES ostaje živ jer GpsService (foreground
+    // servis) i dalje radi u istom procesu. Ako bismo tad uništili WebView, JS/GPS
+    // watch bi umro zajedno s Activity-jem — notifikacija bi i dalje pisala "snima"
+    // dok se stvarno ništa ne bilježi. Umjesto toga, WebView se NAMJERNO ne uništava
+    // (vidi onDestroy) dok je isRecordingActive true — nastavlja da izvršava JS u
+    // pozadini, "osiroćen" bez Activity-ja. Kad korisnik ponovo otvori app, onCreate
+    // ga prepozna i PONOVO ISKORISTI (ne pravi novi WebView, ne zove loadUrl) — JS
+    // stanje snimanja (vlake[]/_tragPts/watchPosition) ostaje netaknuto.
+    private static WebView sWebView;
+    // Isti razlog kao sWebView: dok je snimanje aktivno kad se Activity uništi,
+    // onDestroy() NE smije unregistrovati ovaj receiver (inače Pauza/Stop dugmad
+    // na notifikaciji tiho prestanu raditi dok je app zatvoren). Statički, da
+    // sljedeći onCreate() (ponovno otvaranje app-a dok se i dalje snima) prepozna
+    // već-registrovani receiver i PONOVO GA ISKORISTI umjesto da registruje drugi
+    // (dupli receiver = svaka notifikacijska akcija bi se izvršila dvaput).
+    private static BroadcastReceiver sRecActionReceiver;
+    private boolean reusedWebView = false;
     private ValueCallback<Uri[]> fileCallback;
     private WebViewAssetLoader assetLoader;
     private BroadcastReceiver recActionReceiver;
@@ -59,7 +79,10 @@ public class MainActivity extends Activity {
     // na drugu app), pa snimanje vlake/traga/pojasa izgleda "prekinuto" iako je
     // foreground servis i dalje aktivan. Zato onPause() u Activity-ju MORA
     // preskočiti webView.onPause() dok je snimanje u toku.
-    private volatile boolean isRecordingActive = false;
+    // STATIC (ne instance polje) — mora preživjeti uništenje ove Activity instance
+    // dok je sWebView "osiroćen" u pozadini (vidi napomenu gore); nova Activity
+    // instanca poslije ponovnog otvaranja app-a čita ISTU vrijednost.
+    private static volatile boolean isRecordingActive = false;
     private static final String APP_URL =
             "https://appassets.androidplatform.net/assets/index.html";
 
@@ -74,19 +97,36 @@ public class MainActivity extends Activity {
             getWindow().setDecorFitsSystemWindows(false);
         }
 
-        webView = new WebView(this);
-        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        if (sWebView != null) {
+            // Ponovno otvaranje app-a dok je snimanje preživjelo u pozadini (vidi
+            // napomenu kod sWebView) — iskoristi ISTI WebView, ne pravi novi i ne
+            // zovi loadUrl (to bi resetovalo JS stanje i prekinulo snimanje).
+            webView = sWebView;
+            reusedWebView = true;
+            ViewGroup oldParent = (ViewGroup) webView.getParent();
+            if (oldParent != null) oldParent.removeView(webView);
+        } else {
+            webView = new WebView(this);
+            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            sWebView = webView;
+        }
         setContentView(webView);
 
         hideSystemUI();
         requestPermissions();
+        // Uvijek rebinduj listenere/JS mostove na OVU (trenutnu) Activity instancu —
+        // i kod ponovnog korištenja WebView-a, jer DownloadBridge/GpsBridge/ShareBridge/
+        // WebViewClient/WebChromeClient su non-static inner klase koje interno drže
+        // referencu na staru (uništenu) Activity instancu ako se ne obnove.
         setupWebView();
         registerRecActionReceiver();
 
-        if (savedInstanceState != null) {
-            webView.restoreState(savedInstanceState);
-        } else {
-            webView.loadUrl(APP_URL);
+        if (!reusedWebView) {
+            if (savedInstanceState != null) {
+                webView.restoreState(savedInstanceState);
+            } else {
+                webView.loadUrl(APP_URL);
+            }
         }
     }
 
@@ -399,6 +439,21 @@ public class MainActivity extends Activity {
             Intent intent = new Intent(MainActivity.this, GpsService.class);
             intent.setAction("stop");
             startService(intent);
+            // Ako je OVA Activity već uništena (korisnik je zatvorio/swipe-ovao app
+            // dok je snimanje trajalo — WebView je bio namjerno pošteđen u onDestroy,
+            // vidi napomenu kod sWebView), niko drugi neće pozvati webView.destroy()
+            // jer je taj poziv baš tad bio preskočen. Sad kad je snimanje stvarno
+            // gotovo, oslobodi ga — inače ostaje "osiroćen" u memoriji zauvijek.
+            if (isFinishing() || isDestroyed()) {
+                runOnUiThread(() -> {
+                    if (webView != null) { webView.destroy(); }
+                    if (sWebView == webView) sWebView = null;
+                    if (recActionReceiver != null) {
+                        try { unregisterReceiver(recActionReceiver); } catch (Exception ignored) {}
+                    }
+                    sRecActionReceiver = null;
+                });
+            }
         }
 
         @JavascriptInterface
@@ -421,6 +476,13 @@ public class MainActivity extends Activity {
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerRecActionReceiver() {
+        if (sRecActionReceiver != null) {
+            // Već registrovan (preživio iz prethodne Activity instance dok je
+            // snimanje trajalo) — reuse, ne registruj drugi. onReceive ionako
+            // uvijek čita TRENUTNI webView field, pa ostaje ispravan.
+            recActionReceiver = sRecActionReceiver;
+            return;
+        }
         recActionReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -432,6 +494,7 @@ public class MainActivity extends Activity {
                 }
             }
         };
+        sRecActionReceiver = recActionReceiver;
         IntentFilter filter = new IntentFilter("ba.spd.uss.vlake.REC_ACTION");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(recActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -583,11 +646,23 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        if (recActionReceiver != null) {
+        // Isto kao WebView ispod — dok snimanje traje, receiver MORA ostati
+        // registrovan da Pauza/Stop dugmad na notifikaciji i dalje rade dok je
+        // app zatvoren (vidi napomenu kod sRecActionReceiver).
+        if (recActionReceiver != null && !isRecordingActive) {
             try { unregisterReceiver(recActionReceiver); } catch (Exception ignored) {}
+            sRecActionReceiver = null;
         }
-        if (webView != null) {
+        // Dok snimanje traje NAMJERNO ne uništavamo WebView (vidi napomenu kod
+        // sWebView) — Activity se gasi (npr. swipe iz recent apps), ali proces
+        // ostaje živ zbog GpsService foreground servisa, i JS/GPS watch treba
+        // nastaviti raditi u pozadini dok korisnik ne zaustavi snimanje ili
+        // ponovo otvori app. webView.destroy() se tad odgađa do stvarnog kraja
+        // snimanja (vidi GpsBridge.stopRecording) ili do sljedećeg onCreate-a
+        // koji ponovo iskoristi isti WebView.
+        if (webView != null && !isRecordingActive) {
             webView.destroy();
+            sWebView = null;
         }
         super.onDestroy();
     }
