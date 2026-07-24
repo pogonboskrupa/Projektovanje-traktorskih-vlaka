@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.72.0';
+const APP_VER = 'v3.73.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -13270,6 +13270,9 @@ document.addEventListener('visibilitychange', async () => {
     // Sva tri tipa snimanja (vlaka / trag / doznaka pojas) trebaju wake lock.
     if (_anyRecOn() && !_wakeLock) await _acquireWakeLock();
     _updWakeLockIcon();
+    // Native GPS bafer (trag) — popuni prazninu koja je nastala dok je app bio
+    // zatvoren/u pozadini (vidi _drainNativeGpsBuffer i GpsService.java).
+    try { await _drainNativeGpsBuffer(); } catch(e) {}
     // Povratak u prvi plan — pokušaj sync (online event zna izostati na Androidu)
     if (navigator.onLine && sbUser) {
       _processOfflineQueue();
@@ -15672,13 +15675,19 @@ let _tragLiveSeg = null;// živi "rubber-band" segment do trenutne pozicije
 let _tragLastMoveT = 0; // timestamp zadnjeg stvarnog pomaka (za auto-pauzu)
 const _TRAG_AUTOPAUSE_MS = 120000; // 2 min mirovanja → auto-pauza
 
-function _addTragPoint(la, lo, ac, al, sp) {
+function _addTragPoint(la, lo, ac, al, sp, nowOverride) {
   if (!_tragOn || _tragPaused) return;
 
   // 1. Odbaci samo katastrofalno loše fikseve
   if (ac > 50) return;
 
-  const now = Date.now();
+  // nowOverride: koristi se pri "replay-u" tačaka iz native GPS bafera
+  // (_drainNativeGpsBuffer) — te tačke su prikupljene RANIJE (dok je WebView
+  // bio bez prozora), pa moraju nositi svoj STVARNI historijski timestamp da
+  // bi speed-gate (korak 3) i auto-pauza (korak 4a) računali stvaran razmak
+  // između fiksova, a ne razmak "sad minus prije 10 minuta" kao da je jedan
+  // ogroman skok u trenutku vraćanja u app.
+  const now = nowOverride || Date.now();
 
   // 2. Median filtar od 3 fiksa — biramo STVARNI fix najbliži centroidu
   //    (median po odvojenim osama bi mogao stvoriti tačku koja ne postoji → artefakt)
@@ -15766,6 +15775,28 @@ function _addTragPoint(la, lo, ac, al, sp) {
 
 function _tragLiveClear() {
   if (_tragLiveSeg) { map.removeLayer(_tragLiveSeg); _tragLiveSeg = null; }
+}
+
+// Povuci tačke koje je GpsService (native LocationManager, vidi GpsService.java)
+// prikupio dok je WebView bio bez prozora — Chromium interno može ograničiti/
+// prestati dostavljati navigator.geolocation fiksove osiroćenoj stranici bez
+// obzira da li je JS kontekst preživio. Poziva se na visibilitychange('visible').
+// Za sada samo TRAG (v. napomena u planu) — vlaka/doznaka pojas imaju odvojene,
+// složenije prijemne cjevovode koje bi bilo rizično mijenjati bez terenskog testa.
+async function _drainNativeGpsBuffer() {
+  if (typeof AndroidGps === 'undefined' || typeof AndroidGps.drainNativeBuffer !== 'function') return;
+  if (!_tragOn) return;
+  let raw;
+  try { raw = AndroidGps.drainNativeBuffer(); } catch(e) { return; }
+  if (!raw) return;
+  let pts;
+  try { pts = JSON.parse(raw); } catch(e) { return; }
+  if (!Array.isArray(pts) || !pts.length) return;
+  pts.sort((a, b) => a.t - b.t);
+  for (const p of pts) {
+    if (!p || typeof p.t !== 'number' || p.t <= _tragLastT) continue;
+    _addTragPoint(p.la, p.lo, p.ac, p.al, p.sp, p.t);
+  }
 }
 
 function fabSnimVlaku() {

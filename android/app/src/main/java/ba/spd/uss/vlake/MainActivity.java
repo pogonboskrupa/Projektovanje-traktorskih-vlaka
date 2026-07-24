@@ -37,8 +37,11 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.IntentFilter;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
 import java.io.OutputStream;
 
 public class MainActivity extends Activity {
@@ -471,6 +474,36 @@ public class MainActivity extends Activity {
             return ContextCompat.checkSelfPermission(MainActivity.this,
                     Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                     == PackageManager.PERMISSION_GRANTED;
+        }
+
+        // Poziva se sinhrono iz JS-a (visibilitychange, app opet vidljiv) — vraća
+        // sve tačke koje je GpsService prikupio preko native LocationManager-a dok
+        // je WebView bio "osiroćen"/bez prozora (vidi napomenu kod sWebView i kod
+        // GpsService.BUFFER_LOCK), pa fajl briše. Metoda ima povratnu vrijednost
+        // pa je WebView poziva sinhrono (za razliku od void mostova koje treba
+        // zvati pa čekati callback) — JS odmah dobija JSON niz.
+        @JavascriptInterface
+        public String drainNativeBuffer() {
+            File f = new File(getFilesDir(), "gps_native_buffer.jsonl");
+            StringBuilder sb = new StringBuilder("[");
+            synchronized (GpsService.BUFFER_LOCK) {
+                if (f.exists()) {
+                    boolean first = true;
+                    try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            line = line.trim();
+                            if (line.isEmpty()) continue;
+                            if (!first) sb.append(',');
+                            sb.append(line);
+                            first = false;
+                        }
+                    } catch (IOException ignored) {}
+                    f.delete();
+                }
+            }
+            sb.append(']');
+            return sb.toString();
         }
     }
 
