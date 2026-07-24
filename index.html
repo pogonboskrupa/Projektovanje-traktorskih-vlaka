@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.73.0';
+const APP_VER = 'v3.74.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -13270,8 +13270,9 @@ document.addEventListener('visibilitychange', async () => {
     // Sva tri tipa snimanja (vlaka / trag / doznaka pojas) trebaju wake lock.
     if (_anyRecOn() && !_wakeLock) await _acquireWakeLock();
     _updWakeLockIcon();
-    // Native GPS bafer (trag) — popuni prazninu koja je nastala dok je app bio
-    // zatvoren/u pozadini (vidi _drainNativeGpsBuffer i GpsService.java).
+    // Native GPS bafer (trag + doznaka pojas) — popuni prazninu koja je
+    // nastala dok je app bio zatvoren/u pozadini (vidi _drainNativeGpsBuffer
+    // i GpsService.java).
     try { await _drainNativeGpsBuffer(); } catch(e) {}
     // Povratak u prvi plan — pokušaj sync (online event zna izostati na Androidu)
     if (navigator.onLine && sbUser) {
@@ -15781,11 +15782,18 @@ function _tragLiveClear() {
 // prikupio dok je WebView bio bez prozora — Chromium interno može ograničiti/
 // prestati dostavljati navigator.geolocation fiksove osiroćenoj stranici bez
 // obzira da li je JS kontekst preživio. Poziva se na visibilitychange('visible').
-// Za sada samo TRAG (v. napomena u planu) — vlaka/doznaka pojas imaju odvojene,
-// složenije prijemne cjevovode koje bi bilo rizično mijenjati bez terenskog testa.
+// Pokriva TRAG i DOZNAKA POJAS. Vlaka namjerno NIJE pokrivena — onP() ima
+// složeniju, međusobno isprepletenu prihvatnu logiku (spike-zaštita, jump
+// detekcija...) koju je rizičnije mijenjati bez terenskog testa.
+//
+// GpsService puni bafer KONTINUIRANO cijelo vrijeme snimanja (i dok je app u
+// prvom planu, ne samo u pozadini) — zato SVAKA grana ovdje mora provjeriti
+// da tačka nije VEĆ obrađena uživo (_tragLastT za trag, _dozLastLiveFixTs za
+// doznaku), inače bi replay duplicirao već snimljene tačke (za doznaku i
+// stvarno duplirao redove u doz_track_points na serveru).
 async function _drainNativeGpsBuffer() {
   if (typeof AndroidGps === 'undefined' || typeof AndroidGps.drainNativeBuffer !== 'function') return;
-  if (!_tragOn) return;
+  if (!_tragOn && !_dozGpsOn) return;
   let raw;
   try { raw = AndroidGps.drainNativeBuffer(); } catch(e) { return; }
   if (!raw) return;
@@ -15794,8 +15802,9 @@ async function _drainNativeGpsBuffer() {
   if (!Array.isArray(pts) || !pts.length) return;
   pts.sort((a, b) => a.t - b.t);
   for (const p of pts) {
-    if (!p || typeof p.t !== 'number' || p.t <= _tragLastT) continue;
-    _addTragPoint(p.la, p.lo, p.ac, p.al, p.sp, p.t);
+    if (!p || typeof p.t !== 'number') continue;
+    if (_tragOn && p.t > _tragLastT) _addTragPoint(p.la, p.lo, p.ac, p.al, p.sp, p.t);
+    if (_dozGpsOn && p.t > _dozLastLiveFixTs) await _dozProcessGpsPoint(p.la, p.lo, p.al, p.ac, p.sp, p.t);
   }
 }
 
@@ -31207,6 +31216,14 @@ let _dozGpsPaused = false, _dozGpsPausedTime = 0, _dozGpsPauseStart = 0;
 let _dozGpsMaxSpd = 0, _dozGpsSpdSum = 0, _dozGpsSpdCnt = 0;
 let _dozGpsElevData = [];
 let _dozGpsFullPts = [];
+// Timestamp zadnjeg SIROVOG fiksa koji je watchPosition uživo isporučio (ne
+// samo onih koji su prošli filter/commit) — koristi ga _drainNativeGpsBuffer
+// da pri replay-u native bafera preskoči tačke koje su VEĆ obrađene uživo.
+// Bez ovoga bi svaki povratak u app ponovo poslao (dupli insert u
+// doz_track_points!) sve tačke prikupljene dok je app bio u prvom planu, jer
+// GpsService puni bafer kontinuirano cijelo vrijeme snimanja, ne samo dok je
+// app u pozadini.
+let _dozLastLiveFixTs = 0;
 
 function dozPauseGPS() {
   if (!_dozGpsOn) return;
@@ -31552,6 +31569,7 @@ async function _dozStartGPSBegin() {
   _dozGpsPaused = false; _dozGpsPausedTime = 0; _dozGpsPauseStart = 0;
   _dozGpsMaxSpd = 0; _dozGpsSpdSum = 0; _dozGpsSpdCnt = 0;
   _dozGpsElevData = []; _dozGpsFullPts = [];
+  _dozLastLiveFixTs = 0;
   if (_dozGpsTrackLayer) map.removeLayer(_dozGpsTrackLayer);
   _dozGpsTrackLayer = L.layerGroup().addTo(map);
   _dozGpsPoly = null;
@@ -31570,46 +31588,60 @@ async function _dozStartGPSBegin() {
   if (!_gpsStabWasOn) stopGPS();
 
   _dozGpsWatchId = navigator.geolocation.watchPosition(async pos => {
+    // Zabilježi SIROVI fix ODMAH (prije bilo kakvog filtriranja) — vidi
+    // napomenu kod _dozLastLiveFixTs. Ovo mora ostati prvo u callbacku.
+    _dozLastLiveFixTs = pos.timestamp || Date.now();
     if (!_dozGpsOn || !_dozGpsProjId || !_dozGpsUserId) return;
     const { latitude:lat, longitude:lng, altitude:alt, accuracy:acc, speed } = pos.coords;
-    if (acc > 20) { _dozUpdGpsStats(acc); return; }
-    if (_dozGpsPaused) { _dozUpdGpsStats(acc); return; }
-    const prev = _dozGpsPts[_dozGpsPts.length - 1];
-    if (prev) {
-      const d = dst(prev[0], prev[1], lat, lng);
-      if (d < _DOZ_GPS_MIN_DIST) { _dozUpdGpsStats(acc); return; }
-      _dozGpsLen += d;
-    }
-    const spdMs = (speed != null && speed >= 0) ? speed : 0;
-    if (spdMs > _dozGpsMaxSpd) _dozGpsMaxSpd = spdMs;
-    _dozGpsSpdSum += spdMs; _dozGpsSpdCnt++;
-    if (alt != null) _dozGpsElevData.push(alt);
-    _dozGpsFullPts.push({ lat, lon: lng, ele: alt || 0, time: new Date().toISOString(), spd: spdMs });
-    if (prev) {
-      const kmh = spdMs * 3.6;
-      const col = kmh < 1 ? '#60a5fa' : kmh < 3 ? '#4ade80' : kmh < 6 ? '#fbbf24' : '#ef4444';
-      L.polyline([[prev[0], prev[1]], [lat, lng]], { color: col, weight: 3, opacity: 0.9 }).addTo(_dozGpsTrackLayer);
-    }
-    _dozGpsPts.push([lat, lng]);
-    _dozSaveLivePts();
-    const _dozPt = {
-      project_id: _dozGpsProjId, user_id: _dozGpsUserId,
-      latitude: lat, longitude: lng,
-      altitude: alt || null, accuracy: acc, speed: speed || null,
-      recorded_at: new Date().toISOString()
-    };
-    try {
-      const { error } = await sb.from('doz_track_points').insert(_dozPt);
-      if (error) throw error;
-      _dozGpsSent++;
-    } catch(e) {
-      _dozBufferTrackPoint(_dozPt);
-      _dozGpsBuffered++;
-    }
-    _dozUpdGpsStats(acc);
-    _dozCheckBandCross(lat, lng);
+    await _dozProcessGpsPoint(lat, lng, alt, acc, speed);
   }, err => { console.warn('Doznaka GPS', err); _dozUpdGpsStats(null); },
   { enableHighAccuracy:true, maximumAge:3000, timeout:15000 });
+}
+
+// Obrada jedne GPS tačke za pojas doznake — dijeljeno između uživo
+// watchPosition callbacka (bez tsMs, koristi trenutno vrijeme kao ranije) i
+// _drainNativeGpsBuffer replay-a (sa tsMs = stvarno historijsko vrijeme
+// fiksa, da recorded_at u bazi ostane tačan umjesto "sad" za tačku snimljenu
+// prije nekoliko minuta dok je app bio zatvoren).
+async function _dozProcessGpsPoint(lat, lng, alt, acc, speed, tsMs) {
+  if (!_dozGpsOn || !_dozGpsProjId || !_dozGpsUserId) return;
+  if (acc > 20) { _dozUpdGpsStats(acc); return; }
+  if (_dozGpsPaused) { _dozUpdGpsStats(acc); return; }
+  const prev = _dozGpsPts[_dozGpsPts.length - 1];
+  if (prev) {
+    const d = dst(prev[0], prev[1], lat, lng);
+    if (d < _DOZ_GPS_MIN_DIST) { _dozUpdGpsStats(acc); return; }
+    _dozGpsLen += d;
+  }
+  const spdMs = (speed != null && speed >= 0) ? speed : 0;
+  if (spdMs > _dozGpsMaxSpd) _dozGpsMaxSpd = spdMs;
+  _dozGpsSpdSum += spdMs; _dozGpsSpdCnt++;
+  const isoTs = new Date(tsMs || Date.now()).toISOString();
+  if (alt != null) _dozGpsElevData.push(alt);
+  _dozGpsFullPts.push({ lat, lon: lng, ele: alt || 0, time: isoTs, spd: spdMs });
+  if (prev) {
+    const kmh = spdMs * 3.6;
+    const col = kmh < 1 ? '#60a5fa' : kmh < 3 ? '#4ade80' : kmh < 6 ? '#fbbf24' : '#ef4444';
+    L.polyline([[prev[0], prev[1]], [lat, lng]], { color: col, weight: 3, opacity: 0.9 }).addTo(_dozGpsTrackLayer);
+  }
+  _dozGpsPts.push([lat, lng]);
+  _dozSaveLivePts();
+  const _dozPt = {
+    project_id: _dozGpsProjId, user_id: _dozGpsUserId,
+    latitude: lat, longitude: lng,
+    altitude: alt || null, accuracy: acc, speed: speed || null,
+    recorded_at: isoTs
+  };
+  try {
+    const { error } = await sb.from('doz_track_points').insert(_dozPt);
+    if (error) throw error;
+    _dozGpsSent++;
+  } catch(e) {
+    _dozBufferTrackPoint(_dozPt);
+    _dozGpsBuffered++;
+  }
+  _dozUpdGpsStats(acc);
+  _dozCheckBandCross(lat, lng);
 }
 
 // ─── Upozorenje kad projektant uđe u tuđi pojas ─────────────────
