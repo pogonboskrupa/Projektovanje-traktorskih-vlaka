@@ -131,13 +131,15 @@ public class GpsService extends Service {
             public void onProviderDisabled(String provider) {}
         };
         try {
+            // SAMO GPS provider, namjerno bez NETWORK_PROVIDER-a: mrežni fiksovi
+            // (bazne stanice/wifi) znaju biti pomjereni desetine metara uz
+            // prijavljeno "dobro" accuracy — naizmjenično isprepleteni sa pravim
+            // GPS fiksovima u baferu prave cik-cak liniju koju JS filteri po
+            // tačnosti ne mogu pouzdano uhvatiti. Na terenu (šuma) network
+            // provider ionako nema šta ponuditi.
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                         LocationManager.GPS_PROVIDER, 2000L, 0f, locationListener);
-            }
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                        LocationManager.NETWORK_PROVIDER, 2000L, 0f, locationListener);
             }
         } catch (SecurityException ignored) {
             // dozvola oduzeta između provjere i poziva — nema šta, pobjegli fiksovi

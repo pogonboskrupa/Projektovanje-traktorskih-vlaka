@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.74.0';
+const APP_VER = 'v3.75.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -13270,8 +13270,8 @@ document.addEventListener('visibilitychange', async () => {
     // Sva tri tipa snimanja (vlaka / trag / doznaka pojas) trebaju wake lock.
     if (_anyRecOn() && !_wakeLock) await _acquireWakeLock();
     _updWakeLockIcon();
-    // Native GPS bafer (trag + doznaka pojas) — popuni prazninu koja je
-    // nastala dok je app bio zatvoren/u pozadini (vidi _drainNativeGpsBuffer
+    // Native GPS bafer (vlaka + trag + doznaka pojas) — popuni prazninu koja
+    // je nastala dok je app bio zatvoren/u pozadini (vidi _drainNativeGpsBuffer
     // i GpsService.java).
     try { await _drainNativeGpsBuffer(); } catch(e) {}
     // Povratak u prvi plan — pokušaj sync (online event zna izostati na Androidu)
@@ -14462,6 +14462,12 @@ function _simplifyRecordedPts(pts, toleranceM) {
 function onP(p) {
   const { latitude: la, longitude: lo, altitude: al, accuracy: ac,
           speed: gpsSpeed, heading: gpsHeading } = p.coords;
+  // Zabilježi SIROVI fix ODMAH (prije filtriranja) — _drainNativeGpsBuffer po
+  // ovome zna koje je tačke iz native bafera glavni watch VEĆ vidio uživo, pa
+  // ih pri replay-u preskače (GpsService puni bafer kontinuirano cijelo
+  // vrijeme snimanja, i dok je app u prvom planu — bez ovoga bi se svaka
+  // uživo obrađena tačka procesirala i drugi put pri povratku u app).
+  _onPLastFixTs = p.timestamp || Date.now();
   const filtAl = _filteredAlt(al);
   lastP = { la, lo, al: filtAl ?? 0, ac };
   _lastGpsFixTime = Date.now();
@@ -14530,6 +14536,17 @@ function onP(p) {
   // Live preview segment prati SVAKI fix (isto kao marker pozicije) — vidi _updRecPreview
   _updRecPreview(la, lo);
 
+  _vlakaProcessGpsPoint(la, lo, ac, filtAl ?? al ?? 0, gpsSpeed);
+}
+
+// Prihvat jedne GPS tačke u aktivnu vlaku — dijeljeno između uživo onP()
+// callbacka (bez tsMs) i _drainNativeGpsBuffer replay-a (sa tsMs = stvarno
+// historijsko vrijeme fiksa iz native bafera). Timestamp se provlači kroz SVE
+// vremenske kapije (spike dtS, speed-gate elapsed, gap detekcija) — replay sa
+// Date.now() bi svaku historijsku tačku vidio kao "sad", pa bi speed-gate
+// odbacio cijeli niz (prividno ogromna brzina), a poslije replay-a bi prvi
+// živi fix izgledao kao nula proteklog vremena.
+function _vlakaProcessGpsPoint(la, lo, ac, alt, gpsSpeed, tsMs) {
   if (!recOn || recPaused || actI === null) return;
 
   // 1. FILTER TAČNOSTI
@@ -14541,7 +14558,7 @@ function onP(p) {
   //    marginu za tačnost) se zadrži JEDAN fix: upiše se tek ako ga sljedeći fix
   //    potvrdi (stvaran skok — npr. signal se vratio poslije prekida), a izolovan
   //    teleport-spike (multipath) nestaje jer ga sljedeći fix ne potvrdi.
-  const nowMs = Date.now();
+  const nowMs = tsMs || Date.now();
   if (_lastFixRaw) {
     const dtS = Math.max(0.5, (nowMs - _lastFixRaw.t) / 1000);
     const maxAllowed = Math.max(GPS_MAX_JUMP, GPS_MAX_SPEED * dtS * 3 + ac);
@@ -14574,7 +14591,7 @@ function onP(p) {
     // 5. SPEED GATE — backup za slučaj da Doppler nije dostupan
     const reported = (gpsSpeed != null && gpsSpeed >= 0) ? gpsSpeed : null;
     if (reported !== null && reported > GPS_MAX_SPEED) return;
-    const elapsed = (Date.now() - _lastRecTime) / 1000;
+    const elapsed = (nowMs - _lastRecTime) / 1000;
     if (_lastRecTime > 0 && elapsed > 0 && elapsed < 30 && reported === null) {
       if (distM / elapsed > GPS_MAX_SPEED) return;
     }
@@ -14590,7 +14607,7 @@ function onP(p) {
     // — ne tiho u realnom vremenu dok se snima.
   }
 
-  _lastRecTime = Date.now();
+  _lastRecTime = nowMs;
 
   // Trim pri povratku na roditeljsku vlaku
   if (_parentReturnIdx !== null && actI === _parentReturnIdx) {
@@ -14621,13 +14638,14 @@ function onP(p) {
   }
 
   // GAP DETEKCIJA (D3-C) — dugi prekid bez tačaka ne smije se tiho utopiti u geometriju
-  const gapMs = _lastPtAcceptedAt > 0 ? Date.now() - _lastPtAcceptedAt : 0;
+  const gapMs = _lastPtAcceptedAt > 0 ? nowMs - _lastPtAcceptedAt : 0;
   const isGap = gapMs > GPS_GAP_WARN_MS;
   if (isGap) showToast('⚠ GPS prekid ' + Math.round(gapMs / 1000) + 's — provjeri ovaj dio traga');
-  addPt(actI, sla, slo, filtAl ?? al ?? 0, isGap);
-  _lastPtAcceptedAt = Date.now();
+  addPt(actI, sla, slo, alt, isGap);
+  _lastPtAcceptedAt = nowMs;
 }
 let _lastGpsFixTime = 0;  // timestamp zadnjeg uspješnog GPS fixa
+let _onPLastFixTs   = 0;  // timestamp zadnjeg SIROVOG fiksa iz glavnog watch-a (za native bafer dedup)
 let _gpsWatchdogTimer = null;
 let _heartbeatTimer   = null;
 let _gpsRestartCount  = 0;
@@ -15782,18 +15800,19 @@ function _tragLiveClear() {
 // prikupio dok je WebView bio bez prozora — Chromium interno može ograničiti/
 // prestati dostavljati navigator.geolocation fiksove osiroćenoj stranici bez
 // obzira da li je JS kontekst preživio. Poziva se na visibilitychange('visible').
-// Pokriva TRAG i DOZNAKA POJAS. Vlaka namjerno NIJE pokrivena — onP() ima
-// složeniju, međusobno isprepletenu prihvatnu logiku (spike-zaštita, jump
-// detekcija...) koju je rizičnije mijenjati bez terenskog testa.
+// Pokriva sva tri tipa snimanja: VLAKU, TRAG i DOZNAKA POJAS — svaki kroz
+// ISTU prihvatnu logiku kao uživo fix (_vlakaProcessGpsPoint / _addTragPoint /
+// _dozProcessGpsPoint), sa stvarnim historijskim vremenom svake tačke.
 //
 // GpsService puni bafer KONTINUIRANO cijelo vrijeme snimanja (i dok je app u
-// prvom planu, ne samo u pozadini) — zato SVAKA grana ovdje mora provjeriti
-// da tačka nije VEĆ obrađena uživo (_tragLastT za trag, _dozLastLiveFixTs za
-// doznaku), inače bi replay duplicirao već snimljene tačke (za doznaku i
-// stvarno duplirao redove u doz_track_points na serveru).
+// prvom planu, ne samo u pozadini) — zato SVAKA grana ovdje mora preskočiti
+// tačke koje je odgovarajući uživo watch VEĆ vidio: _onPLastFixTs za vlaku i
+// trag (oba primaju fikseve kroz glavni onP watch), _dozLastLiveFixTs za
+// doznaku (vlastiti watch). Bez toga bi replay duplicirao već obrađene tačke
+// (za doznaku i stvarno duplirao redove u doz_track_points na serveru).
 async function _drainNativeGpsBuffer() {
   if (typeof AndroidGps === 'undefined' || typeof AndroidGps.drainNativeBuffer !== 'function') return;
-  if (!_tragOn && !_dozGpsOn) return;
+  if (!_tragOn && !_dozGpsOn && !recOn) return;
   let raw;
   try { raw = AndroidGps.drainNativeBuffer(); } catch(e) { return; }
   if (!raw) return;
@@ -15803,8 +15822,12 @@ async function _drainNativeGpsBuffer() {
   pts.sort((a, b) => a.t - b.t);
   for (const p of pts) {
     if (!p || typeof p.t !== 'number') continue;
-    if (_tragOn && p.t > _tragLastT) _addTragPoint(p.la, p.lo, p.ac, p.al, p.sp, p.t);
-    if (_dozGpsOn && p.t > _dozLastLiveFixTs) await _dozProcessGpsPoint(p.la, p.lo, p.al, p.ac, p.sp, p.t);
+    if (_tragOn && p.t > Math.max(_tragLastT, _onPLastFixTs))
+      _addTragPoint(p.la, p.lo, p.ac, p.al, p.sp, p.t);
+    if (recOn && p.t > _onPLastFixTs)
+      _vlakaProcessGpsPoint(p.la, p.lo, p.ac, _filteredAlt(p.al) ?? p.al ?? 0, p.sp, p.t);
+    if (_dozGpsOn && p.t > _dozLastLiveFixTs)
+      await _dozProcessGpsPoint(p.la, p.lo, p.al, p.ac, p.sp, p.t);
   }
 }
 
