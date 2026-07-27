@@ -94,6 +94,16 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 - **Splash/drawable resursi**: bitmap u density-generičkom `drawable/` folderu
   se crta u "px kao dp" veličini — fiksirati prikaznu veličinu u layer-list
   XML-u (`android:width/height`), ne oslanjati se na veličinu PNG-a.
+- **GPS snimanje prekinuto telefonskim pozivom (ili sličnim)**: WebView-
+  preživljavanje + native GPS bafer (`GpsService`, vidi `_drainNativeGpsBuffer`
+  u index.html) štite od Activity-only uništenja (swipe iz recent apps), ali
+  NE od OEM "battery manager"-a (Xiaomi/Samsung/Huawei i sl.) koji ubiju
+  CIJELI proces — foreground servis i sve — kad procijene da app treba stati,
+  klasično baš kad stigne poziv. Jedina prenosiva odbrana je izuzeće od Doze/
+  App Standby (`GpsBridge.hasBatteryOptExemption/requestBatteryOptExemption`,
+  `_checkBatteryOptHint` u index.html, pita se jednom pri prvom startu bilo
+  kojeg snimanja) — OEM-specifične "autostart/protected apps" postavke se ne
+  mogu tražiti programski.
 
 ## Kandidati za čišćenje (nisu hitni)
 

@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.76.0';
+const APP_VER = 'v3.77.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -13272,9 +13272,27 @@ async function _releaseWakeLock() {
 
 // Ponovo uzmi wake lock kad se korisnik vrati na stranicu
 // Jednom pokaži savjet za optimizaciju baterije (samo Android)
+// Zašto je ovo bitno: WebView-preživljavanje + native GPS bafer (GpsService)
+// štite snimanje od Activity uništenja (swipe iz recent apps), ali NE od OEM
+// "battery manager"-a (Xiaomi/Samsung/Huawei i sl.) koji agresivno UBIJAJU
+// cijeli proces — foreground servis i sve — npr. baš kad stigne telefonski
+// poziv, da oslobode resurse. To izbrisano potpuno prekida GPS bafer, ne samo
+// stvara prazninu koju bi replay popunio. Standardni Android API lijek je
+// izuzeće od Doze/App Standby (isIgnoringBatteryOptimizations) — ne rješava
+// svaki OEM specifično, ali stvarno pomaže na dobrom dijelu uređaja.
 const _BATT_HINT_KEY = 'tvlake_batt_hint_shown';
-function _checkBatteryOptHint() {
-  // Privremeno isključeno — planirano rješenje kroz PWA/APK
+async function _checkBatteryOptHint() {
+  if (typeof AndroidGps === 'undefined' || typeof AndroidGps.hasBatteryOptExemption !== 'function') return;
+  if (localStorage.getItem(_BATT_HINT_KEY)) return;
+  let exempt = true;
+  try { exempt = AndroidGps.hasBatteryOptExemption(); } catch(e) { return; }
+  localStorage.setItem(_BATT_HINT_KEY, '1');  // pitaj samo jednom, bez obzira na odgovor
+  if (exempt) return;
+  const ok = await _dlgConfirm(
+    'Da GPS snimanje ne prekine telefonski poziv ili druga aplikacija, dozvoli ovoj aplikaciji rad bez ograničenja baterije.',
+    { title: '🔋 Pouzdano snimanje u pozadini', okLabel: 'Otvori postavke' }
+  );
+  if (ok) { try { AndroidGps.requestBatteryOptExemption(); } catch(e) {} }
 }
 
 document.addEventListener('visibilitychange', async () => {
@@ -13400,8 +13418,7 @@ function _togRecBegin() {
     _updBanner();
     _updRecStatusBar();
     if (!gpsOn) toggleGPS();
-    _bgRecStart();  // wake lock + audio + SW heartbeat + notifikacija + native servis
-    _checkBatteryOptHint();
+    _bgRecStart();  // wake lock + audio + SW heartbeat + notifikacija + native servis (uklj. battery opt hint)
     _startGpsWatchdog();
     _updFabVisibility();
     _crashStartTimer();   // auto-save svakih 30s
@@ -14797,6 +14814,7 @@ function _bgRecStart(label) {
   }
   if (label) _startRecNotification(label, '');
   else _startRecNotification();  // vlaka — čita ime + trenutnu dužinu iz vlake[actI]
+  _checkBatteryOptHint();  // sva tri tipa snimanja pate od istog OEM battery-killer problema
 }
 
 function _bgRecStopIfIdle() {

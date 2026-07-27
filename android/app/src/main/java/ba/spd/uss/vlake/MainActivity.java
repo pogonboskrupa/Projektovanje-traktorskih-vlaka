@@ -10,7 +10,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.PowerManager;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.util.Base64;
 import android.view.View;
 import android.view.ViewGroup;
@@ -474,6 +476,36 @@ public class MainActivity extends Activity {
             return ContextCompat.checkSelfPermission(MainActivity.this,
                     Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                     == PackageManager.PERMISSION_GRANTED;
+        }
+
+        // Doze/App Standby (stock Android) i OEM "battery manager"-i (Xiaomi/Samsung/
+        // Huawei i sl.) znaju ubiti CIJELI proces — foreground servis i sve — kad
+        // procijene da je app "u pozadini", npr. baš kad stigne telefonski poziv i
+        // sistemu zatreba RAM/prioritet za njega. WebView-preživljavanje i native GPS
+        // bafer (GpsService) štite od Activity-only uništenja, ali ne od ovoga — ako
+        // proces umre, umre i native bafer. Izuzeće od Doze/App Standby (stock Android
+        // API) je jedina prenosiva odbrana; OEM-specifične "autostart/protected apps"
+        // postavke se ne mogu tražiti programski, samo standardnim Android putem.
+        @JavascriptInterface
+        public boolean hasBatteryOptExemption() {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm == null) return true;
+            return pm.isIgnoringBatteryOptimizations(getPackageName());
+        }
+
+        @JavascriptInterface
+        public void requestBatteryOptExemption() {
+            try {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+            } catch (Exception e) {
+                // Neki OEM-i blokiraju direktni zahtjev — otvori opću listu izuzeća
+                // umjesto da korisnik ostane bez ijedne opcije.
+                try {
+                    startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                } catch (Exception ignored) {}
+            }
         }
 
         // Poziva se sinhrono iz JS-a (visibilitychange, app opet vidljiv) — vraća
