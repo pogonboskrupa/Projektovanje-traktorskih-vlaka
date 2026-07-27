@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.77.0';
+const APP_VER = 'v3.77.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -14261,11 +14261,21 @@ function _onDeviceOrientation(e) {
   _updCompassOnMarker(_compassHeading);
 }
 
-// iOS: deviceorientation s webkitCompassHeading (kompas)
+// Android zna slati OBA eventa istovremeno — 'deviceorientation' tamo često
+// nosi RELATIVNI ugao (proizvoljna referenca od trenutka uključivanja senzora,
+// ne pravi sjever), dok 'deviceorientationabsolute' nosi stvarni magnetni
+// azimut. Kad bi oba hranila isti _compassHeading, kupola/strelica bi se
+// "otimala" između dva različita referentna okvira — vidno trzanje i pogrešan
+// smjer (prijava: "puno se kreće, ne pokazuje kako treba"). Zato je
+// 'deviceorientation' fallback SAMO za iOS (webkitCompassHeading — iOS uopšte
+// ne podržava deviceorientationabsolute) ili za uređaje koji apsolutni event
+// uopšte ne emituju; kad je apsolutni dostupan, on je JEDINI izvor.
+const _hasAbsOrientation = 'ondeviceorientationabsolute' in window;
 window.addEventListener('deviceorientation', e => {
-  if (typeof e.webkitCompassHeading === 'number' || typeof e.alpha === 'number') _onDeviceOrientation(e);
+  if (typeof e.webkitCompassHeading === 'number') { _onDeviceOrientation(e); return; }
+  if (!_hasAbsOrientation && typeof e.alpha === 'number') _onDeviceOrientation(e);
 }, true);
-// Android: deviceorientationabsolute
+// Android: deviceorientationabsolute — pravi (magnetni) sjever
 window.addEventListener('deviceorientationabsolute', _onDeviceOrientation, true);
 
 // ─── ŠUMSKI MOD ─────────────────────────────────────────────────────────────
