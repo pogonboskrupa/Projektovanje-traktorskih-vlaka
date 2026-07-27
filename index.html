@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.77.1';
+const APP_VER = 'v3.78.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5469,7 +5469,12 @@ async function doRegister() {
   document.getElementById('reg-err').style.display = 'none';
   if (!ime || !prezime || !sumarija || !pin) { showAuthErr('Popunite sva obavezna polja', true); return; }
   if (!/^\d+$/.test(pin))  { showAuthErr('PIN smije sadržavati samo cifre', true); return; }
-  if (pin.length < 4)      { showAuthErr('PIN mora imati najmanje 4 cifre', true); return; }
+  // 6 cifara umjesto dosadašnje 4: prijava ide preko IMENA (get_login_email je
+  // namjerno dostupan i neprijavljenima jer je preduslov logina), pa je jedina
+  // stvarna odbrana od pogađanja dužina PIN-a — 4 cifre je svega 10 000
+  // kombinacija. Postojeći kraći PIN-ovi i dalje rade (padEnd(6,'0') se ne
+  // mijenja); strože važi samo za nove registracije.
+  if (pin.length < 6)      { showAuthErr('PIN mora imati najmanje 6 cifara', true); return; }
   if (pin !== pin2)        { showAuthErr('PIN-ovi se ne poklapaju', true); return; }
 
   // Check if name already taken
@@ -5501,6 +5506,10 @@ async function doRegister() {
     });
     insertErr = e;
     if (!insertErr) break;
+    // Server (trigger korisnici_zastita iz 20260727_pristup_odobrenje.sql) sad
+    // provjerava šumariju u tabeli `sumarije`. To NIJE prolazna mrežna greška —
+    // ponavljanje je besmisleno, prekini odmah s jasnom porukom.
+    if (/nepoznata šumarija/i.test(insertErr.message || '')) break;
     if (insertErr.code === '23505') {
       // Provjeri je li VLASTITI red (id = data.user.id) ipak upisan — raniji
       // pokušaj je mogao uspjeti na serveru dok je odgovor izgubljen, što
@@ -5511,7 +5520,11 @@ async function doRegister() {
     }
   }
   if (insertErr) {
-    showAuthErr('Greška pri kreiranju profila (probaj ponovo): ' + insertErr.message, true);
+    if (/nepoznata šumarija/i.test(insertErr.message || '')) {
+      showAuthErr('Odabrana šumarija nije dozvoljena — izaberi jednu iz liste.', true);
+    } else {
+      showAuthErr('Greška pri kreiranju profila (probaj ponovo): ' + insertErr.message, true);
+    }
     return;
   }
 
@@ -5820,7 +5833,7 @@ function _adminRenderUsers() {
             <button onclick="adminResetPin('${uid}','${nm}')"
               style="${approveBtn?'':'flex:1;'}padding:7px 11px;background:#1e3a5f;border:1px solid #475569;border-radius:6px;color:#cbd5e1;font-size:12px;cursor:pointer;white-space:nowrap;">🔑 Reset PIN</button>
           </div>
-          <div style="display:flex;gap:6px;align-items:center;">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
             <select id="admin-sum-sel-${uid}"
               style="flex:1;min-width:0;padding:6px 8px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:12px;">
               ${sumOpts}
@@ -5833,7 +5846,13 @@ function _adminRenderUsers() {
               style="padding:6px 10px;background:rgba(220,38,38,0.12);border:1px solid #dc2626;border-radius:6px;color:#f87171;font-size:13px;cursor:pointer;">
               🗑
             </button>
-          </div>` : ''}
+          </div>
+          <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:#94a3b8;cursor:pointer;">
+            <input type="checkbox" ${u.je_vodeci ? 'checked' : ''}
+              onchange="adminSetVodeci('${uid}',this.checked,'${nm}')"
+              style="width:15px;height:15px;accent-color:#a78bfa;cursor:pointer;">
+            👁 Vodeći projektant — nadzorni pregled cijele šumarije
+          </label>` : ''}
         </div>`;
       }).join('')}
     </div>
@@ -5875,6 +5894,24 @@ async function adminSetApproved(userId, approved, name) {
     return;
   }
   showToast(approved ? `✅ "${name}" odobren` : `⊘ Pristup opozvan: "${name}"`);
+  adminLoadUsers();
+}
+
+// --- Admin: postavi/ukini ulogu vodećeg projektanta ---
+// Ranije se uloga izvodila iz REGEXA nad imenom ("Vodeći Projektant"), i to su
+// poštovale i serverske SECURITY DEFINER funkcije — dovoljno je bilo
+// registrovati se pod tim imenom da se dobije pregled cijele šumarije. Od
+// 20260727_pristup_odobrenje.sql to je prava kolona koju postavlja samo admin.
+async function adminSetVodeci(userId, vodeci, name) {
+  if (!sbProfile?.is_admin) return;
+  const { error } = await sb.rpc('admin_set_vodeci', { p_user_id: userId, p_vodeci: vodeci });
+  if (error) {
+    const missing = /function .*does not exist|schema cache|PGRST202/i.test(error.message || '') || error.code === 'PGRST202';
+    showToast(missing ? '⚠ Primijeni migraciju 20260727 na Supabase (funkcija ne postoji)' : 'Greška: ' + error.message);
+    adminLoadUsers();   // vrati kvačicu na stvarno stanje
+    return;
+  }
+  showToast(vodeci ? `👁 "${name}" je sad vodeći projektant` : `"${name}" više nije vodeći`);
   adminLoadUsers();
 }
 
@@ -6670,48 +6707,13 @@ function _checkProjDistWarn(projektId) {
   }
 }
 
-function toggleNoviProj() {
-  const form = document.getElementById('pd-novi-form');
-  const tog  = document.getElementById('pd-novi-toggle');
-  const open = form.style.display === 'none';
-  form.style.display = open ? '' : 'none';
-  tog.textContent = (open ? '▼' : '▶') + ' Kreiraj novog projektanta';
-}
-
-async function kreirajProjektanta() {
-  const ime     = document.getElementById('pd-np-ime').value.trim();
-  const prezime = document.getElementById('pd-np-prz').value.trim();
-  const pin     = document.getElementById('pd-np-pin').value.trim();
-  if (!ime || !prezime || !pin) { showToast('Popunite ime, prezime i PIN!'); return; }
-  if (!/^\d{4,}$/.test(pin))   { showToast('PIN mora biti min 4 cifre (samo brojevi)!'); return; }
-
-  showToast('Kreiranje...');
-  const { data: newId, error } = await sb.rpc('create_projektant', {
-    p_ime: ime, p_prezime: prezime, p_pin: pin
-  });
-  if (error) { showToast('Greška: ' + error.message); return; }
-
-  // Automatski dodaj u projekat
-  if (_pdProjektId && newId) {
-    const { error: e2 } = await sb.from('projekt_clanovi').insert({
-      projekt_id: _pdProjektId, korisnik_id: newId, added_by: sbUser.id
-    });
-    if (e2) { showToast('Kreiran, ali greška pri dodavanju: ' + e2.message); }
-  }
-
-  // Očisti polja i zatvori formu
-  document.getElementById('pd-np-ime').value = '';
-  document.getElementById('pd-np-prz').value = '';
-  document.getElementById('pd-np-pin').value = '';
-  document.getElementById('pd-novi-form').style.display = 'none';
-  document.getElementById('pd-novi-toggle').textContent = '▶ Kreiraj novog projektanta';
-
-  showToast(`✅ ${ime} ${prezime} kreiran i dodan!`);
-  await sbLoadKolege();
-  await sbLoadProjekti();
-  showProjektDetalji(_pdProjektId);
-  await sbLoadKolegeVlake();
-}
+// UKLONJENO (20260727_pristup_odobrenje.sql): toggleNoviProj() i
+// kreirajProjektanta() — zvale su RPC `create_projektant`, koji je bio
+// SECURITY DEFINER dostupan SVAKOM prijavljenom korisniku (i neodobrenom) i
+// upisivao redove direktno u auth.users. Funkcija je na serveru ukinuta, a UI
+// (pd-novi-form / pd-novi-toggle / pd-np-*) je već ranije uklonjen iz HTML-a,
+// pa je ovo ionako bio mrtav kod. Novi nalozi idu isključivo kroz registraciju
+// + odobrenje admina.
 
 function openDodajClanPanel() {
   const panel = document.getElementById('pd-add-panel');
@@ -8288,8 +8290,12 @@ async function sbLoadKolege() {
   if (!sbProfile?.sumarija || !sbUser) return;
   let data = null;
   try {
+    // `*` umjesto nabrajanja kolona: kolona je_vodeci postoji tek nakon
+    // migracije 20260727_pristup_odobrenje.sql, a eksplicitno traženje
+    // nepostojeće kolone PostgREST vraća kao grešku i oborilo bi cijelo
+    // učitavanje kolega dok migracija ne bude primijenjena.
     let q = sb.from('korisnici')
-      .select('id, ime, prezime, boja')
+      .select('*')
       .neq('id', sbUser.id);
     // ŠPD pregledni nalog vidi SVE korisnike; ostali samo svoju šumariju
     if (!isReadOnly()) q = q.eq('sumarija', sbProfile.sumarija);
@@ -8300,25 +8306,23 @@ async function sbLoadKolege() {
   if (!data) return;
 
   kolegeMap = {};
-  const toUpdate = [];
   data.forEach((k, i) => {
     // Vodeći Projektant je nadzorni nalog za pregled rada šumarije (vidi
     // 20260706_vodeci_projektant.sql) — ne crta vlake, ne treba se nuditi
-    // kao kandidat za dodavanje u projekat.
-    if (/^vode[cć]i\s+projektant$/i.test((k.ime || '').trim())) return;
-    let color = k.boja;
-    if (!color) {
-      color = KORISNIK_PAL[i % KORISNIK_PAL.length];
-      toUpdate.push({ id: k.id, boja: color });
-    }
-    kolegeMap[k.id] = { ime: k.ime + ' ' + k.prezime, color };
+    // kao kandidat za dodavanje u projekat. Od 20260727_pristup_odobrenje.sql
+    // uloga je prava kolona (je_vodeci); regex nad imenom ostaje samo kao
+    // fallback za keš/profil zapisan prije te migracije.
+    if (k.je_vodeci || /^vode[cć]i\s+projektant$/i.test((k.ime || '').trim())) return;
+    // Boja kolege bez upisane boje se računa DETERMINISTIČKI iz njegovog id-a,
+    // ne indeksom u listi i bez upisa u bazu. Ranije se ovdje radio
+    // `sb.from('korisnici').update({boja}).eq('id', id)` nad TUĐIM redom —
+    // to je jedini razlog zbog kojeg je tabela korisnici morala imati široku
+    // UPDATE politiku, a ona je (jer RLS ne zna ograničiti kolonu) značila da
+    // svako može sam sebi postaviti is_admin/odobren. Indeks `i` je usto bio i
+    // nestabilan — ista osoba je dobijala različitu boju na različitim
+    // uređajima, zavisno od redoslijeda u odgovoru.
+    kolegeMap[k.id] = { ime: k.ime + ' ' + k.prezime, color: k.boja || _bojaZaId(k.id) };
   });
-
-  if (navigator.onLine) {
-    toUpdate.forEach(({ id, boja }) => {
-      sb.from('korisnici').update({ boja }).eq('id', id).then(() => {});
-    });
-  }
 
   kolege = Object.values(kolegeMap);
   rndKolege(); rndKolegeVlakeList();
@@ -9923,8 +9927,16 @@ function isSpdField() { return isSpd() && !isAdmin(); }
 // normalnu registraciju; admin mu resetuje PIN kroz Admin panel. Nalog je ČISTO
 // nadzorni: read-only pregled rada svih projektanata SVOJE šumarije (vlake +
 // doznaka + statistike) kroz "Upravljanje projektima".
+// Uloga je od 20260727_pristup_odobrenje.sql PRAVA KOLONA (korisnici.je_vodeci),
+// koju postavlja samo admin (admin_set_vodeci). Ranije se izvodila iz regexa nad
+// IMENOM — i to su poštovale tri SECURITY DEFINER funkcije na serveru, pa je bilo
+// dovoljno registrovati se pod imenom "Vodeći Projektant" da se dobije pregled
+// svih projekata te šumarije. Regex ostaje SAMO kao prelazni fallback za keširani
+// profil zapisan prije migracije (tad kolona ne postoji → undefined); server
+// ionako više ne vjeruje imenu, pa je fallback bezopasan.
 function isVodeci() {
   if (!sbProfile || sbProfile.is_admin) return false;
+  if (sbProfile.je_vodeci !== undefined) return !!sbProfile.je_vodeci;
   return /^vode[cć]i\s+projektant$/i.test((sbProfile.ime || '').trim());
 }
 // Bilo koji nalog koji ne smije uređivati projekte/vlake
@@ -10502,6 +10514,15 @@ async function fetchElev() {
 const PAL = ['#60a5fa','#f87171','#fbbf24','#a78bfa','#fb923c','#38bdf8','#f472b6','#e879f9','#94a3b8','#f59e0b'];
 // Paleta za identitet korisnika (kolege) — distinktivne, ne zelene
 const KORISNIK_PAL = ['#f97316','#818cf8','#22d3ee','#fb7185','#facc15','#c084fc','#2dd4bf','#f43f5e','#60a5fa','#fbbf24'];
+
+// Stabilna boja iz korisničkog id-a (UUID) — ista na svakom uređaju i bez
+// ijednog upisa u bazu. Koristi se kad kolega nema upisanu `boja` vrijednost.
+function _bojaZaId(id) {
+  let h = 0;
+  const s = String(id || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return KORISNIK_PAL[h % KORISNIK_PAL.length];
+}
 let selC = PAL[0], cIdx = 0; // PAL[0] = #60a5fa (plava)
 
 // ── Default boje vlaka / krakova ─────────────────────────────────────────────
@@ -13295,6 +13316,32 @@ async function _checkBatteryOptHint() {
   if (ok) { try { AndroidGps.requestBatteryOptExemption(); } catch(e) {} }
 }
 
+// Provjera je li odobrenje u međuvremenu OPOZVANO.
+// showApp() radi svježi upit SAMO kad je keširani `odobren === false` — dakle
+// korisnik koji je bio odobren pa mu je admin opozvao pristup nastavlja raditi
+// na zastarjelom keširanom profilu neograničeno dugo (na terenu se app danima
+// ne restartuje). Od 20260727_pristup_odobrenje.sql server takvom nalogu ionako
+// više ne daje podatke, ali bi UI i dalje izgledao ispravno uz tihe prazne
+// odgovore — zbunjujuće. Zato pri svakom povratku u prvi plan (throttle 60 s,
+// samo online) osvježimo profil i po potrebi izbacimo na ekran čekanja.
+let _lastOdobrenCheck = 0;
+async function _provjeriOpozivOdobrenja() {
+  if (!sb || !sbUser || !navigator.onLine) return;
+  const now = Date.now();
+  if (now - _lastOdobrenCheck < 60000) return;
+  _lastOdobrenCheck = now;
+  try {
+    const { data, error } = await sb.from('korisnici').select('*').eq('id', sbUser.id).single();
+    if (error || !data) return;                 // mreža laže da radi — pusti na kešu
+    sbProfile = data;
+    _OL.save(_OL.PROFILE, data);
+    if (data.odobren === false && !data.is_admin) {
+      _showAuthScreen();
+      authShowPending();
+    }
+  } catch(e) {}
+}
+
 document.addEventListener('visibilitychange', async () => {
   const bgWarn = document.getElementById('bg-warning');
   if (document.visibilityState === 'visible') {
@@ -13307,6 +13354,8 @@ document.addEventListener('visibilitychange', async () => {
     // je nastala dok je app bio zatvoren/u pozadini (vidi _drainNativeGpsBuffer
     // i GpsService.java).
     try { await _drainNativeGpsBuffer(); } catch(e) {}
+    // Je li admin u međuvremenu opozvao pristup ovom nalogu?
+    _provjeriOpozivOdobrenja();
     // Povratak u prvi plan — pokušaj sync (online event zna izostati na Androidu)
     if (navigator.onLine && sbUser) {
       _processOfflineQueue();
@@ -32539,12 +32588,16 @@ async function dozAddMember() {
     const { data: me } = await sb.from('korisnici').select('sumarija').eq('id', sbUser.id).single();
     if (!me?.sumarija) { showToast('Nisi registrovan u šumariji'); return; }
     const { data: users } = await sb.from('korisnici')
-      .select('id,ime,prezime,boja').eq('sumarija', me.sumarija).neq('id', sbUser.id).order('prezime');
+      // `*` — je_vodeci postoji tek nakon migracije 20260727 (vidi sbLoadKolege)
+      .select('*').eq('sumarija', me.sumarija).neq('id', sbUser.id).order('prezime');
     if (!users?.length) { showToast('Nema projektanata u šumariji'); return; }
     const vecClanovi = new Set(_dozMembers.map(m => m.user_id));
     // Vodeći Projektant je nadzorni nalog (isti obrazac kao kod dodavanja u vlake
     // projekat) — ne snima doznaku, ne treba se nuditi kao kandidat za tim.
-    const dostupni = users.filter(u => !vecClanovi.has(u.id) && !/^vode[cć]i\s+projektant$/i.test((u.ime || '').trim()));
+    // je_vodeci je prava kolona od 20260727_pristup_odobrenje.sql; regex nad
+    // imenom ostaje kao fallback za redove učitane prije migracije.
+    const dostupni = users.filter(u => !vecClanovi.has(u.id)
+      && !u.je_vodeci && !/^vode[cć]i\s+projektant$/i.test((u.ime || '').trim()));
     if (!dostupni.length) { showToast('Svi projektanti su već dodani'); return; }
     _dozShowMemberPicker(dostupni);
   } catch(e) { showToast('Greška: ' + e.message); }

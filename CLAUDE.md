@@ -94,6 +94,26 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 - **Splash/drawable resursi**: bitmap u density-generičkom `drawable/` folderu
   se crta u "px kao dp" veličini — fiksirati prikaznu veličinu u layer-list
   XML-u (`android:width/height`), ne oslanjati se na veličinu PNG-a.
+- **Pristup firme se provjerava NA SERVERU, ne u JS-u**: od
+  `20260727_pristup_odobrenje.sql` postoji `je_odobren()` (admin je implicitno
+  odobren) i **RESTRICTIVE** politika `zzz_odobren` na svim tabelama s
+  podacima. Restrictive politike se I-uju s postojećim permissive politikama,
+  pa se nova tabela štiti dodavanjem te politike — **ne** prepisivanjem
+  postojećih. `SECURITY DEFINER` funkcije zaobilaze RLS, pa svaka nova mora
+  **sama** pozvati `je_odobren()` na početku. Gate u `showApp()` je samo UX.
+- **`korisnici` ima trigger `korisnici_zastita`**: RLS ne zna ograničiti
+  kolonu, pa se `odobren`/`is_admin`/`je_vodeci`/`sumarija`/`login_email`/`id`
+  vraćaju na staru vrijednost pri UPDATE-u i prisilno gase pri INSERT-u (osim
+  za admina i service_role). Zato **nikad ne pisati u TUĐI red `korisnici`** iz
+  klijenta — to je nekad radio backfill boje kolega i baš zbog njega je tabela
+  morala imati široku UPDATE politiku (= svako se mogao sam promovisati u
+  admina). Boja bez zapisa se računa iz `_bojaZaId(id)`.
+- **Uloge se ne izvode iz imena**: "vodeći projektant" je kolona
+  `korisnici.je_vodeci` (postavlja je samo admin preko `admin_set_vodeci`).
+  Regex nad imenom postoji još samo kao fallback za keš od prije migracije.
+- **Nove kolone u upitima na `korisnici`**: koristiti `select('*')`, ne
+  nabrajanje — migracije se pokreću ručno, pa eksplicitno traženje kolone koja
+  još ne postoji obori cijeli upit (PostgREST vraća grešku).
 - **GPS snimanje prekinuto telefonskim pozivom (ili sličnim)**: WebView-
   preživljavanje + native GPS bafer (`GpsService`, vidi `_drainNativeGpsBuffer`
   u index.html) štite od Activity-only uništenja (swipe iz recent apps), ali
