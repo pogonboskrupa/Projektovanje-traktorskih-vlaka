@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.75.1';
+const APP_VER = 'v3.76.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -6381,7 +6381,11 @@ async function saveNovProjekt() {
     updated_at: new Date().toISOString()
   };
 
-  if (!navigator.onLine) {
+  // Kreiraj lokalno s privremenim ID-jem — projekat je odmah upotrebljiv
+  // (može se odmah snimati vlaka na njega), a insert_projekt handler u
+  // _processOfflineQueue() po sinhronizaciji zamijeni tempId pravim ID-jem i
+  // migrira sve što je u međuvremenu nastalo (vlake, aktivni odabir, red čekanja).
+  const createLocal = (msg) => {
     const tempId = _genUUID();
     const newProj = { ...payload, id: tempId, clanovi: [], _pendingSync: true };
     _projekti.unshift(newProj);
@@ -6391,25 +6395,36 @@ async function saveNovProjekt() {
     _aktivniProjektId = tempId;
     localStorage.setItem('tvlake_akt_proj', tempId);
     rndProjektiList(); updProjStats();
-    showToast('📋 Projekat kreiran — sinhronizira se kad budes online');
+    showToast(msg);
+  };
+
+  if (!navigator.onLine) {
+    createLocal('📋 Projekat kreiran — sinhronizira se kad budes online');
     return;
   }
 
-  const { data, error } = await sb.from('projekti').insert(payload).select('id').single();
+  // Insert u VLASTITOM try/catch-u (ne u vanjskom): na terenu navigator.onLine
+  // zna lagati 'true' na mrtvoj vezi (OS-S4), a supabase-js tad grešku zna i
+  // BACITI (fetch TypeError) umjesto vratiti kao {error}. Bez ovoga bi takav
+  // slučaj pao u vanjski catch i projekat bi bio izgubljen uz poruku o grešci —
+  // umjesto da se, kao i kod stvarnog offline-a, sačuva lokalno i sinhronizuje
+  // kasnije. Uski opseg je namjeran: pozivi POSLIJE uspješnog inserta
+  // (sbLoadProjekti) ne smiju okinuti lokalno kreiranje — to bi bio duplikat.
+  let data, error;
+  try {
+    ({ data, error } = await sb.from('projekti').insert(payload).select('id').single());
+  } catch (netEx) {
+    if (_isNetworkErr(netEx)) {
+      createLocal('📴 Veza slaba — projekat sačuvan lokalno, sinhronizuje se kad uspije');
+      return;
+    }
+    throw netEx;
+  }
   if (error) {
     // OS-S1: onLine=true ali zahtjev pao (mrtva/špotava veza) — NE gubi projekat:
     // isti postupak kao offline grana (temp ID + lokalni upis + red čekanja).
     if (_isNetworkErr(error)) {
-      const tempId = _genUUID();
-      const newProj = { ...payload, id: tempId, clanovi: [], _pendingSync: true };
-      _projekti.unshift(newProj);
-      _OL.save(_OL.PROJEKTI, _projekti);
-      _OL.enqueue({ type: 'insert_projekt', payload: { ...payload, _tempId: tempId } });
-      hideNovProjektForm();
-      _aktivniProjektId = tempId;
-      localStorage.setItem('tvlake_akt_proj', tempId);
-      rndProjektiList(); updProjStats();
-      showToast('📴 Veza slaba — projekat sačuvan lokalno, sinhronizuje se kad uspije');
+      createLocal('📴 Veza slaba — projekat sačuvan lokalno, sinhronizuje se kad uspije');
       return;
     }
     showToast('Greška: ' + error.message);
@@ -32450,19 +32465,39 @@ async function dozSaveOdjel() {
   if (!navigator.onLine) { createLocal(); return; }
 
   try {
-    const { data: novi, error } = await sb.from('doz_projects').insert(payload).select('id').single();
+    // Insert u VLASTITOM try/catch-u: na terenu navigator.onLine zna lagati
+    // 'true' na mrtvoj vezi (OS-S4), a supabase-js tad grešku zna i BACITI
+    // (fetch TypeError) umjesto vratiti kao {error} — bez ovoga bi takav slučaj
+    // pao u vanjski catch i odjel bi bio izgubljen uz poruku o grešci, umjesto
+    // da se sačuva lokalno kao i kod stvarnog offline-a. Uski opseg je namjeran:
+    // pozivi POSLIJE uspješnog inserta (članovi, dozLoadOdjeli) ne smiju okinuti
+    // lokalno kreiranje — odjel je već na serveru, to bi bio duplikat.
+    let novi, error;
+    try {
+      ({ data: novi, error } = await sb.from('doz_projects').insert(payload).select('id').single());
+    } catch (netEx) {
+      if (_isNetworkErr(netEx)) { createLocal(); return; }
+      throw netEx;
+    }
     if (error) {
       // OS-S1: onLine=true ali zahtjev pao (mrtva/špotava veza) — ne gubi odjel,
       // isti postupak kao offline grana.
       if (_isNetworkErr(error)) { createLocal(); return; }
       throw error;
     }
-    // Kreator je automatski manager-član — RLS i lista članova ga uključuju
+    // Kreator je automatski manager-član — RLS i lista članova ga uključuju.
+    // Best effort, ne smije srušiti kreiranje: odjel je u ovom trenutku VEĆ na
+    // serveru, a created_by RLS kreatoru ionako daje pun pristup i bez ovog reda
+    // (isti obrazac kao insert_doz_project grana u _processOfflineQueue). Bez
+    // ovog hvatanja bi pucanje veze baš na ovom pozivu prikazalo "Greška" i
+    // ostavilo korisnika da misli da odjel nije napravljen.
     if (novi?.id) {
-      await sb.from('doz_project_members').insert({
-        project_id: novi.id, user_id: sbUser.id, role: 'manager',
-        track_color: DOZ_ENG_COLORS[0], order_index: 0, is_active: true
-      });
+      try {
+        await sb.from('doz_project_members').insert({
+          project_id: novi.id, user_id: sbUser.id, role: 'manager',
+          track_color: DOZ_ENG_COLORS[0], order_index: 0, is_active: true
+        });
+      } catch (e) {}
     }
     dozCloseCreateOdjel();
     showToast('✅ Projekat kreiran!');
