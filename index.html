@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.78.0';
+const APP_VER = 'v3.79.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5477,10 +5477,18 @@ async function doRegister() {
   if (pin.length < 6)      { showAuthErr('PIN mora imati najmanje 6 cifara', true); return; }
   if (pin !== pin2)        { showAuthErr('PIN-ovi se ne poklapaju', true); return; }
 
-  // Check if name already taken
-  const { data: existing } = await sb.from('korisnici')
-    .select('id').eq('ime', ime).eq('prezime', prezime).maybeSingle();
-  if (existing) { showAuthErr(`Korisnik "${ime} ${prezime}" već postoji`, true); return; }
+  // Je li ime već zauzeto? Ovo se izvršava PRIJE sb.auth.signUp(), dakle kao
+  // NEPRIJAVLJEN korisnik. Ranije je to bio direktan `select` na tabelu
+  // korisnici, što je zahtijevalo politiku koja svima dozvoljava čitanje —
+  // a ona je otvarala CIJELI imenik (imena, login_email, is_admin, odobren)
+  // bilo kome s javnim ključem. Od 20260728_pristup_dovrsetak.sql to radi uska
+  // RPC koja vraća samo true/false, bez ijednog podatka.
+  const { data: imeZauzeto, error: eIme } = await sb.rpc('ime_zauzeto', {
+    p_ime: ime, p_prezime: prezime
+  });
+  // Ako RPC još ne postoji (migracija nije primijenjena), preskoči provjeru —
+  // jedinstvenost svejedno brani upis u koraku ispod, uz manje jasnu poruku.
+  if (!eIme && imeZauzeto) { showAuthErr(`Korisnik "${ime} ${prezime}" već postoji`, true); return; }
 
   // Generate unique internal email (never shown to user)
   const slug = `${ime.toLowerCase().replace(/[^a-z]/g,'')}.${prezime.toLowerCase().replace(/[^a-z]/g,'')}`;
@@ -5489,9 +5497,13 @@ async function doRegister() {
   const { data, error } = await sb.auth.signUp({ email: loginEmail, password: pin.padEnd(6, '0') });
   if (error) { showAuthErr('Greška: ' + error.message, true); return; }
 
-  // Dohvati koliko korisnika je već u ovoj šumariji da dodijelimo distinktivnu boju
-  const { data: existingK } = await sb.from('korisnici').select('id').eq('sumarija', sumarija);
-  const korisnikBoja = KORISNIK_PAL[(existingK?.length || 0) % KORISNIK_PAL.length];
+  // Boja se računa DETERMINISTIČKI iz novog korisničkog id-a. Ranije se brojalo
+  // koliko korisnika već ima u šumariji — ali taj upit se izvršava prije nego
+  // vlastiti red u `korisnici` postoji, pa `moja_sumarija()` još vraća NULL i
+  // od 20260728_pristup_dovrsetak.sql (kad je uklonjeno svima-dozvoljeno
+  // čitanje) vratio bi prazno → svi novi korisnici bi dobili istu boju.
+  // _bojaZaId daje stabilnu i raspršenu boju bez ijednog dodatnog upita.
+  const korisnikBoja = _bojaZaId(data.user.id);
 
   // sb.auth.signUp() gore je VEĆ uspio — auth.users red postoji. Ako ovaj insert
   // padne (npr. prolazni prekid veze, češći na Android WebView-u nego u pravom
