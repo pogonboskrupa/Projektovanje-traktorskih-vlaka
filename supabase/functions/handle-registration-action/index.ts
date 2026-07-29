@@ -1,17 +1,23 @@
 // Supabase Edge Function: handle-registration-action
 //
-// Javni GET endpoint na koji vode "Odobri"/"Odbij" dugmad iz email obavještenja
-// (notify-new-registration). Nema Supabase sesiju/JWT (klik iz maila) — sigurnost
-// je HMAC token u linku, izračunat istim NOTIFY_SECRET-om kao pri slanju emaila.
+// Javni GET endpoint na koji vode "Odobri"/"Odbij" dugmad iz Telegram poruke i
+// email obavještenja (šalje ih SQL trigger — vidi
+// supabase/migrations/20260729_obavjestenja.sql). Nema Supabase sesiju/JWT
+// (klik iz poruke), pa je sigurnost HMAC token u linku.
 //
-// DEPLOY: mora se deploy-ovati BEZ JWT provjere (--no-verify-jwt) — inače Supabase
-// vraća 401 prije nego kod ovdje uopšte dobije priliku da provjeri token.
+// Ovo je JEDINA Edge Funkcija koja se mora deploy-ovati, i samo zbog dugmadi:
+// sama obavještenja idu direktno iz baze preko pg_net. Ako ova funkcija nije
+// deploy-ovana, obavještenja i dalje stižu — odobrava se u aplikaciji.
 //
-// Potrebni Supabase secrets (isti kao za notify-new-registration):
-//   NOTIFY_SECRET — MORA biti identičan onome u SQL trigeru i drugoj funkciji.
+// DEPLOY: mora ići BEZ JWT provjere, inače Supabase vraća 401 prije nego kod
+// ovdje uopšte dobije priliku provjeriti token:
+//   supabase functions deploy handle-registration-action --no-verify-jwt
+//
+// Secrets NE TREBA ručno postavljati: NOTIFY_SECRET se čita iz tabele
+// app_secrets (ključ 'notify_secret'). Ranije je stajao i u SQL-u i u Supabase
+// secretima, pa je najčešći uzrok kvara bio da se ta dva raziđu.
 // SUPABASE_URL i SUPABASE_SERVICE_ROLE_KEY su automatski dostupni.
 
-const NOTIFY_SECRET    = Deno.env.get('NOTIFY_SECRET') ?? '';
 const SUPABASE_URL     = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
@@ -22,6 +28,24 @@ async function hmacHex(secret: string, msg: string): Promise<string> {
   );
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg));
   return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Poređenje otporno na mjerenje vremena — da se token ne može pogađati bajt po bajt.
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function readSecret(): Promise<string> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/app_secrets?kljuc=eq.notify_secret&select=vrijednost`,
+    { headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } }
+  );
+  if (!res.ok) return '';
+  const rows: { vrijednost: string }[] = await res.json();
+  return rows?.[0]?.vrijednost ?? '';
 }
 
 function page(title: string, body: string, color: string): Response {
@@ -46,13 +70,29 @@ Deno.serve(async (req: Request) => {
   const uid    = url.searchParams.get('uid') || '';
   const action = url.searchParams.get('action') || '';
   const token  = url.searchParams.get('token') || '';
+  const exp    = url.searchParams.get('exp') || '';
 
-  if (!uid || !['approve', 'reject'].includes(action) || !token) {
+  if (!uid || !['approve', 'reject'].includes(action) || !token || !exp) {
     return page('Nevažeći link', 'Nedostaju parametri u linku.', '#f59e0b');
   }
-  const expected = await hmacHex(NOTIFY_SECRET, `${uid}:${action}`);
-  if (expected !== token) {
-    return page('Nevažeći link', 'Token ne odgovara — link je možda oštećen.', '#f59e0b');
+
+  // Rok je DIO potpisane poruke, pa se ne može produžiti mijenjanjem URL-a.
+  // Raniji linkovi nisu imali rok — vrijedili su zauvijek.
+  const expNum = Number(exp);
+  if (!Number.isFinite(expNum) || expNum * 1000 < Date.now()) {
+    return page('Link je istekao',
+      'Ovo obavještenje je starije od 7 dana. Odobri korisnika u aplikaciji, tab Korisnici.', '#f59e0b');
+  }
+
+  const secret = await readSecret();
+  if (!secret) {
+    return page('Nije podešeno',
+      'Tajna za potpisivanje nije postavljena u bazi (app_secrets). Vidi docs/OBAVJESTENJA.md.', '#f59e0b');
+  }
+
+  const expected = await hmacHex(secret, `${uid}:${action}:${exp}`);
+  if (!safeEqual(expected, token)) {
+    return page('Nevažeći link', 'Token ne odgovara — link je oštećen ili falsifikovan.', '#f59e0b');
   }
 
   const odobren = action === 'approve';
@@ -71,8 +111,9 @@ Deno.serve(async (req: Request) => {
   const rows = await patchRes.json();
   const u = rows?.[0];
   const name = u ? `${u.ime || ''} ${u.prezime || ''}`.trim() : 'Korisnik';
+  const sum  = u?.sumarija ? ` (${u.sumarija})` : '';
 
   return odobren
-    ? page('Korisnik odobren', `${name} sada može koristiti aplikaciju.`, '#16a34a')
-    : page('Korisnik odbijen', `${name} ostaje blokiran i ne može pristupiti aplikaciji.`, '#dc2626');
+    ? page('Korisnik odobren', `${name}${sum} sada može koristiti aplikaciju.`, '#16a34a')
+    : page('Korisnik odbijen', `${name}${sum} ostaje blokiran i ne može pristupiti aplikaciji.`, '#dc2626');
 });

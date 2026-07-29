@@ -3837,7 +3837,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
       <div style="padding:14px 16px;">
         <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;">
           <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px;">📧 Email obavještenja o registraciji</div>
-          <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Na ove adrese stiže email kad se neko novi registruje — sa dugmadima za direktno odobravanje ili odbijanje, bez otvaranja aplikacije.</div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Na ove adrese stiže email kad se neko novi registruje — sa dugmadima za direktno odobravanje ili odbijanje, bez otvaranja aplikacije. Telegram poruka se šalje zasebno (vidi docs/OBAVJESTENJA.md).</div>
           <div id="postavke-email-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
             <p style="color:#64748b;font-size:12px;text-align:center;padding:8px 0;">⏳ Učitavam...</p>
           </div>
@@ -3848,6 +3848,11 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
             <button onclick="postavkeAddEmail()"
               style="padding:9px 14px;background:#166534;border:1px solid #4ade80;border-radius:8px;color:#4ade80;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">＋ Dodaj</button>
           </div>
+          <button onclick="postavkeTestNotif()"
+            style="width:100%;margin-top:10px;padding:10px;background:#1e3a5f;border:1px solid #3b82f6;border-radius:8px;color:#60a5fa;font-size:13px;font-weight:600;cursor:pointer;">
+            📨 Pošalji probno obavještenje
+          </button>
+          <div style="font-size:10px;color:#475569;margin-top:6px;line-height:1.5;">Provjerava cijeli lanac (Telegram + email) bez pravljenja lažne registracije.</div>
         </div>
       </div>
     </div>
@@ -4550,7 +4555,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.79.1';
+const APP_VER = 'v3.80.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5983,9 +5988,10 @@ async function adminResetPin(userId, name) {
 }
 
 // ═══ POSTAVKE — email adrese za obavještenja o novoj registraciji ═══════════
-// Tabela admin_notify_emails (RLS: samo admin) čita se Edge Function-om
-// notify-new-registration pri svakoj novoj registraciji — vidi
-// supabase/migrations/20260704_admin_notify_emails.sql.
+// Tabelu admin_notify_emails (RLS: samo admin) čita SQL trigger pri svakoj
+// novoj registraciji i šalje mail direktno preko Resend API-ja — vidi
+// supabase/migrations/20260729_obavjestenja.sql. Telegram ide istim putem.
+// (Ranije je to radila Edge Funkcija notify-new-registration, koja je ukinuta.)
 async function postavkeLoadEmails() {
   if (!sbProfile?.is_admin) return;
   const el = document.getElementById('postavke-email-list');
@@ -6033,6 +6039,24 @@ async function postavkeDeleteEmail(id, email) {
   if (error) { showToast('Greška: ' + error.message); return; }
   showToast('🗑 Adresa uklonjena');
   postavkeLoadEmails();
+}
+
+// Probno obavještenje — bez ovoga se podešavanje (Telegram token, chat id,
+// Resend ključ) moglo provjeriti samo pravljenjem lažne registracije.
+async function postavkeTestNotif() {
+  if (!sbProfile?.is_admin) return;
+  if (!navigator.onLine) { showToast('⚠ Probno obavještenje traži internet'); return; }
+  showToast('📨 Šaljem probno obavještenje...');
+  const { data, error } = await sb.rpc('admin_test_notifikacija');
+  if (error) {
+    const missing = /function .*does not exist|schema cache|PGRST202/i.test(error.message || '') || error.code === 'PGRST202';
+    showToast(missing ? '⚠ Primijeni migraciju 20260729 na Supabase' : 'Greška: ' + error.message);
+    return;
+  }
+  await _dlgConfirm(
+    (data || 'Poslano.') + '\n\nAko ništa ne stigne, provjeri tajne u tabeli app_secrets — upute su u docs/OBAVJESTENJA.md.',
+    { title: '📨 Probno obavještenje', okLabel: 'U redu' }
+  );
 }
 
 // --- Admin: statistika po šumariji (korisnici · vlake · km) ---
@@ -6090,16 +6114,33 @@ async function _adminLoadStats() {
 }
 
 // --- Admin: provjera registracija na čekanju (poslije prijave) ---
-async function _adminCheckPending() {
+let _lastPendingCheck = 0;
+// tiho=true → osvježi samo brojčanik, bez toasta (periodična provjera)
+async function _adminCheckPending(tiho) {
   if (!sbProfile?.is_admin) return;
   try {
     const { data, error } = await sb.rpc('admin_get_all_users');
     if (error || !data) return;
     const n = data.filter(u => u.odobren === false).length;
+    const bilo = _notifCounts.admin || 0;
     _notifCounts.admin = n;
     _notifRender('admin');
-    if (n > 0) showToast(`⏳ ${n} korisnik${n === 1 ? '' : 'a'} čeka odobrenje — tab Korisnici`);
+    // Pri periodičnoj provjeri javi SAMO ako je stigao neko nov — inače bi se
+    // isti toast ponavljao svaki put kad se app vrati u prvi plan.
+    if (n > 0 && (!tiho || n > bilo)) {
+      showToast(`⏳ ${n} korisnik${n === 1 ? '' : 'a'} čeka odobrenje — tab Korisnici`);
+    }
   } catch(e) {}
+}
+
+// Admin koji app drži otvorenim danima inače ne bi vidio nove registracije bez
+// restarta — _adminCheckPending() se zvao samo iz sbInitData() pri pokretanju.
+function _adminSchedPendingCheck() {
+  if (!sbProfile?.is_admin || !navigator.onLine) return;
+  const now = Date.now();
+  if (now - _lastPendingCheck < 60000) return;
+  _lastPendingCheck = now;
+  _adminCheckPending(true).catch(() => {});
 }
 
 // =====================================================================
@@ -13407,6 +13448,8 @@ document.addEventListener('visibilitychange', async () => {
     try { await _drainNativeGpsBuffer(); } catch(e) {}
     // Je li admin u međuvremenu opozvao pristup ovom nalogu?
     _provjeriOpozivOdobrenja();
+    // Ako sam ja admin — ima li novih registracija koje čekaju odobrenje?
+    _adminSchedPendingCheck();
     // Povratak u prvi plan — pokušaj sync (online event zna izostati na Androidu)
     if (navigator.onLine && sbUser) {
       _processOfflineQueue();
