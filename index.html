@@ -2389,7 +2389,7 @@ select:focus { outline:none; border-color:#3b82f6; }
 .ddb.undo    { background:#150d2e; color:#a78bfa; }
 .ddb.finish  { background:#052e16; color:#4ade80; }
 .ddb.cancel  { background:#2d0a0a; color:#f87171; flex:0 0 auto; }
-/* Vodi me do lokacije — banner za tapkanje tačaka (isti .ddb dugmad, ljubičasta tema) */
+/* Vodi me do odjela/lokacije — banner za tapkanje tačaka (isti .ddb dugmad, ljubičasta tema) */
 #guide-draw-banner {
   position:fixed; bottom:0; left:0; right:0;
   display:none; flex-direction:column;
@@ -4550,7 +4550,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.79.0';
+const APP_VER = 'v3.79.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5579,12 +5579,51 @@ async function promijeniPin() {
 }
 
 async function doLogout() {
+  // OBA await-a ispod moraju biti VREMENSKI OGRANIČENA. Sve čišćenje i povratak
+  // na login ekran su u try/finally niže i garantovano bi se izvršili — ali samo
+  // ako izvršavanje uopšte STIGNE do njih. try/catch hvata grešku, ali ne i
+  // vješanje: bez mreže su oba poziva znala visjeti zauvijek, pa je odjava tiho
+  // ostajala nedovršena i korisnik bi ostao u aplikaciji bez ikakve poruke
+  // ("odjava ne radi offline"). Isti Promise.race obrazac koristi i showApp().
+
   // Pokušaj isporučiti zaostale offline operacije prije odjave (da se ne
-  // pomiješaju sa sljedećim nalogom na istom uređaju)
+  // pomiješaju sa sljedećim nalogom na istom uređaju). navigator.onLine na
+  // terenu zna lagati 'true' na mrtvoj vezi (OS-S4), pa i ovo mora imati kočnicu.
+  // Ako 5 s ne bude dovoljno, red ostaje u localStorage i ode na sljedećoj prijavi.
   if (navigator.onLine && sbUser && sbProfile) {
-    try { await _processOfflineQueue(); } catch(e) {}
+    try {
+      const pq = _processOfflineQueue().catch(() => {});
+      await Promise.race([pq, new Promise(r => setTimeout(r, 5000))]);
+    } catch(e) {}
   }
-  try { await sb.auth.signOut(); } catch(e) {}
+
+  // signOut() šalje mrežni zahtjev na /auth/v1/logout i usput uzima navigator.locks
+  // bravu nad auth tokenom — ako osvježavanje tokena već drži tu bravu čekajući
+  // mrežu, signOut čeka nju, bez ugrađenog timeouta. Bez mreže tražimo SAMO
+  // lokalno brisanje sesije (scope:'local' → nema mrežnog poziva); kad mreže ima,
+  // ostaje podrazumijevani 'global' da se refresh token stvarno poništi i na
+  // serveru (bitno na dijeljenom terenskom telefonu).
+  // .catch() ide na SAM promise, ne samo oko await-a — promise koji izgubi trku
+  // bi inače kasnije bacio unhandled rejection.
+  // Vanjski try je i dalje potreban: ako inicijalizacija Supabase klijenta nije
+  // uspjela, `sb` je null pa `sb.auth` baci SINHRONO — .catch() na promise-u tu
+  // ne pomaže, a neuhvaćena greška bi preskočila cijelo čišćenje ispod.
+  try {
+    const pso = sb.auth.signOut(navigator.onLine ? undefined : { scope: 'local' })
+                  .catch(() => {});
+    await Promise.race([pso, new Promise(r => setTimeout(r, 2000))]);
+  } catch(e) {}
+
+  // Ako signOut nije stigao završiti, Supabase sesija ostaje zapisana u
+  // localStorage — _clearSavedUser() briše samo tvlake_saved_user, pa bi pri
+  // sljedećem pokretanju onAuthStateChange('INITIAL_SESSION') vratio korisnika
+  // NAZAD u aplikaciju iako se odjavio. Zato ključ brišemo i sami.
+  try {
+    Object.keys(localStorage)
+      .filter(k => /^sb-.*-auth-token$/.test(k))
+      .forEach(k => localStorage.removeItem(k));
+  } catch(e) {}
+
   sbUser = null; sbProfile = null;
 
   // Sve čišćenje ide u try/finally — GARANTOVANO se vraćamo na login ekran čak i ako
@@ -5714,7 +5753,7 @@ async function _wipeAllLocalUserData() {
   } catch(e) {}
   localStorage.removeItem(_WX_PLACES_KEY);
   localStorage.removeItem(_WX_CACHE_KEY);
-  localStorage.removeItem(_GUIDE_ROUTES_KEY);  // sačuvane rute "Vodi me do lokacije"
+  localStorage.removeItem(_GUIDE_ROUTES_KEY);  // sačuvane rute "Vodi me do odjela/lokacije"
   // Tematske .gpkg karte — lokalni per-korisnik sadržaj (ista klasa kao KML):
   // obriši sve IDB fajlove iz registra + registar + legacy ključeve
   try {
@@ -22517,7 +22556,7 @@ function _updFabVisibility() {
   const onKarta = _activeTab === 'karta';
   const mdpActive = typeof _mdpIdx !== 'undefined' && _mdpIdx !== null; // ručno crtanje u toku
   const edActive  = typeof editOn !== 'undefined' && editOn && activeTool === 'edit'; // edit panel otvoren
-  const guideActive = typeof _guideOn !== 'undefined' && _guideOn; // "Vodi me do lokacije" tapkanje u toku
+  const guideActive = typeof _guideOn !== 'undefined' && _guideOn; // "Vodi me do odjela/lokacije" tapkanje u toku
   const hideBars  = mdpActive || edActive || guideActive;
   const ab = document.getElementById('action-bar');
   if (ab) ab.style.display = (onKarta && !hideBars) ? 'flex' : 'none';
@@ -24253,7 +24292,7 @@ function closeProfilModal() {
   document.getElementById('profil-modal').classList.remove('show');
 }
 
-// ─── VODI ME DO LOKACIJE ────────────────────────────────────────────────────
+// ─── VODI ME DO ODJELA/LOKACIJE ────────────────────────────────────────────────────
 // Ručno tapkanje rute na karti (start [+ međutačke] + odredište, ili "od moje
 // lokacije" gdje je start auto-GPS) → dužina + profil visina + nagib + procjena
 // vremena dolaska. Reuse: _fetchProfileElev/_renderElevProfile (isti #profil-modal
@@ -32745,7 +32784,7 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();openGraniceModal()">🗺 Granice Odjela</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();startLocPhoto()">📷 Uslikaj lokaciju</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showShareLocMenu()">📍 Podijeli lokaciju</div>
-  <div class="mdrop-item" style="color:#a78bfa;" onclick="closeMenuDropdown();showGuideChoice()">🧭 Vodi me do lokacije</div>
+  <div class="mdrop-item" style="color:#a78bfa;" onclick="closeMenuDropdown();showGuideChoice()">🧭 Vodi me do odjela/lokacije</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showHelp()">📖 Upute za korištenje</div>
   <div class="mdrop-sep"></div>
@@ -34050,7 +34089,7 @@ if (typeof AndroidDownload !== 'undefined') {
   </div>
 </div>
 
-<!-- ═══ VODI ME DO LOKACIJE — BANNER ZA TAPKANJE TAČAKA ═══ -->
+<!-- ═══ VODI ME DO ODJELA/LOKACIJE — BANNER ZA TAPKANJE TAČAKA ═══ -->
 <div id="guide-draw-banner">
   <div id="guide-draw-row1">
     <span id="guide-draw-label">📌 Tapni POČETNU tačku</span>
@@ -34165,12 +34204,12 @@ if (typeof AndroidDownload !== 'undefined') {
   <div id="doz-qr-scan-status" style="position:absolute;bottom:24px;left:0;right:0;text-align:center;color:#fff;font-size:12px;padding:0 20px;"></div>
 </div>
 
-<!-- VODI ME DO LOKACIJE — izbor moda -->
+<!-- VODI ME DO ODJELA/LOKACIJE — izbor moda -->
 <div id="guide-choice-modal" style="display:none;position:fixed;inset:0;z-index:99030;background:rgba(0,0,0,0.65);align-items:center;justify-content:center;padding:16px;"
   onclick="if(event.target===this)closeGuideChoice()">
   <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;width:100%;max-width:380px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,0.7);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3 style="margin:0;font-size:15px;color:#a78bfa;">🧭 Vodi me do lokacije</h3>
+      <h3 style="margin:0;font-size:15px;color:#a78bfa;">🧭 Vodi me do odjela/lokacije</h3>
       <button onclick="closeGuideChoice()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
     </div>
     <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.5;">Za odlazak kombijem/autom do terena — ruta ide <b style="color:#e2e8f0;">putem</b> (OSRM). Tapni tačke na karti (može i međutačke); dobijaš dužinu, profil, nagib i vrijeme dolaska.</div>
