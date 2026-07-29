@@ -118,6 +118,7 @@ from net._http_response order by created desc limit 20;
 
 | Šta vidiš | Šta znači |
 |---|---|
+| **prazno, a probno obavještenje ne javlja grešku** | funkcija je pala PRIJE slanja — najčešće `hmac()` nije pronađen jer pgcrypto živi u šemi `extensions`. Provjeri donjim upitom i ponovo pokreni migraciju `20260729`. |
 | nema nijednog reda | trigger se nije okinuo — provjeri `select extname from pg_extension where extname='pg_net';` |
 | `error_msg` popunjen, status prazan | poziv nije izašao (mreža/DNS) |
 | Telegram `401` / `404` | pogrešan `telegram_token` |
@@ -125,6 +126,18 @@ from net._http_response order by created desc limit 20;
 | Resend `401` | pogrešan `resend_api_key` |
 | Resend `403` / `422` | `resend_from` domena nije verifikovana |
 | `200` a ništa ne stiže | provjeri spam; za email i da lista primalaca nije prazna |
+
+Gdje živi pgcrypto (bitno za prvi red tabele — slanje potpisuje linkove sa
+`hmac()`, a funkcija ga neće naći ako je u drugoj šemi):
+
+```sql
+select p.proname, n.nspname as sema
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where p.proname in ('hmac', 'crypt');
+```
+
+Migracija `20260729` već uključuje `extensions` u `search_path`, pa je ispravna
+u oba slučaja — ako je rezultat `extensions`, samo je ponovo pokreni.
 
 Provjera dugmadi: klikni "Odobri" u poruci — mora se otvoriti stranica s
 potvrdom, a u bazi:

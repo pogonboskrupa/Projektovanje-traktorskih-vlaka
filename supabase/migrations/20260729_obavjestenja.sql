@@ -26,6 +26,15 @@
 create extension if not exists pg_net;
 create extension if not exists pgcrypto;   -- hmac() za potpisivanje linkova
 
+-- PAŽNJA za svaku buduću funkciju koja koristi pgcrypto (hmac/crypt/gen_salt):
+-- u Supabase projektima pgcrypto po pravilu živi u šemi `extensions`, NE u
+-- `public`. Funkcija sa `SET search_path = public, ...` tu šemu isključuje, pa
+-- poziv padne sa "function hmac(...) does not exist". Zato SVE funkcije ispod
+-- koje potpisuju linkove imaju `extensions` u search_path-u. Ovo je posebno
+-- podmuklo ovdje jer je slanje umotano u EXCEPTION WHEN OTHERS THEN NULL (da
+-- nikad ne sruši registraciju) — greška bi bila progutana, ništa ne bi stiglo,
+-- a net._http_response bi ostao prazan, bez ijednog traga o uzroku.
+
 
 -- ════════════════════════════════════════════════════════════
 -- 1. Tajne izvan repoa
@@ -62,7 +71,7 @@ create or replace function public._posalji_obavjestenje(
 returns void
 language plpgsql
 security definer
-set search_path = public, net
+set search_path = public, net, extensions
 as $$
 declare
   v_secret   text := public._tajna('notify_secret');
@@ -169,7 +178,7 @@ create or replace function public.notify_new_registration_trigger()
 returns trigger
 language plpgsql
 security definer
-set search_path = public, net
+set search_path = public, net, extensions
 as $$
 begin
   -- Problem sa slanjem NIKAD ne smije srušiti registraciju.
@@ -196,7 +205,7 @@ create or replace function public.admin_test_notifikacija()
 returns text
 language plpgsql
 security definer
-set search_path = public, net
+set search_path = public, net, extensions
 as $$
 begin
   if not public.je_admin() then
@@ -214,6 +223,48 @@ grant execute on function public.admin_test_notifikacija() to authenticated;
 
 
 -- ════════════════════════════════════════════════════════════
--- 5. Osvježi PostgREST schema keš
+-- 5. Popravka istog propusta u admin_reset_pin
+-- ════════════════════════════════════════════════════════════
+-- admin_reset_pin iz 20260701_odobrenje_i_reset.sql koristi crypt()/gen_salt()
+-- — također pgcrypto — uz `SET search_path = public, auth`, dakle BEZ šeme
+-- `extensions`. Ako pgcrypto tamo živi (uobičajeno za Supabase), ta funkcija je
+-- već sada pokvarena: admin ne može resetovati zaboravljen PIN, a greška se
+-- vidi tek pri pokušaju. Tijelo je nepromijenjeno — dodan je samo `extensions`.
+create or replace function admin_reset_pin(
+  p_user_id  UUID,
+  p_pin      TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+  v_caller_admin BOOLEAN;
+BEGIN
+  SELECT k.is_admin INTO v_caller_admin
+    FROM korisnici k WHERE k.id = auth.uid();
+
+  IF NOT COALESCE(v_caller_admin, FALSE) THEN
+    RAISE EXCEPTION 'Pristup odbijen — samo admin';
+  END IF;
+
+  IF p_pin !~ '^\d{4,6}$' THEN
+    RAISE EXCEPTION 'PIN mora biti 4–6 cifara';
+  END IF;
+
+  UPDATE auth.users
+    SET encrypted_password = crypt(rpad(p_pin, 6, '0'), gen_salt('bf')),
+        updated_at = now()
+    WHERE id = p_user_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION admin_reset_pin(UUID, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_reset_pin(UUID, TEXT) TO authenticated;
+
+
+-- ════════════════════════════════════════════════════════════
+-- 6. Osvježi PostgREST schema keš
 -- ════════════════════════════════════════════════════════════
 notify pgrst, 'reload schema';
