@@ -94,6 +94,20 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 - **Splash/drawable resursi**: bitmap u density-generičkom `drawable/` folderu
   se crta u "px kao dp" veličini — fiksirati prikaznu veličinu u layer-list
   XML-u (`android:width/height`), ne oslanjati se na veličinu PNG-a.
+- **Adaptivna ikonica aplikacije** (`mipmap-*/ic_launcher_foreground.png`):
+  sadržaj MORA stati unutar "safe zone" kruga (dijagonala okvira crteža ≤ 61%
+  platna, idealno ≤ 60% zbog margine) — inače je različiti launcheri (krug/
+  skvirkl/zaobljeni kvadrat) sijeku nekonzistentno, izgleda drugačije na
+  različitim telefonima. Pozadina ide isključivo kroz `ic_launcher_background`
+  boju u `values/colors.xml` (trenutno bijela) — foreground PNG ne smije imati
+  pozadinu popunjenu do ivice, samo providan crtež. Izvor grafike:
+  `drawable/splash_logo.png` (zeleni crtež na bijeloj kartici, providna
+  pozadina) — od njega se izvlači sam "ink" (linija crteža), ne od starog
+  `ic_launcher_foreground.png` (imao je zelenu popunjenu do ruba, bez marže —
+  otud "zelen vrh/bjelkasto dno" izgled na nekim telefonima, popravljeno u
+  v3.81.0). Legacy `ic_launcher.png`/`ic_launcher_round.png` (fallback za
+  starije launchere) su odvojeno generisani flattened PNG-ovi (bijela
+  pozadina + centriran crtež), ne oslanjaju se na OS maskiranje.
 - **Pristup firme se provjerava NA SERVERU, ne u JS-u**: od
   `20260727_pristup_odobrenje.sql` postoji `je_odobren()` (admin je implicitno
   odobren) i **RESTRICTIVE** politika `zzz_odobren` na svim tabelama s

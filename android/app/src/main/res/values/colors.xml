@@ -5,6 +5,13 @@
     <color name="colorBackground">#0f172a</color>
     <!-- Splash pozadina = zelena iz logoa -->
     <color name="colorSplash">#376638</color>
-    <!-- Adaptive icon background -->
-    <color name="ic_launcher_background">#376638</color>
+    <!-- Adaptive icon background — bijela (v3.81.0). Ranije zelena (#376638): kako
+         ic_launcher_foreground.png ranije NIJE imao providan rub (zelena je punila
+         cijeli 432x432 kanvas do ivice, bez "safe zone" margine), Android bi ga na
+         pojedinim launcherima (krug/skvirkl umjesto zaobljenog kvadrata) sjekao
+         nekonzistentno — otud "zelen vrh, bjelkasto dno" izgled na telefonu. Sad je
+         foreground samo tanak zeleni crtež na providnom, centriran unutar sigurne
+         zone (garantovano bez sječenja ni pod jednim oblikom maske), a bijela boja
+         ovdje popunjava pozadinu ispod njega. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>
