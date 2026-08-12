@@ -4659,9 +4659,23 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.84.0';
+const APP_VER = 'v3.85.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
+
+// Jednokratno čišćenje zaostataka uklonjene vremenske prognoze (v3.85.0).
+// _wipeAllLocalUserData() briše iste ključeve, ali se ona pokreće SAMO kad se na
+// uređaju prijavi DRUGI korisnik — ko nastavi sa istim nalogom nosio bi keš
+// prognoze zauvijek. Zastavica osigurava da se petlja po localStorage-u izvrši
+// jednom, ne pri svakom pokretanju.
+try {
+  if (!localStorage.getItem('tvlake_wx_purged')) {
+    Object.keys(localStorage)
+      .filter(k => k === 'tvlake_weather_cache' || k === 'tvlake_wx_places' || k.startsWith('tvlake_wx_cache_'))
+      .forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
+    localStorage.setItem('tvlake_wx_purged', '1');
+  }
+} catch(e) {}
 // =====================================================================
 // === SUPABASE AUTH ===
 // =====================================================================
@@ -5414,7 +5428,6 @@ async function showApp() {
     _localKmlRestore();
     _kmlcInit(); // load IDB key list for offline badge rendering
     _temRestore(); // tematska .gpkg karta iz IDB (async, ne blokira)
-    _wxRestore();  // prognoza — sačuvane lokacije/područja + obrisi na karti
     // Trajna pohrana: bez persist() browser pod pritiskom diska smije obrisati
     // CIJELI Cache Storage/IDB (sve offline pločice i karte odjednom). Uz persist()
     // pregledano/preuzeto ostaje dok korisnik sam ne obriše.
@@ -5832,8 +5845,6 @@ async function doLogout() {
   // Tematske .gpkg karte — in-memory reset (IDB + registar ostaju: isti korisnik ih
   // dobija nazad kroz _temRestore; promjena korisnika ih briše kroz _wipeAllLocalUserData)
   try { _temRemoveAll(true); } catch(e) {}
-  // Prognoza — ukloni obrise područja s karte i resetuj listu (restore je vrati sljedećem loginu)
-  try { Object.values(_wxAreaLayers).forEach(l => { try { map.removeLayer(l); } catch(e) {} }); _wxAreaLayers = {}; _wxPlaces = []; } catch(e) {}
 
   if (typeof _geojsonLayer !== 'undefined' && _geojsonLayer) { try { map.removeLayer(_geojsonLayer); } catch(e) {} }
   _geojsonLayer = null;
@@ -5888,12 +5899,16 @@ async function _wipeAllLocalUserData() {
   localStorage.removeItem(_TACKE_KEY);
   localStorage.removeItem(_KVC_KEY);
   localStorage.removeItem('tvlake_kolege');
-  // Prognoza — sačuvane lokacije/područja + po-mjesto keš (lokalni per-korisnik sadržaj)
+  // Vremenska prognoza je UKLONJENA iz aplikacije (v3.85.0), ali telefoni koji su
+  // je koristili i dalje nose njene ključeve u localStorage-u. Zato se ovdje i
+  // dalje brišu — doslovnim imenima, jer konstante (_WX_*) više ne postoje.
+  // Ovo se može ukloniti kad prođe dovoljno vremena da su svi uređaji očišćeni.
   try {
-    (JSON.parse(localStorage.getItem(_WX_PLACES_KEY) || '[]') || []).forEach(p => { try { localStorage.removeItem(_WX_CACHE_PFX + p.id); } catch(e) {} });
+    (JSON.parse(localStorage.getItem('tvlake_wx_places') || '[]') || [])
+      .forEach(p => { try { localStorage.removeItem('tvlake_wx_cache_' + p.id); } catch(e) {} });
   } catch(e) {}
-  localStorage.removeItem(_WX_PLACES_KEY);
-  localStorage.removeItem(_WX_CACHE_KEY);
+  localStorage.removeItem('tvlake_wx_places');
+  localStorage.removeItem('tvlake_weather_cache');
   localStorage.removeItem(_GUIDE_ROUTES_KEY);  // sačuvane rute "Vodi me do odjela/lokacije"
   // Tematske .gpkg karte — lokalni per-korisnik sadržaj (ista klasa kao KML):
   // obriši sve IDB fajlove iz registra + registar + legacy ključeve
@@ -21250,358 +21265,6 @@ tbody tr:nth-child(even) td{background:#f9fafb}
   _openOrDownloadReport(html, 'Izvjestaj_' + _izvMode + '_' + r.od);
 }
 
-// ═══ VREMENSKA PROGNOZA (Open-Meteo — ista usluga kao za visine) ═════════════
-const _WX_CACHE_KEY   = 'tvlake_weather_cache';      // legacy (Moja lokacija)
-const _WX_PLACES_KEY  = 'tvlake_wx_places';          // sačuvane lokacije/područja
-const _WX_CACHE_PFX   = 'tvlake_wx_cache_';          // po-mjesto keš: prefiks + id
-let _wxPlaces = [];
-let _wxAreaLayers = {};   // id → L.polygon (trajni obris područja na karti)
-
-function _wxLoadPlaces() { try { _wxPlaces = JSON.parse(localStorage.getItem(_WX_PLACES_KEY) || '[]'); } catch { _wxPlaces = []; } }
-function _wxSavePlaces() { try { localStorage.setItem(_WX_PLACES_KEY, JSON.stringify(_wxPlaces)); } catch(e) {} }
-
-// Zajednički URL za prognozu (7 dana + vjetar za upozorenja)
-function _wxUrl(la, lo) {
-  return `https://api.open-meteo.com/v1/forecast?latitude=${la.toFixed(4)}&longitude=${lo.toFixed(4)}`
-    + `&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m`
-    + `&hourly=temperature_2m,precipitation_probability,precipitation,weather_code`
-    + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset`
-    + `&timezone=auto&forecast_days=7`;
-}
-
-// Smjer vjetra (stepeni) → strelica + oznaka
-function _wxWindDir(deg) {
-  if (deg == null) return '';
-  const dirs = ['S','SI','I','JI','J','JZ','Z','SZ'];
-  const arrows = ['↑','↗','→','↘','↓','↙','←','↖'];
-  const i = Math.round(deg / 45) % 8;
-  return `${arrows[i]} ${dirs[i]}`;
-}
-function _wxHM(iso) { try { const d = new Date(iso); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); } catch { return '—'; } }
-
-// Fetch za mjesto (ili {la,lo}) uz po-mjesto keš. Vraća {data, cachedTs}.
-async function _wxFetch(la, lo, cacheKey) {
-  let data = null, cachedTs = null;
-  try {
-    const r = await fetch(_wxUrl(la, lo));
-    if (r.ok) { data = await r.json(); try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), la, lo, data })); } catch(e) {} }
-  } catch(e) {}
-  if (!data) {
-    try { const c = JSON.parse(localStorage.getItem(cacheKey) || 'null'); if (c?.data) { data = c.data; cachedTs = c.ts; } } catch(e) {}
-  }
-  return { data, cachedTs };
-}
-
-// Lokalni datum (YYYY-MM-DD) — poredi se sa Open-Meteo dnevnim datumima (timezone=auto)
-function _wxLocalDateStr(d) {
-  d = d || new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
-
-// In-app upozorenja za 7 dana → [{i, kind, txt}] (kiša / mraz / vjetar)
-function _wxAlerts(dy) {
-  if (!dy || !dy.time) return [];
-  const dani = ['ned','pon','uto','sri','čet','pet','sub'];
-  const todayS = _wxLocalDateStr();
-  const tomS = _wxLocalDateStr(new Date(Date.now() + 86400000));
-  const out = [];
-  for (let i = 0; i < dy.time.length; i++) {
-    const ds = dy.time[i];
-    // Oznaka "danas"/"sutra" prati STVARNI datum iz podataka, ne indeks —
-    // spriječava da zastarjeli keš (npr. kad mreža nije dostupna) bude prikazan
-    // kao "danas" iako pripada drugom danu.
-    const dan = ds === todayS ? 'danas' : (ds === tomS ? 'sutra' : dani[new Date(ds).getDay()]);
-    const pp = dy.precipitation_probability_max?.[i] ?? 0;
-    const ps = dy.precipitation_sum?.[i] ?? 0;
-    const tmin = dy.temperature_2m_min?.[i];
-    const wmax = dy.wind_speed_10m_max?.[i] ?? 0;
-    if (pp >= 60 || ps >= 5) out.push({ i, kind: 'kiša', txt: `🌧 ${dan}: kiša ${pp}%${ps>=5?` (${Math.round(ps)}mm)`:''}` });
-    if (tmin != null && tmin <= 0) out.push({ i, kind: 'mraz', txt: `❄ ${dan}: mraz ${Math.round(tmin)}°C` });
-    if (wmax >= 40) out.push({ i, kind: 'vjetar', txt: `💨 ${dan}: jak vjetar ${Math.round(wmax)} km/h` });
-  }
-  return out;
-}
-
-function _wxCode(c) {
-  // WMO weather_code → {emoji, tekst}
-  if (c === 0) return { e: '☀', t: 'Vedro' };
-  if (c === 1) return { e: '🌤', t: 'Pretežno vedro' };
-  if (c === 2) return { e: '⛅', t: 'Djelimično oblačno' };
-  if (c === 3) return { e: '☁', t: 'Oblačno' };
-  if (c === 45 || c === 48) return { e: '🌫', t: 'Magla' };
-  if (c >= 51 && c <= 57) return { e: '🌦', t: 'Rosulja' };
-  if (c >= 61 && c <= 67) return { e: '🌧', t: 'Kiša' };
-  if (c >= 71 && c <= 77) return { e: '🌨', t: 'Snijeg' };
-  if (c >= 80 && c <= 82) return { e: '🌧', t: 'Pljuskovi' };
-  if (c >= 85 && c <= 86) return { e: '🌨', t: 'Snježni pljuskovi' };
-  if (c >= 95) return { e: '⛈', t: 'Grmljavina' };
-  return { e: '🌡', t: '—' };
-}
-
-// Kao _wxCode, ali usklađuje ikonu s vjerovatnoćom/količinom padavina.
-// Open-Meteo znak weather_code zna vratiti kišnu ikonu iako je prob nizak i
-// suma zanemariva (npr. "kiša" pri 8%). U tom slučaju vrati "prom. oblačno".
-function _wxCodeP(c, prob, amount) {
-  if (c >= 51 && c <= 82) {  // padavinski kodovi (rosulja/kiša/pljuskovi)
-    // Vjerovatnoća je PRIMARNA: ako je mala, ne prikazuj kišnu ikonu iako model-kod
-    // tvrdi da pada (Open-Meteo dnevni weather_code zna biti kišni pri 8% šanse).
-    // Izuzetak: stvarno velika najavljena količina (pravi pljusak) — tad ostaje kiša.
-    const mostlyDry =
-      (prob != null && prob < 40 && (amount == null || amount < 10)) ||
-      (prob == null && amount != null && amount < 0.2);
-    if (mostlyDry) return { e: '⛅', t: 'Prom. oblačno' };
-  }
-  return _wxCode(c);
-}
-
-// Detalj prognoze za jedno mjesto (id iz _wxPlaces, ili null = Moja lokacija)
-async function _wxOpenPlace(id) {
-  const m = document.getElementById('weather-modal');
-  m.style.display = 'flex';
-  const body = document.getElementById('weather-body');
-  const titleEl = document.getElementById('weather-title');
-  body.innerHTML = '<p style="color:#64748b;font-size:12px;text-align:center;padding:16px 0;">⏳ Učitavam...</p>';
-  let la, lo, name, cacheKey;
-  if (id) {
-    const pl = _wxPlaces.find(p => p.id === id);
-    if (!pl) { closeWeather(); return; }
-    la = pl.la; lo = pl.lo; name = pl.name; cacheKey = _WX_CACHE_PFX + id;
-  } else {
-    const pos = lastP || (map && map.getCenter && { la: map.getCenter().lat, lo: map.getCenter().lng });
-    if (!pos) { body.innerHTML = '<p style="color:#f87171;font-size:12px;text-align:center;padding:16px 0;">Nema GPS pozicije ni karte.</p>'; return; }
-    la = pos.la; lo = pos.lo; name = '📍 Moja lokacija'; cacheKey = _WX_CACHE_KEY;
-  }
-  if (titleEl) titleEl.textContent = name;
-  const { data, cachedTs } = await _wxFetch(la, lo, cacheKey);
-  if (!data) { body.innerHTML = '<p style="color:#f87171;font-size:12px;text-align:center;padding:16px 0;">📴 Nema veze i nema keširane prognoze.</p>'; return; }
-  _wxRender(body, data, cachedTs);
-}
-
-// Zadržano ime za meni/kompatibilnost — otvara panel s listom
-async function showWeather() { showWeatherPanel(); }
-
-function _wxRender(body, d, cachedTs) {
-  const cur = d.current || {};
-  const wc = _wxCodeP(cur.weather_code, null, cur.precipitation);
-  const now = new Date();
-  const h = d.hourly || {};
-  // Sljedećih 12h od trenutnog sata
-  let startIdx = 0;
-  if (h.time) { for (let i = 0; i < h.time.length; i++) { if (new Date(h.time[i]) >= now) { startIdx = Math.max(0, i - 1); break; } } }
-  const hourCells = [];
-  for (let i = startIdx; i < Math.min(startIdx + 12, (h.time || []).length); i++) {
-    const t = new Date(h.time[i]);
-    const pp = h.precipitation_probability ? h.precipitation_probability[i] : null;
-    hourCells.push(`<div style="flex:0 0 auto;text-align:center;padding:4px 8px;">
-      <div style="font-size:10px;color:#64748b;">${String(t.getHours()).padStart(2,'0')}h</div>
-      <div style="font-size:16px;">${_wxCodeP(h.weather_code ? h.weather_code[i] : 0, pp, h.precipitation ? h.precipitation[i] : null).e}</div>
-      <div style="font-size:12px;color:#e2e8f0;">${Math.round(h.temperature_2m[i])}°</div>
-      <div style="font-size:10px;color:${pp>=50?'#60a5fa':'#475569'};">${pp!=null?pp+'%':''}</div>
-    </div>`);
-  }
-  const dy = d.daily || {};
-  // Globalni raspon temperatura za trakice (min/max preko 7 dana)
-  const allMax = (dy.temperature_2m_max || []), allMin = (dy.temperature_2m_min || []);
-  const gMax = Math.max(...allMax, 0), gMin = Math.min(...allMin, 0);
-  const gSpan = Math.max(1, gMax - gMin);
-  const dayRows = (dy.time || []).map((t, i) => {
-    const dt = new Date(t);
-    const dan = ['NED','PON','UTO','SRI','ČET','PET','SUB'][dt.getDay()];
-    const c = _wxCodeP(dy.weather_code[i], dy.precipitation_probability_max[i], dy.precipitation_sum ? dy.precipitation_sum[i] : null);
-    const mn = allMin[i], mx = allMax[i];
-    const left = ((mn - gMin) / gSpan) * 100;
-    const w = Math.max(6, ((mx - mn) / gSpan) * 100);
-    const pp = dy.precipitation_probability_max[i];
-    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid rgba(30,58,95,0.4);">
-      <div style="width:34px;font-size:11px;font-weight:700;color:${i===0?'#60a5fa':'#94a3b8'};">${i===0?'DAN':dan}</div>
-      <div style="width:24px;font-size:18px;text-align:center;">${c.e}</div>
-      <div style="width:38px;font-size:10px;color:${pp>=50?'#60a5fa':'#475569'};">💧${pp}%</div>
-      <div style="width:26px;text-align:right;font-size:12px;color:#64748b;">${Math.round(mn)}°</div>
-      <div style="flex:1;height:6px;background:#1e293b;border-radius:3px;position:relative;">
-        <div style="position:absolute;left:${left}%;width:${w}%;height:100%;border-radius:3px;background:linear-gradient(90deg,#38bdf8,#fbbf24,#f87171);"></div>
-      </div>
-      <div style="width:26px;font-size:12px;font-weight:700;color:#e2e8f0;">${Math.round(mx)}°</div>
-    </div>`;
-  }).join('');
-  const alerts = _wxAlerts(dy);
-  const alertBox = alerts.length
-    ? `<div style="background:linear-gradient(135deg,#1e3a5f,#1e293b);border:1px solid #3b82f6;border-radius:10px;padding:9px 11px;margin-bottom:12px;">
-        <div style="font-size:11px;color:#93c5fd;font-weight:700;margin-bottom:4px;">⚠ UPOZORENJA (7 DANA)</div>
-        ${alerts.map(a => `<div style="font-size:12px;color:#cbd5e1;padding:1px 0;">${a.txt}</div>`).join('')}
-      </div>`
-    : '';
-  // Sunce (izlazak/zalazak danas) — korisno za planiranje terena
-  const sun = (dy.sunrise && dy.sunset)
-    ? `<div style="display:flex;justify-content:space-around;background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:8px;margin-bottom:12px;">
-        <div style="text-align:center;"><div style="font-size:18px;">🌅</div><div style="font-size:11px;color:#94a3b8;">Izlazak</div><div style="font-size:13px;font-weight:600;color:#fbbf24;">${_wxHM(dy.sunrise[0])}</div></div>
-        <div style="text-align:center;"><div style="font-size:18px;">🌇</div><div style="font-size:11px;color:#94a3b8;">Zalazak</div><div style="font-size:13px;font-weight:600;color:#f97316;">${_wxHM(dy.sunset[0])}</div></div>
-      </div>` : '';
-  // Hero pozadina — dan/noć/oblačno ton
-  const dayNow = new Date();
-  const isNight = (dy.sunrise && dy.sunset) ? (dayNow < new Date(dy.sunrise[0]) || dayNow > new Date(dy.sunset[0])) : (dayNow.getHours() < 6 || dayNow.getHours() > 20);
-  const heroBg = isNight ? 'linear-gradient(135deg,#1e293b,#0f172a)' : 'linear-gradient(135deg,#1e3a5f,#16213e)';
-  body.innerHTML = `
-    ${cachedTs ? `<div style="font-size:10px;color:#f59e0b;text-align:center;margin-bottom:8px;">📴 Keširano — ${fmtDateShort(new Date(cachedTs).toISOString())} ${new Date(cachedTs).getHours()}:${String(new Date(cachedTs).getMinutes()).padStart(2,'0')}</div>` : ''}
-    ${alertBox}
-    <div style="background:${heroBg};border:1px solid #1e3a5f;border-radius:14px;padding:16px;margin-bottom:12px;">
-      <div style="display:flex;align-items:center;gap:14px;">
-        <div style="font-size:52px;line-height:1;">${wc.e}</div>
-        <div style="flex:1;">
-          <div style="font-size:34px;font-weight:700;color:#f1f5f9;line-height:1;">${Math.round(cur.temperature_2m)}°C</div>
-          <div style="font-size:13px;color:#cbd5e1;margin-top:2px;">${wc.t}</div>
-          ${cur.apparent_temperature!=null?`<div style="font-size:11px;color:#94a3b8;">osjeća se ${Math.round(cur.apparent_temperature)}°</div>`:''}
-        </div>
-      </div>
-      <div style="display:flex;justify-content:space-around;margin-top:12px;padding-top:12px;border-top:1px solid rgba(148,163,184,0.15);">
-        <div style="text-align:center;"><div style="font-size:11px;color:#94a3b8;">💨 Vjetar</div><div style="font-size:13px;font-weight:600;color:#e2e8f0;">${Math.round(cur.wind_speed_10m)}<span style="font-size:10px;color:#64748b;"> km/h</span></div><div style="font-size:10px;color:#64748b;">${_wxWindDir(cur.wind_direction_10m)}</div></div>
-        <div style="text-align:center;"><div style="font-size:11px;color:#94a3b8;">💧 Vlažnost</div><div style="font-size:13px;font-weight:600;color:#e2e8f0;">${cur.relative_humidity_2m!=null?cur.relative_humidity_2m+'%':'—'}</div></div>
-        <div style="text-align:center;"><div style="font-size:11px;color:#94a3b8;">🌧 Padavine</div><div style="font-size:13px;font-weight:600;color:#e2e8f0;">${cur.precipitation||0}<span style="font-size:10px;color:#64748b;"> mm</span></div></div>
-      </div>
-    </div>
-    ${sun}
-    <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:4px;letter-spacing:0.05em;">SLJEDEĆIH 12 SATI</div>
-    <div style="display:flex;overflow-x:auto;gap:2px;background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:8px 2px;margin-bottom:14px;">${hourCells.join('')}</div>
-    <div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:2px;letter-spacing:0.05em;">7 DANA</div>
-    <div>${dayRows}</div>`;
-}
-
-function closeWeather() { document.getElementById('weather-modal').style.display = 'none'; }
-
-// ── Panel prognoze: lista mjesta + konsolidovana upozorenja ──────────────────
-function showWeatherPanel() {
-  document.getElementById('wx-panel').style.display = 'flex';
-  _wxRenderList();
-}
-function closeWeatherPanel() { document.getElementById('wx-panel').style.display = 'none'; }
-
-// Async: dohvati prognozu (keš/mreža) za sva mjesta pa renderuj listu + upozorenja.
-async function _wxRenderList() {
-  const body = document.getElementById('wx-panel-body');
-  if (!body) return;
-  // Sastavi mjesta: Moja lokacija (implicitna) + sačuvana
-  const myPos = lastP || (map && map.getCenter && { la: map.getCenter().lat, lo: map.getCenter().lng });
-  const items = [];
-  if (myPos) items.push({ id: null, name: '📍 Moja lokacija', la: myPos.la, lo: myPos.lo, cacheKey: _WX_CACHE_KEY, type: 'me' });
-  _wxPlaces.forEach(p => items.push({ id: p.id, name: p.name, la: p.la, lo: p.lo, cacheKey: _WX_CACHE_PFX + p.id, type: p.type }));
-
-  body.innerHTML = `<p style="color:#64748b;font-size:12px;text-align:center;padding:10px 0;">⏳ Učitavam prognoze...</p>`;
-  // Dohvati sve paralelno
-  const results = await Promise.all(items.map(it => _wxFetch(it.la, it.lo, it.cacheKey)));
-
-  // Konsolidovana upozorenja
-  const todayS = _wxLocalDateStr();
-  let allAlerts = '';
-  let stale = false;
-  items.forEach((it, idx) => {
-    const dy = results[idx].data?.daily;
-    const al = _wxAlerts(dy).slice(0, 4);
-    if (al.length) allAlerts += `<div style="margin-bottom:5px;"><div style="font-size:11px;color:#93c5fd;font-weight:600;">${_escHtml(it.name)}</div>${al.map(a => `<div style="font-size:12px;color:#cbd5e1;">${a.txt}</div>`).join('')}</div>`;
-    // Ako je podatak iz keša (mreža nedostupna) i njegov dan-0 nije stvarni "danas" → upozori,
-    // jer je onda cijela lista dana pomjerena unazad (npr. "danas" u prikazu je zapravo jučer/prekjučer).
-    if (results[idx].cachedTs && dy?.time?.[0] && dy.time[0] !== todayS) stale = true;
-  });
-  const staleBox = stale
-    ? `<div style="background:#3b1f0a;border:1px solid #b45309;border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:12px;color:#fbbf24;">⚠ Prognoza je iz keša (nema veze sa internetom) i može biti zastarjela — dani prikazani kao "danas"/"sutra" možda ne odgovaraju stvarnom datumu.</div>`
-    : '';
-  const alertBox = staleBox + (allAlerts
-    ? `<div style="background:#1e293b;border:1px solid #3b82f6;border-radius:10px;padding:10px 12px;margin-bottom:12px;"><div style="font-size:11px;color:#60a5fa;font-weight:700;margin-bottom:6px;">⚠ UPOZORENJA (7 DANA)</div>${allAlerts}</div>`
-    : `<div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:12px;color:#64748b;">✓ Nema značajnih upozorenja za sljedećih 7 dana.</div>`);
-
-  // Kartice mjesta
-  const cards = items.map((it, idx) => {
-    const d = results[idx].data;
-    const cur = d?.current;
-    const wc = cur ? _wxCodeP(cur.weather_code, null, cur.precipitation) : { e: '—', t: '' };
-    const dy = d?.daily;
-    const mini = dy?.time ? dy.time.slice(0, 7).map((t, i) =>
-      `<span style="font-size:13px;" title="${['ned','pon','uto','sri','čet','pet','sub'][new Date(t).getDay()]}">${_wxCodeP(dy.weather_code[i], dy.precipitation_probability_max[i], dy.precipitation_sum ? dy.precipitation_sum[i] : null).e}</span>`).join('') : '';
-    const delBtn = it.id ? `<button onclick="event.stopPropagation();_wxDeletePlace('${it.id}')" style="padding:6px 9px;background:rgba(220,38,38,0.10);border:1px solid #7f1d1d;border-radius:7px;color:#f87171;font-size:12px;cursor:pointer;flex-shrink:0;"><svg class="ic"><use href="#ic-obrisi"/></svg></button>` : '';
-    return `<div onclick="_wxOpenPlace(${it.id ? `'${it.id}'` : 'null'})"
-      style="display:flex;align-items:center;gap:10px;background:#16213e;border:1px solid #1e3a5f;border-radius:12px;padding:11px 12px;margin-bottom:8px;cursor:pointer;">
-      <div style="font-size:30px;line-height:1;flex-shrink:0;">${wc.e}</div>
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;font-weight:600;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${it.type==='area'?'⬛ ':''}${_escHtml(it.name)}</div>
-        <div style="font-size:12px;color:#94a3b8;">${cur ? Math.round(cur.temperature_2m)+'°C · '+wc.t : (results[idx].cachedTs ? 'keš' : 'nema podataka')}</div>
-        <div style="margin-top:2px;letter-spacing:1px;">${mini}</div>
-      </div>
-      ${delBtn}
-    </div>`;
-  }).join('');
-
-  body.innerHTML = `
-    ${alertBox}
-    ${cards || '<div style="font-size:12px;color:#64748b;text-align:center;padding:12px 0;">Nema lokacija. Dodaj lokaciju ili nacrtaj područje.</div>'}
-    <div style="display:flex;gap:8px;margin-top:6px;">
-      <button onclick="_wxAddPointHere()" style="flex:1;padding:11px;background:#1e3a5f;border:1px solid #3b82f6;border-radius:10px;color:#93c5fd;font-size:13px;font-weight:600;cursor:pointer;"><svg class="ic"><use href="#ic-dodaj"/></svg> Lokacija</button>
-      <button onclick="_wxDrawArea()" style="flex:1;padding:11px;background:#1e3a5f;border:1px solid #38bdf8;border-radius:10px;color:#7dd3fc;font-size:13px;font-weight:600;cursor:pointer;"><svg class="ic"><use href="#ic-kvadrat"/></svg> Nacrtaj područje</button>
-    </div>`;
-}
-
-async function _wxAddPointHere() {
-  const pos = lastP || (map && map.getCenter && { la: map.getCenter().lat, lo: map.getCenter().lng });
-  if (!pos) { showToast('Nema GPS pozicije ni karte'); return; }
-  const name = await _dlgPrompt('Naziv lokacije:', '', { title: '➕ Nova lokacija' });
-  if (name == null) return;
-  const nm = name.trim() || ('Lokacija ' + (_wxPlaces.length + 1));
-  _wxPlaces.push({ id: 'w' + Date.now().toString(36), name: nm, type: 'point', la: pos.la, lo: pos.lo });
-  _wxSavePlaces();
-  showToast('✅ Lokacija dodana');
-  _wxRenderList();
-}
-
-function _wxDrawArea() {
-  closeWeatherPanel();
-  // switchTab PRIJE stanja crtanja (isti razlog kao dozStartNewBoundaryDraw)
-  switchTab('karta');
-  _dozDrawType = '__wxaoi__';
-  _dozDrawPts = [];
-  _dozDrawEnabled = false;
-  _dozDragLastPt = null;
-  setTimeout(() => {
-    document.getElementById('doz-draw-banner').style.display = 'flex';
-    document.getElementById('doz-draw-type-label').textContent = '⬛ Područje za prognozu';
-    document.getElementById('doz-draw-count').textContent = '0 tačaka';
-    const dtb = document.getElementById('doz-draw-toggle');
-    if (dtb) { dtb.classList.remove('on'); const _ci = document.getElementById('doz-draw-check'); if (_ci) _ci.textContent = '☐'; }
-    document.getElementById('map').style.cursor = '';
-    if (_dozDrawLayer) { map.removeLayer(_dozDrawLayer); _dozDrawLayer = null; }
-    document.getElementById('action-bar').style.display = 'none';
-    document.getElementById('tab-bar').style.display = 'none';
-    document.getElementById('map-center-dot').style.display = '';
-    map.invalidateSize();
-    showToast('⬛ Nacrtaj područje — čekiraj "Crtaj" pa pomjeraj mapu, ili dodaj tačke ručno');
-  }, 50);
-}
-
-// Poziva se iz dozFinishDraw za tip __wxaoi__ (ring = [{lat,lng}], cla/clo = centroid)
-async function _wxAddArea(ring, cla, clo) {
-  const name = await _dlgPrompt('Naziv područja:', '', { title: '⬛ Novo područje' });
-  const nm = (name == null ? '' : name.trim()) || ('Područje ' + (_wxPlaces.length + 1));
-  const id = 'w' + Date.now().toString(36);
-  _wxPlaces.push({ id, name: nm, type: 'area', la: cla, lo: clo, ring: ring.map(p => [p.lat, p.lng]) });
-  _wxSavePlaces();
-  // NE ostavljamo obris poligona na karti — područje služi samo za prognozu (centroid).
-  showToast('✅ Područje dodano');
-  showWeatherPanel();
-}
-
-async function _wxDeletePlace(id) {
-  const pl = _wxPlaces.find(p => p.id === id);
-  if (!pl) return;
-  if (!await _dlgConfirm(`Ukloniti "${pl.name}" iz prognoze?`, { danger: true })) return;
-  _wxPlaces = _wxPlaces.filter(p => p.id !== id);
-  _wxSavePlaces();
-  try { localStorage.removeItem(_WX_CACHE_PFX + id); } catch(e) {}
-  if (_wxAreaLayers[id]) { try { map.removeLayer(_wxAreaLayers[id]); } catch(e) {} delete _wxAreaLayers[id]; }
-  showToast('🗑 Uklonjeno');
-  _wxRenderList();
-}
-
-// Restore (showApp) — učitaj sačuvana mjesta (bez obrisa na karti)
-function _wxRestore() {
-  _wxLoadPlaces();
-}
-
 // Zajedničke sekcije statistike vlaka: KPI grid + per-vlaka tabela (krakovi
 // ugniježđeni, lager badge) + tabela lagera. Koriste ih admin "Upravljanje
 // projektima" detalj i Projekat tab "Detaljna statistika".
@@ -32169,7 +31832,6 @@ function dozUndoDrawPt() {
 
 function dozCancelDraw() {
   const wasBoundary = _dozDrawType === '__boundary__';
-  const wasWx       = _dozDrawType === '__wxaoi__';
   _dozDrawType = null; _dozDrawPts = [];
   _dozDrawCleanup();
   if (_dozDrawLayer) { map.removeLayer(_dozDrawLayer); _dozDrawLayer = null; }
@@ -32180,8 +31842,6 @@ function dozCancelDraw() {
   if (wasBoundary) {
     _dozCreateBoundary = null; _dozCreateAreaHa = null;
     dozShowCreateOdjel(true);
-  } else if (wasWx) {
-    showWeatherPanel();  // po otkazu crtanja područja — nazad na panel prognoze
   }
 }
 
@@ -32190,28 +31850,6 @@ function dozFinishDraw() {
   const coords = _dozDrawPts.map(p => [p.lng, p.lat]);
   coords.push(coords[0]);
 
-  if (_dozDrawType === '__wxaoi__') {
-    // Prognoza za područje: centroid poligona (Open-Meteo je tačkast)
-    let cla, clo;
-    try {
-      const cen = turf.centroid(turf.polygon([coords]));
-      clo = cen.geometry.coordinates[0]; cla = cen.geometry.coordinates[1];
-    } catch(e) {
-      // fallback: prosjek tačaka
-      cla = _dozDrawPts.reduce((s, p) => s + p.lat, 0) / _dozDrawPts.length;
-      clo = _dozDrawPts.reduce((s, p) => s + p.lng, 0) / _dozDrawPts.length;
-    }
-    const ring = _dozDrawPts.map(p => ({ lat: p.lat, lng: p.lng }));
-    _dozDrawType = null; _dozDrawPts = [];
-    _dozDrawCleanup();
-    if (_dozDrawLayer) { map.removeLayer(_dozDrawLayer); _dozDrawLayer = null; }
-    document.getElementById('doz-draw-banner').style.display = 'none';
-    document.getElementById('map').style.cursor = '';
-    document.getElementById('tab-bar').style.display = 'flex';
-    document.getElementById('action-bar').style.display = '';
-    _wxAddArea(ring, cla, clo);
-    return;
-  }
 
   if (_dozDrawType === '__boundary__') {
     _dozCreateBoundary = { type:'Polygon', coordinates:[coords] };
@@ -32954,7 +32592,6 @@ if (typeof AndroidDownload !== 'undefined') {
   background:#16213e;border:1px solid #0f3460;border-radius:8px;
   min-width:220px;z-index:99000;box-shadow:0 8px 24px rgba(0,0,0,0.6);
   touch-action:manipulation;max-height:80vh;overflow-y:auto;overscroll-behavior:contain;">
-  <div class="mdrop-item" style="color:#60a5fa;font-weight:700;" onclick="closeMenuDropdown();showWeatherPanel()">🌧 Prognoza</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showExport()">⬆ KML Export</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();showPrintModal()">🖨 Print / Štampanje</div>
@@ -34053,29 +33690,6 @@ if (typeof AndroidDownload !== 'undefined') {
     <button style="background:#7f1d1d;color:#fff;" onclick="vcDelete()"><svg class="ic"><use href="#ic-obrisi"/></svg> Obriši i dodaj novu</button>
     <button style="background:#166534;color:#fff;" onclick="vcAddNext()"><svg class="ic"><use href="#ic-dodaj"/></svg> Dodaj novu (sljedeći broj)</button>
     <button style="background:#374151;color:#94a3b8;" onclick="vcCancel()"><svg class="ic"><use href="#ic-zatvori"/></svg> Odustani</button>
-  </div>
-</div>
-<!-- VREMENSKA PROGNOZA -->
-<div id="weather-modal" style="display:none;position:fixed;inset:0;z-index:99000;background:rgba(0,0,0,0.65);align-items:center;justify-content:center;padding:16px;"
-  onclick="if(event.target===this)closeWeather()">
-  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;width:100%;max-width:430px;max-height:86vh;overflow-y:auto;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,0.7);">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <h3 id="weather-title" style="margin:0;font-size:15px;color:#60a5fa;">🌧 Vremenska prognoza</h3>
-      <button onclick="closeWeather()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;"><svg class="ic"><use href="#ic-zatvori"/></svg></button>
-    </div>
-    <div id="weather-body"><p style="color:#64748b;font-size:12px;text-align:center;padding:16px 0;">⏳ Učitavam...</p></div>
-  </div>
-</div>
-
-<!-- PROGNOZA — PANEL (lokacije/područja + upozorenja) -->
-<div id="wx-panel" style="display:none;position:fixed;inset:0;z-index:98900;background:rgba(0,0,0,0.65);align-items:center;justify-content:center;padding:16px;"
-  onclick="if(event.target===this)closeWeatherPanel()">
-  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;width:100%;max-width:440px;max-height:88vh;overflow-y:auto;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,0.7);">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <h3 style="margin:0;font-size:15px;color:#60a5fa;">🌧 Prognoza</h3>
-      <button onclick="closeWeatherPanel()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;"><svg class="ic"><use href="#ic-zatvori"/></svg></button>
-    </div>
-    <div id="wx-panel-body"></div>
   </div>
 </div>
 
