@@ -118,6 +118,18 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   čišćenje se okida iz `admin_get_all_users()` (svaki put kad admin otvori tab
   Korisnici) i iz `check_own_pending_expiry()` (svaki put kad korisnik na
   ekranu "Čeka se odobrenje" klikne "Provjeri ponovo").
+- **Ikonice glavne trake** (`#tab-bar`, Meni + 7 tabova) su od v3.83.0 crtane
+  inline SVG (`.tbi` CSS klasa), ne emoji — emoji izgleda različito na svakom
+  OEM-u/verziji Androida, nekad i kao prazan kvadratić. `stroke="currentColor"`
+  znači da ikonica prati boju dugmeta identično tekstu (zelena pri aktivnom
+  tabu preko `.tab-btn.active`, ili trajna amber/ljubičasta/zelena za
+  Korisnici/Postavke/Teren preko inline `style="color:..."`) — **ne** hardkodovati
+  boju u SVG-u, pokvario bi se taj mehanizam. Veličina je `em`, ne `px` — prati
+  `font-size` dugmeta pa automatski postaje manja na mobilnom breakpointu bez
+  posebne media-query grane. Emoji verzija (za vraćanje ako ustreba):
+  `docs/BACKUP_traka_ikonice_emoji.md`. Dugmad UNUTAR pojedinih panela
+  (Karta/Vlake/Doznaka/...) i dalje koriste emoji — ta izmjena namjerno nije
+  urađena u istom potezu, čeka se posebna odluka.
 - **Pristup firme se provjerava NA SERVERU, ne u JS-u**: od
   `20260727_pristup_odobrenje.sql` postoji `je_odobren()` (admin je implicitno
   odobren) i **RESTRICTIVE** politika `zzz_odobren` na svim tabelama s
