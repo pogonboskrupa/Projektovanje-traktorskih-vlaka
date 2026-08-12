@@ -127,9 +127,16 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   boju u SVG-u, pokvario bi se taj mehanizam. Veličina je `em`, ne `px` — prati
   `font-size` dugmeta pa automatski postaje manja na mobilnom breakpointu bez
   posebne media-query grane. Emoji verzija (za vraćanje ako ustreba):
-  `docs/BACKUP_traka_ikonice_emoji.md`. Dugmad UNUTAR pojedinih panela
-  (Karta/Vlake/Doznaka/...) i dalje koriste emoji — ta izmjena namjerno nije
-  urađena u istom potezu, čeka se posebna odluka.
+  `docs/BACKUP_traka_ikonice_emoji.md`.
+- **Ikonice dugmadi u panelima** (v3.84.0): isti razlog i isti mehanizam, ali
+  preko **SVG sprite-a** odmah iza `<body>` (65 `<symbol id="ic-...">`), pa se
+  koristi `<svg class="ic"><use href="#ic-NAZIV"/></svg>`. Zamijenjeno je 398
+  mjesta unutar `<button>` elemenata; emoji u toastovima, dijalozima i
+  naslovima sekcija je NAMJERNO ostao. **SVG u dugmadima ne smije imati
+  jednostruke navodnike ni backtick** — dio dugmadi se gradi u JS stringovima
+  (`'...'` / `` `...` ``), pa bi ih to prekinulo; sve definicije koriste samo
+  dvostruke navodnike. Mapiranje emoji→ikonica i postupak vraćanja:
+  `docs/BACKUP_ikonice_dugmadi.md`.
 - **Pristup firme se provjerava NA SERVERU, ne u JS-u**: od
   `20260727_pristup_odobrenje.sql` postoji `je_odobren()` (admin je implicitno
   odobren) i **RESTRICTIVE** politika `zzz_odobren` na svim tabelama s
