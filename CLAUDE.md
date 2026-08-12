@@ -108,6 +108,16 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   v3.81.0). Legacy `ic_launcher.png`/`ic_launcher_round.png` (fallback za
   starije launchere) su odvojeno generisani flattened PNG-ovi (bijela
   pozadina + centriran crtež), ne oslanjaju se na OS maskiranje.
+- **Neodobrena registracija ističe za 7 dana** (`20260730_isticanje_
+  registracije.sql`) — automatski se briše (korisnici + auth.users) ako admin
+  ne odobri na vrijeme. Kolona `prvo_odobren_at` (nikad se ne resetuje nazad na
+  NULL) razlikuje "čeka PRVO odobrenje" (briše se) od "opozvan nakon što je
+  ranije bio odobren" (NE briše se) — obje imaju `odobren=false`, pa **nikad
+  ne filtrirati čišćenje samo po `odobren`**, uvijek i po `prvo_odobren_at IS
+  NULL`. Nema pg_cron-a (projekat namjerno bez CI/scheduled infrastrukture) —
+  čišćenje se okida iz `admin_get_all_users()` (svaki put kad admin otvori tab
+  Korisnici) i iz `check_own_pending_expiry()` (svaki put kad korisnik na
+  ekranu "Čeka se odobrenje" klikne "Provjeri ponovo").
 - **Pristup firme se provjerava NA SERVERU, ne u JS-u**: od
   `20260727_pristup_odobrenje.sql` postoji `je_odobren()` (admin je implicitno
   odobren) i **RESTRICTIVE** politika `zzz_odobren` na svim tabelama s

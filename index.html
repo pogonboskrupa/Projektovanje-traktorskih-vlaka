@@ -3331,6 +3331,9 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
         <div style="font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:16px;">
           Registracija je zaprimljena. Administrator treba odobriti Vaš pristup prije nego
           možete koristiti aplikaciju. Pokušajte ponovo kada Vas admin odobri.
+          <br><br>
+          <span style="color:#fbbf24;">⚠ Ako admin ne odobri u roku od 7 dana od registracije,
+          nalog se briše i registraciju treba popuniti ponovo.</span>
         </div>
         <button class="auth-btn-primary" onclick="_authRecheck()">
           <div class="auth-btn-primary-inner">🔄 Provjeri ponovo</div>
@@ -4555,7 +4558,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.81.0';
+const APP_VER = 'v3.82.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 // =====================================================================
@@ -5344,6 +5347,24 @@ function authShowPending() {
 async function _authRecheck() {
   if (!sbUser) { authShowLogin(); return; }
   if (sb) {
+    // Prvo provjeri je li registracija ISTEKLA (7 dana bez PRVOG odobrenja —
+    // vidi 20260730_isticanje_registracije.sql). Ako jeste, server je nalog već
+    // obrisao (korisnici + auth.users) unutar ovog istog RPC poziva — ovdje samo
+    // pokažemo poruku i odjavimo lokalno, jer sesija sad pokazuje na nepostojeći
+    // nalog. Ako RPC ne postoji (migracija još nije primijenjena) ili je mreža
+    // spora, greška se tiho ignoriše i nastavlja se na običnu provjeru ispod —
+    // isticanje NIKAD ne smije blokirati normalno "Provjeri ponovo".
+    try {
+      const _tmoX = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000));
+      const { data: istekla, error: expErr } = await Promise.race([
+        sb.rpc('check_own_pending_expiry'), _tmoX
+      ]);
+      if (!expErr && istekla === true) {
+        await _registracijaIstekla();
+        return;
+      }
+    } catch(e) {}
+
     try {
       const _tmo = new Promise((_, rej) => setTimeout(() => rej(new Error('nema odgovora servera (5s)')), 5000));
       const { data, error } = await Promise.race([
@@ -5356,6 +5377,20 @@ async function _authRecheck() {
     }
   }
   showApp();  // gate ponovo provjerava sbProfile.odobren
+}
+
+// Nalog je obrisan jer admin nije odobrio u roku od 7 dana (vidi gore). Nalog
+// stvarno više ne postoji na serveru (auth.users je obrisan), pa je jedino
+// ispravno lokalno se odjaviti i uputiti korisnika da se registruje ponovo —
+// za razliku od običnog opoziva pristupa (_provjeriOpozivOdobrenja), gdje se
+// nalog i dalje čeka na eventualno odobrenje.
+async function _registracijaIstekla() {
+  try { await sb.auth.signOut({ scope: 'local' }); } catch(e) {}
+  sbUser = null; sbProfile = null;
+  _clearSavedUser();
+  _showAuthScreen();
+  authShowReg();
+  showAuthErr('Registracija je istekla jer nije odobrena u roku od 7 dana. Popunite ponovo.', true);
 }
 // Zaboravljen PIN — neautentifikovan korisnik se ne može dokazati, pa upućujemo na admina.
 function _zaboravljenPin(e) {
@@ -5859,8 +5894,15 @@ function _adminRenderUsers() {
         const isPending  = u.odobren === false;
         const isApproved = u.odobren === true;
         const cardBorder = isPending ? '#d97706' : '#334155';
+        // istice_at je popunjen SAMO za naloge koji čekaju PRVO odobrenje (vidi
+        // 20260730_isticanje_registracije.sql) — opozvan nalog (ranije odobren,
+        // pa mu je pristup povučen) ga nema, jer se njemu ništa ne briše.
+        const dana = u.istice_at ? Math.ceil((new Date(u.istice_at) - Date.now()) / 86400000) : null;
+        const expiryChip = (isPending && dana !== null)
+          ? ` <span style="color:#f87171;font-size:10px;">· briše se za ${dana <= 0 ? '<1 dan' : dana + ' dan' + (dana === 1 ? '' : 'a')}</span>`
+          : '';
         const statusChip = isPending
-          ? ' <span style="color:#fbbf24;font-size:10px;background:rgba(217,119,6,0.18);padding:1px 6px;border-radius:4px;">⏳ ČEKA ODOBRENJE</span>'
+          ? ' <span style="color:#fbbf24;font-size:10px;background:rgba(217,119,6,0.18);padding:1px 6px;border-radius:4px;">⏳ ČEKA ODOBRENJE</span>' + expiryChip
           : isApproved ? ' <span style="color:#4ade80;font-size:10px;">✓ odobren</span>' : '';
         const approveBtn = isPending
           ? `<button onclick="adminSetApproved('${uid}',true,'${nm}')"
