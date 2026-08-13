@@ -2667,10 +2667,14 @@ select:focus { outline:none; border-color:#3b82f6; }
 #ab-tacka { color: #92400e; }
 #ab-loc   .ab-ico { background: #dbeafe; color: #2563eb; }
 #ab-loc   { color: #1d4ed8; }
-/* Lokacija (donja traka) — ikonica uvećana 20% unutar ISTOG kruga (.ab-ico
-   ostaje 28px), na traženje korisnika. .ic je inače 1.05em posvuda; ovdje
-   samo lokalno override, ne dira globalnu klasu. */
-#ab-loc .ic { width: 1.26em; height: 1.26em; }
+/* Lokacija/Tragovi/Izmjeri (donja traka) — ikonice uvećane unutar ISTOG kruga
+   (.ab-ico ostaje 28px), na traženje korisnika. .ic je inače 1.05em posvuda;
+   ovdje samo lokalni override, ne dira globalnu klasu. Lokacija je dobila dva
+   uzastopna uvećanja od 20% (1.05→1.26→1.512em ≈ +44% od originala); Tragovi i
+   Izmjeri su dobili jedno (1.05→1.26em, +20%), pa su sad na istoj veličini na
+   kojoj je Lokacija bila prije drugog kruga. */
+#ab-loc .ic { width: 1.512em; height: 1.512em; }
+#btragovi .ic, #ab-izmjeri .ic { width: 1.26em; height: 1.26em; }
 #ab-centar .ab-ico { background: #d1fae5; color: #059669; }
 #ab-centar { color: #047857; }
 #route-suggest-btn.active { background:#4c1d95 !important; border-color:#7c3aed !important; color:#c4b5fd !important; box-shadow:0 0 0 2px rgba(167,139,250,0.3); }
@@ -4666,7 +4670,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.88.0';
+const APP_VER = 'v3.89.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
