@@ -108,6 +108,12 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   v3.81.0). Legacy `ic_launcher.png`/`ic_launcher_round.png` (fallback za
   starije launchere) su odvojeno generisani flattened PNG-ovi (bijela
   pozadina + centriran crtež), ne oslanjaju se na OS maskiranje.
+  Od v3.91.0 se crtež izvlači SAMO iz gornjeg dijela splash_logo.png (satelit +
+  krug + jelke), BEZ dvoreda teksta ispod — puni grb sa tekstom je na 48dp
+  (stvarna veličina ikonice na telefonu) bio nečitljiv, čitao se kao mutna
+  mrlja. Tekst ostaje na splash ekranu (drawable/splash_logo.png se ne mijenja,
+  koristi se samo dio njegovog sadržaja za mipmap ikonice), gubi se samo sa
+  ikonice na početnom ekranu.
 - **Neodobrena registracija ističe za 7 dana** (`20260730_isticanje_
   registracije.sql`) — automatski se briše (korisnici + auth.users) ako admin
   ne odobri na vrijeme. Kolona `prvo_odobren_at` (nikad se ne resetuje nazad na
@@ -137,6 +143,15 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   (`'...'` / `` `...` ``), pa bi ih to prekinulo; sve definicije koriste samo
   dvostruke navodnike. Mapiranje emoji→ikonica i postupak vraćanja:
   `docs/BACKUP_ikonice_dugmadi.md`.
+- **Ikonica koja se čita iz mape/objekta (`neka_mapa[key]`) je automatska
+  provjera preskočila** — lovila je samo doslovne `'...'` stringove sa emojijem,
+  ne i indirektne lookup-e. Baš zbog toga je dugme za promjenu podloge karte
+  (`layer-switch-btn`, `setLayer()` u index.html) gubilo ikonicu i vraćalo se na
+  emoji čim korisnik izabere Topo/Satelit/Karta/Google — popravljeno u v3.91.0
+  (`iconSvg[key]` umjesto starog `icons[key]` + `textContent`). Kod dodavanja
+  NOVOG tile sloja u `TL` objektu, novi ključ mora ući i u `iconSvg` (dva mjesta:
+  startup restore + `setLayer()`) i u `map2id`/`map2row`/`_CMGR_ROWS`, inače mu
+  aktivni highlight, MB bedž ili offline keš pregled tiho ne rade.
 - **Pristup firme se provjerava NA SERVERU, ne u JS-u**: od
   `20260727_pristup_odobrenje.sql` postoji `je_odobren()` (admin je implicitno
   odobren) i **RESTRICTIVE** politika `zzz_odobren` na svim tabelama s

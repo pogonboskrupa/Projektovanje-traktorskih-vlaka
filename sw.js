@@ -2,7 +2,7 @@
 // Service Worker — ŠPD Unsko-sanske šume
 // Promijeni APP_VERSION pri svakom deploymentu → okida update
 // =====================================================================
-const APP_VERSION = '3.90.0';
+const APP_VERSION = '3.91.0';
 const APP_CACHE   = 'tvlake-app-v' + APP_VERSION;
 const TILE_CACHE  = 'tvlake-tiles-v1';
 const LIB_CACHE   = 'tvlake-lib-v1';
@@ -106,7 +106,8 @@ self.addEventListener('fetch', event => {
     url.includes('tile.opentopomap.org') ||
     url.includes('tile.openstreetmap.org') ||
     url.includes('arcgisonline.com') ||
-    url.includes('.google.com/vt/')
+    url.includes('.google.com/vt/') ||
+    url.includes('tiles.maps.eox.at')
   ) {
     _tileRespond(event, TILE_CACHE);
     return;

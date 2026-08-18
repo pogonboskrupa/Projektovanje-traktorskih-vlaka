@@ -4670,7 +4670,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.90.0';
+const APP_VER = 'v3.91.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -11319,7 +11319,12 @@ const TL = {
   '⛰ Topo':    new CachedTopo('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxNativeZoom:17,maxZoom:22,subdomains:['a','b','c'],keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
   '🛰 Satelit': new CachedSat('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22,keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
   '🗺 Karta':   new CachedOsm('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
-  '📡 Google':  new CachedSat('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxNativeZoom:20,maxZoom:22,subdomains:['0','1','2','3'],keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150})
+  '📡 Google':  new CachedSat('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxNativeZoom:20,maxZoom:22,subdomains:['0','1','2','3'],keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
+  // Sentinel-2 cloudless (EOX IT Services, besplatno, bez API ključa) — svježija/oštrija
+  // satelitska podloga za šumska područja od ArcGIS-a na mnogim lokacijama. Rezolucija
+  // izvornih Sentinel-2 pločica je niža od Google/ArcGIS (maxNativeZoom 14, Leaflet
+  // dalje uveličava softverski isto kao kod ostalih slojeva).
+  '🌍 Sentinel':new CachedSat('https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg',{maxNativeZoom:14,maxZoom:22,keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150})
 };
 const _ELEV_CACHE  = 'tvlake-elev-v1';
 const _SLOPE_CACHE = 'tvlake-slope-v1';
@@ -11526,11 +11531,19 @@ setTimeout(_demLegendUpdate, 0); // after DOM ready
     } else if (saved?.type === 'tl' && TL[saved.key]) restoredKey = saved.key;
   } catch(e) {}
   TL[restoredKey].addTo(map);
-  const icons = {'⛰ Topo':'⛰','🛰 Satelit':'🛰','🗺 Karta':'🗺','📡 Google':'📡','📐 Nagib':'📐'};
-  // btn may not exist yet at this point — setLayer later handles it; update after DOM ready
+  const iconSvg = {
+    '⛰ Topo':    '<svg class="ic"><use href="#ic-podloga"/></svg>',
+    '🛰 Satelit': '<svg class="ic"><use href="#ic-satelit"/></svg>',
+    '🗺 Karta':   '<svg class="ic"><use href="#ic-karta"/></svg>',
+    '📡 Google':  '<svg class="ic"><use href="#ic-globus"/></svg>',
+    '🌍 Sentinel':'<svg class="ic"><use href="#ic-satelit"/></svg>'
+  };
+  // btn may not exist yet at this point — setLayer later handles it; update after DOM ready.
+  // Koristi innerHTML (SVG), ne textContent — od v3.84.0 ikonica dugmeta je SVG element,
+  // textContent bi ga izbrisao i vratio prazan/pogresan prikaz (isti bug kao ispod).
   setTimeout(() => {
     const btn = document.getElementById('layer-switch-btn');
-    if (btn) btn.textContent = icons[restoredKey] || '🗺';
+    if (btn) btn.innerHTML = iconSvg[restoredKey] || '<svg class="ic"><use href="#ic-karta"/></svg>';
   }, 500);
 })();
 // Zoom i layer kontrole su sada vlastiti HTML panel (#map-ctrl-bar), ne Leaflet kontrole
@@ -11609,7 +11622,7 @@ function _openLayerSheet() {
     const sqlBtn = document.getElementById('ls-sql-btn-' + idx);
     if (sqlBtn) sqlBtn.classList.add('active');
   } else {
-    const map2id = {'⛰ Topo':'lo-topo','🛰 Satelit':'lo-sat','🗺 Karta':'lo-osm','📡 Google':'lo-google','_nagib':'lo-nagib','_granice':'lo-granice'};
+    const map2id = {'⛰ Topo':'lo-topo','🛰 Satelit':'lo-sat','🗺 Karta':'lo-osm','📡 Google':'lo-google','🌍 Sentinel':'lo-eox','_nagib':'lo-nagib','_granice':'lo-granice'};
     const el = document.getElementById(map2id[active] || '');
     if (el) el.classList.add('active');
   }
@@ -11670,6 +11683,7 @@ const _CMGR_ROWS = [
   { id: 'sat',   ico: '🛰',  name: 'Satelit',         sub: 'ArcGIS Imagery',   cache: TILE_CACHE_NAME, host: 'World_Imagery' },
   { id: 'osm',   ico: '🗺',  name: 'Karta',           sub: 'OpenStreetMap',    cache: TILE_CACHE_NAME, host: 'tile.openstreetmap.org' },
   { id: 'goog',  ico: '📡',  name: 'Google satelit',  sub: 'Google',           cache: TILE_CACHE_NAME, host: '.google.com/vt' },
+  { id: 'eox',   ico: '🌍',  name: 'Sentinel-2',      sub: 'EOX cloudless',    cache: TILE_CACHE_NAME, host: 'tiles.maps.eox.at' },
   { id: 'elev',  ico: '🏔',  name: 'Sjenčenje terena', sub: 'Hillshade',       cache: 'tvlake-elev-v1' },
   { id: 'slope', ico: '📐',  name: 'Nagib terena',    sub: 'Shaded relief',    cache: 'tvlake-slope-v1' },
   { id: 'terr',  ico: '🗻',  name: 'Teren (DEM)',     sub: 'Visinski podaci',  cache: 'tvlake-terr-v1' },
@@ -11808,7 +11822,7 @@ async function _cacheMgrDeleteAll() {
 // pločica bez uzorkovanja veličine ako scan još ne postoji).
 async function _lsFillCardBadges() {
   if (!('caches' in window)) return;
-  const map2row = { 'lo-topo': 'topo', 'lo-sat': 'sat', 'lo-osm': 'osm', 'lo-google': 'goog' };
+  const map2row = { 'lo-topo': 'topo', 'lo-sat': 'sat', 'lo-osm': 'osm', 'lo-google': 'goog', 'lo-eox': 'eox' };
   let d = _cmgrData;
   if (!d) { try { d = await _cacheMgrScan(); } catch(e) { return; } }
   for (const [btnId, rowId] of Object.entries(map2row)) {
@@ -11868,9 +11882,20 @@ function setLayer(key) {
       map.removeLayer(_geojsonLayer);
     }
     if (TL[key]) TL[key].addTo(map);
-    const icons = {'⛰ Topo':'⛰','🛰 Satelit':'🛰','🗺 Karta':'🗺','📡 Google':'📡','📐 Nagib':'📐'};
+    const iconSvg = {
+    '⛰ Topo':    '<svg class="ic"><use href="#ic-podloga"/></svg>',
+    '🛰 Satelit': '<svg class="ic"><use href="#ic-satelit"/></svg>',
+    '🗺 Karta':   '<svg class="ic"><use href="#ic-karta"/></svg>',
+    '📡 Google':  '<svg class="ic"><use href="#ic-globus"/></svg>',
+    '🌍 Sentinel':'<svg class="ic"><use href="#ic-satelit"/></svg>'
+  };
+    // BUG (v3.84.0-v3.90.0): ovdje je stajalo btn.textContent = icons[key], sto je
+    // BRISALO SVG ikonicu i vracalo je na emoji cim korisnik izabere Topo/Satelit/
+    // Karta/Google — jer se ikonica citala iz mape (icons[key]), ne iz literalnog
+    // teksta, pa je ranija automatska provjera (koja je hvatala samo doslovne
+    // '...' stringove) ovo mjesto preskocila. innerHTML + SVG referenca popravlja.
     const btn = document.getElementById('layer-switch-btn');
-    if (btn) btn.textContent = icons[key] || '🗺';
+    if (btn) btn.innerHTML = iconSvg[key] || '<svg class="ic"><use href="#ic-karta"/></svg>';
     _saveLastMap('tl', key);
   }
   closeLayerSheet();
@@ -34455,7 +34480,10 @@ if (typeof AndroidDownload !== 'undefined') {
         <span class="layer-ico"><svg class="ic"><use href="#ic-karta"/></svg></span>Karta<span class="lopt-sub">OpenStreetMap</span>
       </button>
       <button class="layer-opt" id="lo-google" onclick="setLayer('📡 Google')">
-        <span class="layer-ico"><svg class="ic"><use href="#ic-gps"/></svg></span>Google<span class="lopt-sub">Satelit HD</span>
+        <span class="layer-ico"><svg class="ic"><use href="#ic-globus"/></svg></span>Google<span class="lopt-sub">Satelit HD</span>
+      </button>
+      <button class="layer-opt" id="lo-eox" onclick="setLayer('🌍 Sentinel')">
+        <span class="layer-ico"><svg class="ic"><use href="#ic-satelit"/></svg></span>Sentinel-2<span class="lopt-sub">EOX, bez ključa</span>
       </button>
       <button class="layer-opt" id="lo-nagib" onclick="setLayer('_nagib')">
         <span class="layer-ico"><svg class="ic"><use href="#ic-uglomjer"/></svg></span>Nagib<span class="lopt-sub">Topo + nagibi</span>
