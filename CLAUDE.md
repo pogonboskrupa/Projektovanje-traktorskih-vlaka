@@ -114,6 +114,46 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   mrlja. Tekst ostaje na splash ekranu (drawable/splash_logo.png se ne mijenja,
   koristi se samo dio njegovog sadržaja za mipmap ikonice), gubi se samo sa
   ikonice na početnom ekranu.
+- **v3.92.0 "Dendro Map" rebrend — nova ikonica i login logo**: korisnik je
+  dao gotovu grafiku `docs/DENDRO_MAP_source.jpg` (2816×1536 mockup: zlatni
+  grb — kompas/planine/jelka/pin/valovi — na tamnozelenoj zaobljenoj kartici,
+  natpis "DENDRO MAP" + "ŠPD Unsko sanske šume d.o.o." ispod) i tražio da to
+  postane i app ikonica i slika na login ekranu. Postupak (ponoviti isto ako
+  se master grafika ponovo mijenja):
+  - Grb (bez teksta, bez kartice/border-a) izvučen iz mockupa preko
+    `scipy.ndimage.label` connected-component analize nad "gold" maskom
+    (prag boje), NE prostim bounding-box crop-om — mockup ima svoj zlatni
+    border oko kartice koji bi automatski pravougaoni crop pokupio zajedno s
+    grbom. Border je jedna velika povezana komponenta (obuhvata skoro cijelu
+    karticu) — izbaci se po labelu; sitni ostaci (< 150px, npr. antialiasing
+    fragment gornjeg ruba border-a) izbace se i filterom po veličini
+    komponente. Rezultat: providan PNG, samo "ink" (isti princip kao ranije
+    za splash_logo.png, ovdje automatizovano jer izvor NIJE bio čist crtež na
+    jednobojnoj pozadini nego prezentacijski mockup s bordurom i tekstom).
+  - `ic_launcher_background` promijenjen sa bijele (`#FFFFFF`, v3.81.0) na
+    `#42523C` — tamnozelena uzorkovana medijanom piksela iz praznine između
+    grba i teksta na mockupu (`np.median`, ne mean — paper-texture zrnavost u
+    JPEG-u vuče mean previsoko). Namjerna promjena: novi brend je DIZAJNIRAN
+    kao zlatno na tamnozelenom, bijela pozadina bi to osiromašila. Safe-zone
+    pravilo (≤ 60% dijagonale) i "bez teksta na ikonici" pravilo iz v3.81.0/
+    v3.91.0 i dalje važe nepromijenjeno — samo se boja pozadine i sam crtež
+    mijenjaju.
+  - `icon-192.png`/`icon-512.png` (PWA manifest, `sw.js` notifikacije) su isto
+    regenerisani iz istog grba/boje radi konzistentnosti — inače bi Android
+    notifikacija (koristi `icon-192.png`) i home-screen ikonica pokazivale
+    različit brend.
+  - Login logo (`index.html`, `.auth-logo-box img`, inline
+    `data:image/jpeg;base64,...`) zamijenjen punim lockup-om (grb + oba reda
+    teksta), izrezanim direktno iz mockupa uz malu marginu oko zlatnog
+    border-a kartice — na login ekranu (veći prikaz, 115px) tekst je čitljiv
+    pa se ne izbacuje kao kod ikonice. Ovo je JEDINO mjesto u `index.html` s
+    `src="data:image/jpeg;base64,"` — sigurno za regex/string zamjenu bez
+    parsiranja HTML-a.
+  - `drawable/splash_logo.png` (nativni Android splash prije nego se WebView
+    učita) i `colorSplash` (`#376638`) NISU dirani — korisnik je tražio samo
+    "ikonu aplikacije i početnu sliku kod logina", što je login-ekran logo,
+    ne native splash. Ako se i splash treba rebrendirati, to je odvojena,
+    eksplicitno tražena izmjena.
 - **Neodobrena registracija ističe za 7 dana** (`20260730_isticanje_
   registracije.sql`) — automatski se briše (korisnici + auth.users) ako admin
   ne odobri na vrijeme. Kolona `prvo_odobren_at` (nikad se ne resetuje nazad na
