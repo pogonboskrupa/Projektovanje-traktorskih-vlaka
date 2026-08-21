@@ -4670,7 +4670,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.92.0';
+const APP_VER = 'v3.92.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5219,11 +5219,24 @@ function _showAuthScreen() {
 async function initAuth() {
   const cached = _OL.load(_OL.PROFILE);
   const saved = _loadSavedUser();
-  const hasLocalData = !!(cached && saved);
 
-  // OFFLINE FAST PATH: keširani profil + zapamćeni kredencijali = odmah u app
-  // Ovo pokriva: povratak iz kamere (Android ubije WebView), avionski mod, teren bez signala
-  if (hasLocalData && (!navigator.onLine || !sb)) {
+  // BUG (prijavljeno s terena, popravljeno u v3.92.1): offline ulazak je ranije
+  // zahtijevao I keširani profil I zapamćen PIN (checkbox "Zapamti me" na login
+  // formi) — `hasLocalData = cached && saved`. To je pogrešno spajalo dvije
+  // odvojene stvari: `cached` je dokaz da je OVAJ uređaj već bio uspješno
+  // prijavljen (dovoljno za offline nastavak), dok je `saved` samo opcioni PIN
+  // za TIHI re-login kad istekne Supabase sesija — ako korisnik nije čekirao
+  // "Zapamti me" (ili ga je isčekirao), `saved` je null i korisnik je ranije
+  // bio izbačen na login ekran ČIM bi zaista bio offline, iako je uredno
+  // prijavljen i ima keširan profil. Sad je keširani profil SAM PO SEBI
+  // dovoljan za offline pristup na sva tri mjesta ispod; `saved` PIN se i
+  // dalje koristi samo za pokušaj TIHOG re-logina (dobija svježu sesiju, pa
+  // sync ponovo radi), ne kao uslov za offline ulazak.
+
+  // OFFLINE FAST PATH: postoji keširani profil = odmah u app, bez obzira na
+  // zapamćen PIN. Ovo pokriva: povratak iz kamere (Android ubije WebView),
+  // avionski mod, teren bez signala.
+  if (cached && (!navigator.onLine || !sb)) {
     sbUser = { id: cached.id, email: cached.email || '' };
     sbProfile = cached;
     _setOfflineMode(true);
@@ -5232,8 +5245,8 @@ async function initAuth() {
     return;
   }
 
-  // Ako nema keširanog profila ni kredencijala, odmah prikaži login
-  if (!hasLocalData) {
+  // Ako nema keširanog profila, nema se na šta osloniti — odmah prikaži login
+  if (!cached) {
     _showAuthScreen();
   }
 
@@ -5257,30 +5270,32 @@ async function initAuth() {
     }
   });
 
-  // 2. Fallback: auto-login sa zapamćenim kredencijalima
+  // Pomoćnik: bilo kakav neuspjeh online logina kad IMAMO keširani profil
+  // NIKAD ne smije izbaciti korisnika na login ni obrisati kredencijale —
+  // na terenu navigator.onLine zna lažno biti true, a Supabase tiho vrati null.
+  const goOfflineOrLogin = () => {
+    if (cached) {
+      sbUser = { id: cached.id, email: cached.email || '' };
+      sbProfile = cached;
+      _setOfflineMode(true);
+      showApp();
+      showToast('📴 Offline pristup — lokalni podaci');
+    } else {
+      _showAuthScreen();
+    }
+  };
+
+  // 2. Fallback: auto-login sa zapamćenim kredencijalima (ako PIN nije
+  //    zapamćen, nemamo šta pokušati online — odmah offline-ili-login)
   setTimeout(async () => {
     if (sbUser) return;
-    if (!saved) { _showAuthScreen(); return; }
-    // Pomoćnik: bilo kakav neuspjeh online logina kad IMAMO keširani profil
-    // NIKAD ne smije izbaciti korisnika na login ni obrisati kredencijale —
-    // na terenu navigator.onLine zna lažno biti true, a Supabase tiho vrati null.
-    const goOfflineOrLogin = () => {
-      if (cached && saved) {
-        sbUser = { id: cached.id, email: cached.email || '' };
-        sbProfile = cached;
-        _setOfflineMode(true);
-        showApp();
-        showToast('📴 Offline pristup — lokalni podaci');
-      } else {
-        _showAuthScreen();
-      }
-    };
+    if (!saved) { goOfflineOrLogin(); return; }
     try {
       // OS-S4: navigator.onLine na terenu zna lagati 'true' na mrtvoj vezi — RPC bi
       // tada visio do Supabase timeouta i korisnik bi čekao 4500ms fallback. Kad
       // postoji keširani profil, utrkuj prvi mrežni korak s 1500ms — na timeout
       // odmah offline ulaz (auto-login se ionako ponovi pri sljedećem pokretanju).
-      const _tmo = (cached && saved)
+      const _tmo = cached
         ? new Promise((_, rej) => setTimeout(() => rej(new Error('_autologin_timeout')), 1500))
         : null;
       const emailPromise = sb.rpc('get_login_email', { p_ime: saved.ime, p_prezime: saved.prezime });
@@ -5300,15 +5315,7 @@ async function initAuth() {
   // 3. Offline fallback — ako nema mreže ali postoji keširani profil
   setTimeout(async () => {
     if (sbUser) return;
-    if (cached && saved) {
-      sbUser = { id: cached.id, email: cached.email || '' };
-      sbProfile = cached;
-      _setOfflineMode(true);
-      showApp();
-      showToast('📴 Offline pristup — koriste se lokalni podaci');
-    } else {
-      _showAuthScreen();
-    }
+    goOfflineOrLogin();
   }, 4500);
 }
 
