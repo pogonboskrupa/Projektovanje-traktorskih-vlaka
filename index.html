@@ -4690,7 +4690,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.97.0';
+const APP_VER = 'v3.97.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -25371,11 +25371,11 @@ function _rdShowResult() {
   if (nBad > 0) {
     // Ovo NE BI smjelo biti moguće (rdFindRoute tvrdo odbacuje takve kandidate) —
     // zadržano kao vidljiv alarm ako se ikad desi (npr. buduća izmjena algoritma).
-    badgeHtml = `<div style="background:#3a1e1e;border:1px solid #dc2626;color:#f87171;padding:6px 8px;border-radius:6px;font-size:11px;">🔴 ${nBad} segmenata prelazi maksimalni nagib — prijavite ovo kao grešku</div>`;
+    badgeHtml = `<div style="background:#3a1e1e;border:1px solid #dc2626;color:#f87171;padding:6px 8px;border-radius:6px;font-size:12px;">🔴 ${nBad} segmenata prelazi maksimalni nagib — prijavite ovo kao grešku</div>`;
   } else if (nWarn > 0) {
-    badgeHtml = `<div style="background:#3a2e1e;border:1px solid #d97706;color:#fbbf24;padding:6px 8px;border-radius:6px;font-size:11px;">🟠 ${nWarn} segmenata iznad preporučenog (ali unutar maksimalnog) nagiba</div>`;
+    badgeHtml = `<div style="background:#3a2e1e;border:1px solid #d97706;color:#fbbf24;padding:6px 8px;border-radius:6px;font-size:12px;">🟠 ${nWarn} segmenata iznad preporučenog (ali unutar maksimalnog) nagiba</div>`;
   } else {
-    badgeHtml = `<div style="background:#1e3a2e;border:1px solid #16a34a;color:#4ade80;padding:6px 8px;border-radius:6px;font-size:11px;">✅ Cijela trasa unutar preporučenog nagiba</div>`;
+    badgeHtml = `<div style="background:#1e3a2e;border:1px solid #16a34a;color:#4ade80;padding:6px 8px;border-radius:6px;font-size:12px;">✅ Cijela trasa unutar preporučenog nagiba</div>`;
   }
 
   const first = _rdResultPath[0], last = _rdResultPath[_rdResultPath.length - 1];
@@ -25385,7 +25385,7 @@ function _rdShowResult() {
   const resEl = document.getElementById('rd-result');
   resEl.style.display = 'block';
   resEl.innerHTML = `
-    <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;font-size:11px;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;color:#e2e8f0;font-variant-numeric:tabular-nums;margin-bottom:6px;">
+    <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:9px 11px;font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:5px 6px;color:#e2e8f0;font-variant-numeric:tabular-nums;margin-bottom:6px;">
       <span style="color:#94a3b8;">Dužina trase</span><span style="font-family:monospace;">${fmtL(v.totalDist)}</span>
       <span style="color:#94a3b8;">Azimut (A→B)</span><span style="font-family:monospace;">${azOverall.toFixed(1)}°</span>
       <span style="color:#94a3b8;">Visinska razlika</span><span style="font-family:monospace;">${dhOverall >= 0 ? '+' : ''}${dhOverall.toFixed(0)} m</span>
@@ -25395,10 +25395,10 @@ function _rdShowResult() {
     </div>
     ${badgeHtml}
     <div style="display:flex;gap:6px;margin-top:8px;">
-      <button onclick="_rdShowProfile()" style="flex:1;padding:8px;background:#1d4ed8;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-statistika"/></svg> Uzdužni profil</button>
-      <button onclick="_rdSaveRoute()" style="flex:1;padding:8px;background:#059669;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-sacuvaj"/></svg> Sačuvaj rutu</button>
+      <button onclick="_rdShowProfile()" style="flex:1;padding:8px;background:#1d4ed8;border:none;border-radius:6px;color:#fff;font-size:12px;cursor:pointer;"><svg class="ic"><use href="#ic-statistika"/></svg> Uzdužni profil</button>
+      <button onclick="_rdSaveRoute()" style="flex:1;padding:8px;background:#059669;border:none;border-radius:6px;color:#fff;font-size:12px;cursor:pointer;"><svg class="ic"><use href="#ic-sacuvaj"/></svg> Sačuvaj rutu</button>
     </div>
-    <button onclick="_rdDiscardResult()" style="width:100%;padding:6px;margin-top:6px;background:transparent;border:none;color:#64748b;font-size:10.5px;cursor:pointer;text-decoration:underline;"><svg class="ic"><use href="#ic-obrisi"/></svg> Odbaci prijedlog (ukloni s karte)</button>
+    <button onclick="_rdDiscardResult()" style="width:100%;padding:6px;margin-top:6px;background:transparent;border:none;color:#64748b;font-size:11.5px;cursor:pointer;text-decoration:underline;"><svg class="ic"><use href="#ic-obrisi"/></svg> Odbaci prijedlog (ukloni s karte)</button>
   `;
   showToast(`✓ Trasa: ${fmtL(v.totalDist)}, max nagib ${v.maxSlopePct.toFixed(1)}%`);
 }
@@ -25467,7 +25467,7 @@ function _rdRenderSavedRoutes() {
   const countEl = document.getElementById('rd-saved-routes-count');
   if (countEl) countEl.textContent = routes.length ? String(routes.length) : '';
   if (!routes.length) {
-    wrap.innerHTML = '<div style="font-size:10.5px;color:#64748b;padding:4px 0;">Nema sačuvanih trasa.</div>';
+    wrap.innerHTML = '<div style="font-size:11.5px;color:#64748b;padding:4px 0;">Nema sačuvanih trasa.</div>';
     return;
   }
   wrap.innerHTML = routes.map(r => {
@@ -25479,21 +25479,21 @@ function _rdRenderSavedRoutes() {
     const az = r.azimuthDeg != null ? r.azimuthDeg : rdAzimuth(first.la, first.lo, last.la, last.lo);
     const dh = r.deltaH != null ? r.deltaH : (last.al - first.al);
     return `
-      <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:6px 8px;margin-bottom:5px;font-size:10.5px;">
+      <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:7px 9px;margin-bottom:5px;font-size:11.5px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
           <span style="display:flex;align-items:center;gap:6px;min-width:0;">
             <input type="color" value="${col}" onchange="_rdSetRouteColor('${r.id}',this.value)" title="Boja trase" style="width:20px;height:20px;border:1px solid #334155;border-radius:4px;cursor:pointer;padding:0;background:none;flex-shrink:0;">
             <span style="color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.nm)}</span>
           </span>
-          ${shown ? `<span style="color:${col};white-space:nowrap;font-size:9.5px;">● na karti</span>` : ''}
+          ${shown ? `<span style="color:${col};white-space:nowrap;font-size:10.5px;">● na karti</span>` : ''}
         </div>
-        <div style="color:#94a3b8;font-family:monospace;font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        <div style="color:#94a3b8;font-family:monospace;font-variant-numeric:tabular-nums;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
           ${fmtL(r.totalDist)} · azimut ${az.toFixed(0)}° · Δh ${dh >= 0 ? '+' : ''}${dh.toFixed(0)} m · maks ${r.maxSlopePct.toFixed(1)}%
         </div>
-        <div style="display:flex;gap:4px;margin-top:5px;">
-          <button onclick="_rdToggleSavedRouteOnMap('${r.id}')" style="flex:1;padding:5px;background:${shown ? '#7c3aed' : '#374151'};border:none;border-radius:5px;color:#fff;font-size:10px;cursor:pointer;">${shown ? '🗺 Sakrij' : '🗺 Prikaži'}</button>
-          <button onclick="_rdRenameSavedRoute('${r.id}')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-crtaj"/></svg></button>
-          <button onclick="_rdDeleteSavedRoute('${r.id}')" style="padding:5px 8px;background:#3a1e1e;border:none;border-radius:5px;color:#f87171;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-obrisi"/></svg></button>
+        <div style="display:flex;gap:4px;margin-top:6px;">
+          <button onclick="_rdToggleSavedRouteOnMap('${r.id}')" style="flex:1;padding:5px;background:${shown ? '#7c3aed' : '#374151'};border:none;border-radius:5px;color:#fff;font-size:11px;cursor:pointer;">${shown ? '🗺 Sakrij' : '🗺 Prikaži'}</button>
+          <button onclick="_rdRenameSavedRoute('${r.id}')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-crtaj"/></svg></button>
+          <button onclick="_rdDeleteSavedRoute('${r.id}')" style="padding:5px 8px;background:#3a1e1e;border:none;border-radius:5px;color:#f87171;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-obrisi"/></svg></button>
         </div>
       </div>`;
   }).join('');
@@ -34452,66 +34452,66 @@ if (typeof AndroidDownload !== 'undefined') {
      _routeOnStartClick/_routeOnEndClick tok) — mapa mora ostati klikabilna. -->
 <div id="rd-modal" style="display:none;position:fixed;inset:0;z-index:99000;background:rgba(0,0,0,0.65);align-items:center;justify-content:center;padding:16px;"
   onclick="if(event.target===this)closeRoadDesignModal()">
-  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;width:100%;max-width:440px;max-height:88vh;overflow-y:auto;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,0.7);">
+  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;width:100%;max-width:440px;max-height:92vh;overflow-y:auto;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,0.7);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
       <h3 style="margin:0;font-size:15px;color:#a78bfa;">🛤 Projektovanje šumskog puta</h3>
       <button onclick="closeRoadDesignModal()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:0 4px;"><svg class="ic"><use href="#ic-zatvori"/></svg></button>
     </div>
-    <div style="font-size:10px;color:#64748b;margin-bottom:10px;">Preliminarna trasa — nije konačan građevinski projekat.</div>
+    <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Preliminarna trasa — nije konačan građevinski projekat.</div>
 
     <!-- TAČKE A/B -->
     <div id="rd-pt-a" style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;margin-bottom:6px;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:12px;font-weight:700;color:#4ade80;">● A — početna tačka</span>
-        <button onclick="_rdPickPoint('start')" style="padding:4px 8px;background:#1e3a2e;border:1px solid #16a34a;border-radius:6px;color:#4ade80;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-pozicija"/></svg> Postavi na karti</button>
+        <span style="font-size:13px;font-weight:700;color:#4ade80;">● A — početna tačka</span>
+        <button onclick="_rdPickPoint('start')" style="padding:4px 8px;background:#1e3a2e;border:1px solid #16a34a;border-radius:6px;color:#4ade80;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-pozicija"/></svg> Postavi na karti</button>
       </div>
-      <div id="rd-pt-a-info" style="font-size:10.5px;color:#94a3b8;margin-top:4px;">Nije postavljena</div>
+      <div id="rd-pt-a-info" style="font-size:11.5px;color:#94a3b8;margin-top:4px;">Nije postavljena</div>
       <div style="display:flex;gap:4px;margin-top:5px;">
-        <input id="rd-a-lat" type="number" step="0.00001" placeholder="lat" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
-        <input id="rd-a-lon" type="number" step="0.00001" placeholder="lon" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
-        <button onclick="_rdApplyManual('start')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:10px;cursor:pointer;">Primijeni</button>
+        <input id="rd-a-lat" type="number" step="0.00001" placeholder="lat" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:12px;">
+        <input id="rd-a-lon" type="number" step="0.00001" placeholder="lon" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:12px;">
+        <button onclick="_rdApplyManual('start')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:11px;cursor:pointer;">Primijeni</button>
       </div>
     </div>
     <div id="rd-pt-b" style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:12px;font-weight:700;color:#f87171;">● B — završna tačka</span>
-        <button onclick="_rdPickPoint('end')" style="padding:4px 8px;background:#3a1e1e;border:1px solid #dc2626;border-radius:6px;color:#f87171;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-pozicija"/></svg> Postavi na karti</button>
+        <span style="font-size:13px;font-weight:700;color:#f87171;">● B — završna tačka</span>
+        <button onclick="_rdPickPoint('end')" style="padding:4px 8px;background:#3a1e1e;border:1px solid #dc2626;border-radius:6px;color:#f87171;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-pozicija"/></svg> Postavi na karti</button>
       </div>
-      <div id="rd-pt-b-info" style="font-size:10.5px;color:#94a3b8;margin-top:4px;">Nije postavljena</div>
+      <div id="rd-pt-b-info" style="font-size:11.5px;color:#94a3b8;margin-top:4px;">Nije postavljena</div>
       <div style="display:flex;gap:4px;margin-top:5px;">
-        <input id="rd-b-lat" type="number" step="0.00001" placeholder="lat" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
-        <input id="rd-b-lon" type="number" step="0.00001" placeholder="lon" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
-        <button onclick="_rdApplyManual('end')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:10px;cursor:pointer;">Primijeni</button>
+        <input id="rd-b-lat" type="number" step="0.00001" placeholder="lat" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:12px;">
+        <input id="rd-b-lon" type="number" step="0.00001" placeholder="lon" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:12px;">
+        <button onclick="_rdApplyManual('end')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:11px;cursor:pointer;">Primijeni</button>
       </div>
     </div>
 
     <!-- MEĐUTAČKA (opciono) — korisno za duže/složenije trase gdje pretraga
          u jednom skoku od A do B ne stigne naći rješenje na vrijeme; dijeli
          trasu na A→M i M→B. -->
-    <button id="rd-pt-via-add" onclick="_rdShowViaSection()" style="width:100%;padding:6px;background:transparent;border:1px dashed #374151;border-radius:8px;color:#94a3b8;font-size:10.5px;cursor:pointer;margin-bottom:10px;">➕ Dodaj međutačku (za duže/složenije trase)</button>
+    <button id="rd-pt-via-add" onclick="_rdShowViaSection()" style="width:100%;padding:6px;background:transparent;border:1px dashed #374151;border-radius:8px;color:#94a3b8;font-size:11.5px;cursor:pointer;margin-bottom:10px;">➕ Dodaj međutačku (za duže/složenije trase)</button>
     <div id="rd-pt-via" style="display:none;background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:12px;font-weight:700;color:#fbbf24;">● M — međutačka</span>
+        <span style="font-size:13px;font-weight:700;color:#fbbf24;">● M — međutačka</span>
         <div style="display:flex;gap:4px;">
-          <button onclick="_rdPickPoint('via')" style="padding:4px 8px;background:#3a331e;border:1px solid #d97706;border-radius:6px;color:#fbbf24;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-pozicija"/></svg> Postavi na karti</button>
-          <button onclick="_rdRemoveVia()" style="padding:4px 6px;background:#374151;border:none;border-radius:6px;color:#94a3b8;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-zatvori"/></svg></button>
+          <button onclick="_rdPickPoint('via')" style="padding:4px 8px;background:#3a331e;border:1px solid #d97706;border-radius:6px;color:#fbbf24;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-pozicija"/></svg> Postavi na karti</button>
+          <button onclick="_rdRemoveVia()" style="padding:4px 6px;background:#374151;border:none;border-radius:6px;color:#94a3b8;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-zatvori"/></svg></button>
         </div>
       </div>
-      <div id="rd-pt-c-info" style="font-size:10.5px;color:#94a3b8;margin-top:4px;">Nije postavljena</div>
+      <div id="rd-pt-c-info" style="font-size:11.5px;color:#94a3b8;margin-top:4px;">Nije postavljena</div>
       <div style="display:flex;gap:4px;margin-top:5px;">
-        <input id="rd-c-lat" type="number" step="0.00001" placeholder="lat" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
-        <input id="rd-c-lon" type="number" step="0.00001" placeholder="lon" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
-        <button onclick="_rdApplyManual('via')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:10px;cursor:pointer;">Primijeni</button>
+        <input id="rd-c-lat" type="number" step="0.00001" placeholder="lat" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:12px;">
+        <input id="rd-c-lon" type="number" step="0.00001" placeholder="lon" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:12px;">
+        <button onclick="_rdApplyManual('via')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:11px;cursor:pointer;">Primijeni</button>
       </div>
     </div>
 
     <!-- PREGLED A-B (distanca/azimut/visinska razlika) -->
-    <div id="rd-preview" style="display:none;font-size:11px;background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;margin-bottom:10px;grid-template-columns:auto 1fr;gap:2px 10px;color:#e2e8f0;"></div>
+    <div id="rd-preview" style="display:none;font-size:12px;background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;margin-bottom:10px;grid-template-columns:auto 1fr;gap:3px 6px;color:#e2e8f0;"></div>
 
     <!-- PARAMETRI TRASE -->
     <details style="margin-bottom:10px;">
-      <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#cbd5e1;padding:4px 0;">⚙ Parametri trase</summary>
-      <div id="rd-params" style="display:grid;grid-template-columns:1fr 70px;gap:5px 8px;align-items:center;font-size:11px;color:#94a3b8;margin-top:6px;">
+      <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#cbd5e1;padding:4px 0;">⚙ Parametri trase</summary>
+      <div id="rd-params" style="display:grid;grid-template-columns:1fr 70px;gap:6px 6px;align-items:center;font-size:12px;color:#94a3b8;margin-top:6px;">
         <label>Maksimalni uzdužni nagib (%)</label><input id="rd-p-nagibMax" type="number" step="0.5" style="padding:4px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;">
         <label>Preporučeni uzdužni nagib (%)</label><input id="rd-p-nagibPreporuceni" type="number" step="0.5" style="padding:4px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;">
         <label>Minimalni uzdužni nagib (%)</label><input id="rd-p-nagibMin" type="number" step="0.5" style="padding:4px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;">
@@ -34526,7 +34526,7 @@ if (typeof AndroidDownload !== 'undefined') {
         <label>Min. razmak serpentina (m)</label><input id="rd-p-minRazmakSerpentina" type="number" step="1" style="padding:4px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;">
         <label for="rd-p-bezSerpentina">Ne pravi serpentine (samo blage trase)</label><input id="rd-p-bezSerpentina" type="checkbox" style="width:16px;height:16px;justify-self:end;accent-color:#7c3aed;">
       </div>
-      <div style="font-size:9.5px;color:#475569;margin-top:5px;">Poprečni nagib/radijus krivine/razmak serpentina se čuvaju, ali ih Faza 1 algoritma još ne koristi direktno (vidi napomenu na kraju izvještaja). "Ne pravi serpentine" je izuzetak — TVRDO zabranjuje oštre zaokrete (preko ~100°); ako teren zaista traži serpentinu da zadovolji maks. nagib, trasa se neće naći dok se ova opcija ne isključi.</div>
+      <div style="font-size:10.5px;color:#475569;margin-top:5px;">Poprečni nagib/radijus krivine/razmak serpentina se čuvaju, ali ih Faza 1 algoritma još ne koristi direktno (vidi napomenu na kraju izvještaja). "Ne pravi serpentine" je izuzetak — TVRDO zabranjuje oštre zaokrete (preko ~100°); ako teren zaista traži serpentinu da zadovolji maks. nagib, trasa se neće naći dok se ova opcija ne isključi.</div>
     </details>
 
     <button id="rd-generate-btn" onclick="_rdGenerate()" style="width:100%;padding:10px;background:#7c3aed;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;opacity:0.5;">🚀 Generiši trasu</button>
@@ -34535,7 +34535,7 @@ if (typeof AndroidDownload !== 'undefined') {
 
     <!-- SAČUVANE TRASE — zaseban spisak, nezavisan od "vlaka"/projekat koncepta -->
     <details style="margin-top:10px;">
-      <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#cbd5e1;padding:4px 0;">📂 Sačuvane trase <span id="rd-saved-routes-count" style="color:#a78bfa;"></span></summary>
+      <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#cbd5e1;padding:4px 0;">📂 Sačuvane trase <span id="rd-saved-routes-count" style="color:#a78bfa;"></span></summary>
       <div id="rd-saved-routes-list" style="margin-top:6px;"></div>
     </details>
   </div>
