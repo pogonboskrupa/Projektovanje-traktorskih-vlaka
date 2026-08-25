@@ -4683,7 +4683,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.95.2';
+const APP_VER = 'v3.95.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -25197,6 +25197,15 @@ function _rdRenderPoints() {
   _rdUpdatePreviewAndButton();
 }
 
+// Zašto dugme "Generiši trasu" (još) nije spremno — null kad JEST spremno.
+// NAMJERNO se ne koristi pravi HTML `disabled` atribut na dugmetu (vidi niže):
+// dok je dugme stvarno disabled, klik NE OKIDA onclick uopšte — korisnik nema
+// NIKAKVU povratnu informaciju (prijavljeni bug "ne napravi se trasa kad
+// generišem trasu, ništa se ne desi"). Dugme ostaje klikabilno cijelo vrijeme
+// (samo vizuelno zatamnjeno dok nije spremno), a _rdGenerate() provjerava ovaj
+// razlog i uvijek pokaže KONKRETNU poruku umjesto tihog ne-rada.
+let _rdNotReadyReason = 'Postavite obje tačke (A i B)';
+
 // Nakon što su obje tačke postavljene: preuzmi DEM (offline keš prvo, online
 // fallback — isti tok kao _routeOnEndClick), pa prikaži distancu/azimut/
 // visinsku razliku PRIJE generisanja trase (tačka 1 specifikacije).
@@ -25205,7 +25214,8 @@ async function _rdUpdatePreviewAndButton() {
   const btn = document.getElementById('rd-generate-btn');
   const prevEl = document.getElementById('rd-preview');
   if (!a || !b) {
-    btn.disabled = true; btn.style.opacity = '0.5';
+    _rdNotReadyReason = 'Postavite obje tačke (A i B)';
+    btn.style.opacity = '0.5';
     prevEl.style.display = 'none';
     return;
   }
@@ -25213,12 +25223,14 @@ async function _rdUpdatePreviewAndButton() {
     // DEM već učitan za trenutne tačke (npr. poslije neuspjelog "Generiši" pa
     // ponovnog otvaranja modala) — nema potrebe za ponovnim preuzimanjem.
     _rdRenderPreviewStats(a, b);
-    btn.disabled = false; btn.style.opacity = '1';
+    _rdNotReadyReason = null;
+    btn.style.opacity = '1';
     return;
   }
   prevEl.style.display = 'grid';
   prevEl.innerHTML = '<span style="grid-column:1/3;color:#94a3b8;">⏳ Učitavam model terena…</span>';
-  btn.disabled = true; btn.style.opacity = '0.5';
+  _rdNotReadyReason = 'Model terena se još učitava — sačekajte par sekundi pa probajte ponovo';
+  btn.style.opacity = '0.5';
   const viaPt = _rdPoints.via;
   const boundPts = [[a.lat, a.lon], [b.lat, b.lon]];
   if (viaPt) boundPts.push([viaPt.lat, viaPt.lon]);
@@ -25239,6 +25251,7 @@ async function _rdUpdatePreviewAndButton() {
   if (!dem) {
     const reason = fetchErr ? fetchErr.message : 'nije preuzet za ovu oblast i nema mreže';
     prevEl.innerHTML = `<span style="grid-column:1/3;color:#f87171;">⚠ Model terena nedostupan (${_escHtml ? _escHtml(reason) : reason}). Preuzmite DEM u Vlake panelu (🏔 DEM offline) dok ste na mreži, ili probajte ponovo ako ste online.</span>`;
+    _rdNotReadyReason = 'Model terena nedostupan: ' + reason;
     return;
   }
   a.elev = _demBilinearElev(dem, a.lat, a.lon);
@@ -25248,7 +25261,8 @@ async function _rdUpdatePreviewAndButton() {
   _rdPaintPointInfo('end');
   if (_rdPoints.via) _rdPaintPointInfo('via');
   _rdRenderPreviewStats(a, b);
-  btn.disabled = false; btn.style.opacity = '1';
+  _rdNotReadyReason = null;
+  btn.style.opacity = '1';
 }
 
 function _rdRenderPreviewStats(a, b) {
@@ -25292,6 +25306,10 @@ function _rdRouteLeg(dem, aLat, aLon, bLat, bLon, params) {
 
 function _rdGenerate() {
   const a = _rdPoints.start, b = _rdPoints.end, via = _rdPoints.via;
+  // Dugme NIJE pravi HTML disabled (vidi _rdNotReadyReason) — uvijek klikabilno,
+  // pa se konkretan razlog uvijek pokaže umjesto da klik tiho ne uradi ništa
+  // (prijavljeni bug: "ne napravi se trasa kad generišem trasu", bez ikakve poruke).
+  if (_rdNotReadyReason) { showToast('⚠ ' + _rdNotReadyReason); return; }
   if (!a || !b || !_rdDem || a.elev == null || b.elev == null) { showToast('⚠ Postavite obje tačke i sačekajte model terena'); return; }
   if (via && via.elev == null) { showToast('⚠ Sačekajte da se učita visina međutačke'); return; }
   const params = _rdCollectParams();
@@ -34476,7 +34494,7 @@ if (typeof AndroidDownload !== 'undefined') {
       <div style="font-size:9.5px;color:#475569;margin-top:5px;">Poprečni nagib/radijus krivine/razmak serpentina se čuvaju, ali ih Faza 1 algoritma još ne koristi direktno (vidi napomenu na kraju izvještaja).</div>
     </details>
 
-    <button id="rd-generate-btn" disabled onclick="_rdGenerate()" style="width:100%;padding:10px;background:#7c3aed;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;opacity:0.5;">🚀 Generiši trasu</button>
+    <button id="rd-generate-btn" onclick="_rdGenerate()" style="width:100%;padding:10px;background:#7c3aed;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;opacity:0.5;">🚀 Generiši trasu</button>
 
     <div id="rd-result" style="display:none;margin-top:10px;"></div>
 
