@@ -249,9 +249,9 @@ function rdFindRoute(opts) {
       if (slopePct > nagibMax) continue; // TVRDO odbačen kandidat — nikad se ne prelazi max nagib
 
       // Ugao skretanja u odnosu na ULAZNI pravac u ovaj čvor (ne u odnosu na
-      // pravac ka cilju) — koristi se i za turnPenalty ispod i, ako je
-      // bezSerpentina uključeno, kao TVRDI cutoff (isto mjesto gdje se
-      // odbacuje nagib) koji sprječava rutu da ikad napravi serpentinu.
+      // pravac ka cilju) — koristi se ISKLJUČIVO za bezSerpentina TVRDI
+      // cutoff ispod (isto mjesto gdje se odbacuje nagib), NE za kaznu u
+      // cost funkciji (vidi napomenu ispod zašto je ta kazna uklonjena).
       let turnDiff = 0;
       if (node.azIn != null) {
         turnDiff = Math.abs(az - node.azIn);
@@ -264,18 +264,25 @@ function rdFindRoute(opts) {
       else if (slopePct > params.nagibPreporuceni) penalty = 1.8;
       const angPenalty = 1 + Math.abs(off)/400; // blaga kazna za skretanje, da ne luta bez potrebe
 
-      // Kazna za promjenu smjera U ODNOSU NA PRETHODNI KORAK — bez ovoga
-      // svaki čvor bira ugao nezavisno prema trenutnom azimutu-ka-cilju, pa
-      // dva uzastopna koraka znaju blago skrenuti lijevo-desno-lijevo
-      // (cik-cak na malom prostoru) iako je ukupan napredak isti. Kvadratna
-      // kazna — blag zaokret je skoro besplatan, oštar zaokret/povratak
-      // unazad je skup — favorizuje "pro" izgled (glatke, produžene dionice)
-      // umjesto isprekidane linije.
-      const turnPenalty = node.azIn != null ? 1 + (turnDiff/180)*(turnDiff/180)*3 : 1;
+      // NAPOMENA (regresija otkrivena i uklonjena poslije v3.95.1): ovdje je
+      // ranije postojala i kvadratna "turnPenalty" kazna za promjenu smjera
+      // u odnosu na prethodni korak, uvedena da spriječi cik-cak na malom
+      // prostoru. Mjerenja su pokazala da je BILA ŠTETNA na stvarnom terenu
+      // koji zahtijeva pravu serpentinu: na terenu gdje je serpentina jedini
+      // način da se zadovolji max nagib, kazna je iskrivila prioritet
+      // pretrage tako da (a) na kraćim trasama nađe znatno DUŽI put nego
+      // bez nje (izmjereno: 4.03× umjesto 2.77× prave linije, isti teren),
+      // ili (b) na dužim trasama (~1km+) pretraga uopšte NE USPIJE naći
+      // rješenje unutar realnog budžeta iteracija. Anti-cik-cak cilj i dalje
+      // je ostvaren — ali isključivo kroz _rdSmoothPath (string-pulling
+      // zaglađivanje poslije pretrage, ispod), koje je dovoljno samo za sebe
+      // (nikad ne može PRODUŽITI trasu, samo skratiti kad prava linija
+      // između dvije tačke zadovoljava max nagib) i ne pati od ovog problema
+      // jer ne utiče na TOK same pretrage, samo čisti rezultat naknadno.
 
       const candKey = keyFor(cand.lat, cand.lon);
       if (closed.has(candKey)) continue;
-      const tentG = node.g + L*penalty*angPenalty*turnPenalty;
+      const tentG = node.g + L*penalty*angPenalty;
 
       const existing = nodes.get(candKey);
       if (!existing || tentG < existing.g) {

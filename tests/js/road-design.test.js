@@ -111,6 +111,32 @@ test('TEST 3: direktna linija prelazi max nagib → algoritam nalazi DUŽU trasu
     `trasa mora biti primjetno duža od prave linije kad prava linija ne zadovoljava nagib (${val.totalDist.toFixed(0)}m vs ${straightDist.toFixed(0)}m)`);
 });
 
+// ── Regresija: turnPenalty (uveden u v3.95.1, uklonjen poslije prijave
+// "sad od 2km trase pravi nepotrebno 3,5km") na DUŽOJ skali koja stvarno
+// zahtijeva serpentinu (~1km, red veličine realne šumske trase — ne 60m kao
+// TEST3). Prije uklanjanja, SVAKI turnPenalty koeficijent > 0 je na ovoj
+// skali doveo do potpunog neuspjeha pretrage (NO_ROUTE) unutar realnog
+// budžeta iteracija — kazna iskrivi prioritet pretrage tako da troši budžet
+// na grane koje "izgledaju jeftino" (malo skretanja) a na kraju padnu na
+// nagib-cutoff, umjesto da nađe serpentinsku granu koja stvarno vodi do
+// cilja. Ovaj test direktno štiti od ponavljanja te regresije. ──
+test('Regresija (turnPenalty): trasa se PRONAĐE na ~1km terenu koje zahtijeva serpentinu', () => {
+  const params = Object.assign({}, RD_DEFAULT_PARAMS, { nagibMax: 8, nagibPreporuceni: 6, duzinaMax: 15000 });
+  const climbGrade = 0.15; // jednoličan uspon sjever, ravno istok-zapad — isti princip kao TEST3, veća skala
+  const sampleElev = (lat, lon) => 400 + (lat - lat0)*M_PER_DEG_LAT*climbGrade;
+  const startLat = lat0, startLon = lon0;
+  const endLat = lat0 + 1000/M_PER_DEG_LAT, endLon = lon0 + 150/M_PER_DEG_LAT/Math.cos(lat0*Math.PI/180);
+
+  const straightDist = rdHaversine(startLat, startLon, endLat, endLon);
+  const iterBudget = Math.max(6000, Math.min(100000, Math.round(straightDist * 40))); // isti obrazac kao _rdIterBudget u index.html
+
+  const res = rdFindRoute({ startLat, startLon, endLat, endLon, sampleElev, params, maxIterations: iterBudget });
+  assert.ok(res.ok, 'trasa mora biti pronađena na realnoj (~1km) skali koja zahtijeva serpentinu: ' + res.reason);
+
+  const val = rdValidateRoute(res.path, params);
+  assert.ok(!val.anyExceedsMax, 'nijedan segment ne smije prelaziti max nagib');
+});
+
 test('rdFindRoute: nema DEM podataka → ok=false, reason=DEM_MISSING', () => {
   const params = Object.assign({}, RD_DEFAULT_PARAMS);
   const res = rdFindRoute({
