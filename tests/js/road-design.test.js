@@ -140,5 +140,50 @@ test('rdFindRoute: nedostižan cilj (okružen prestrmim terenom) → ok=false, n
   assert.equal(res.ok, false, 'nedostižan cilj mora vratiti ok:false, ne izmišljenu trasu');
 });
 
+// ── Regresija: heap-based open lista mora ostati brza i na dužoj/težoj trasi ──
+// (prijavljeni bug "dvije tačke su premalo" — duže trase su znale iscrpiti
+// iteracije prije nego stignu do rješenja; ovo provjerava da veći budžet
+// stvarno stigne na vrijeme, ne samo da JESTE veći)
+test('rdFindRoute: duža trasa preko strmog terena i dalje brza uz veći budžet', () => {
+  const params = Object.assign({}, RD_DEFAULT_PARAMS, { nagibMax: 8, nagibPreporuceni: 6, duzinaMax: 20000 });
+  const climbGrade = 0.20;
+  const sampleElev = (lat, lon) => 400 + (lat - lat0)*M_PER_DEG_LAT*climbGrade;
+  const startLat = lat0, startLon = lon0;
+  const endLat = lat0 + 600/M_PER_DEG_LAT, endLon = lon0 + 50/M_PER_DEG_LAT/Math.cos(lat0*Math.PI/180);
+
+  const t0 = Date.now();
+  const res = rdFindRoute({ startLat, startLon, endLat, endLon, sampleElev, params, maxIterations: 40000 });
+  const elapsed = Date.now() - t0;
+  assert.ok(res.ok, 'trasa mora biti pronađena uz dovoljan budžet: ' + res.reason);
+  assert.ok(elapsed < 2000, `pretraga ne smije trajati predugo (${elapsed}ms) — heap regresija?`);
+  const val = rdValidateRoute(res.path, params);
+  assert.ok(!val.anyExceedsMax);
+});
+
+// ── Međutačka (via) — obrazac koji index.html koristi: dva odvojena poziva
+// rdFindRoute spojena u jednu trasu. Provjerava da je spajanje ispravno
+// (bez duple tačke na spoju) i da hard-cutoff nagiba i dalje važi na OBA
+// kraka pojedinačno. ──
+test('Međutačka: A→M i M→B spojeni bez duple tačke, oba kraka poštuju max nagib', () => {
+  const params = Object.assign({}, RD_DEFAULT_PARAMS);
+  const sampleElev = (lat, lon) => 500 + (lat - lat0)*M_PER_DEG_LAT*0.04; // blag 4% nagib
+  const start = { lat: lat0, lon: lon0 };
+  const via = { lat: lat0 + 150/M_PER_DEG_LAT, lon: lon0 + 30/M_PER_DEG_LAT };
+  const end = { lat: lat0 + 300/M_PER_DEG_LAT, lon: lon0 };
+
+  const leg1 = rdFindRoute({ startLat: start.lat, startLon: start.lon, endLat: via.lat, endLon: via.lon, sampleElev, params });
+  const leg2 = rdFindRoute({ startLat: via.lat, startLon: via.lon, endLat: end.lat, endLon: end.lon, sampleElev, params });
+  assert.ok(leg1.ok && leg2.ok, 'oba kraka moraju uspjeti na blagom terenu');
+
+  const merged = leg1.path.concat(leg2.path.slice(1));
+  // Nema duple tačke na spoju (ista lat/lon dva puta zaredom)
+  for (let i = 1; i < merged.length; i++) {
+    assert.ok(!(merged[i].lat === merged[i-1].lat && merged[i].lon === merged[i-1].lon),
+      `duplirana tačka na indeksu ${i}`);
+  }
+  const val = rdValidateRoute(merged, params);
+  assert.ok(!val.anyExceedsMax, 'spojena trasa preko međutačke ne smije prelaziti max nagib ni na jednom kraku');
+});
+
 console.log(`\n${_pass} prošlo, ${_fail} palo`);
 process.exit(_fail > 0 ? 1 : 0);

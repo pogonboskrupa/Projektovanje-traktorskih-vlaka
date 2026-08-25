@@ -107,6 +107,43 @@ function rdPreview(startLat, startLon, startElev, endLat, endLon, endElev) {
   };
 }
 
+// Binarni min-heap za "open" listu A* pretrage. Prvobitna verzija je (kao i
+// postojeći _astarRoute u index.html) koristila obično sortiranje niza pri
+// svakom skidanju elementa (O(n log n) PO ITERACIJI) — dovoljno brzo za
+// kratke trase, ali kod dužih/strmijih (gdje treba puno cik-cak koraka i
+// open lista naraste na hiljade) to dominira vremenom izvršavanja i na
+// realnom telefonu (sporiji CPU od dev mašine) može izgledati kao da se
+// alat zaledio. Heap svodi skidanje/dodavanje na O(log n).
+function _rdHeapPush(heap, item) {
+  heap.push(item);
+  let i = heap.length - 1;
+  while (i > 0) {
+    const parent = (i - 1) >> 1;
+    if (heap[parent].f <= heap[i].f) break;
+    const tmp = heap[parent]; heap[parent] = heap[i]; heap[i] = tmp;
+    i = parent;
+  }
+}
+function _rdHeapPop(heap) {
+  const top = heap[0];
+  const last = heap.pop();
+  if (heap.length > 0) {
+    heap[0] = last;
+    let i = 0;
+    const n = heap.length;
+    while (true) {
+      const l = 2*i+1, r = 2*i+2;
+      let smallest = i;
+      if (l < n && heap[l].f < heap[smallest].f) smallest = l;
+      if (r < n && heap[r].f < heap[smallest].f) smallest = r;
+      if (smallest === i) break;
+      const tmp = heap[smallest]; heap[smallest] = heap[i]; heap[i] = tmp;
+      i = smallest;
+    }
+  }
+  return top;
+}
+
 // ─── Jezgro: A* vođen šestarskim korakom preko kontinualnog DEM prostora ──
 //
 // Za razliku od rasterskog A* (fiksne susjedne ćelije grida), ovdje se
@@ -154,7 +191,8 @@ function rdFindRoute(opts) {
   nodes.set(startKey, { lat: startLat, lon: startLon, elev: elevStart, parentKey: null, g: 0 });
 
   const closed = new Set();
-  const open = [{ f: rdHaversine(startLat, startLon, endLat, endLon), key: startKey }];
+  const open = [];
+  _rdHeapPush(open, { f: rdHaversine(startLat, startLon, endLat, endLon), key: startKey });
 
   const offsets = [0, 20, -20, 45, -45, 70, -70, 100, -100, 135, -135];
 
@@ -162,8 +200,7 @@ function rdFindRoute(opts) {
   let iterations = 0;
 
   while (open.length && iterations++ < maxIterations) {
-    open.sort((a, b) => a.f - b.f);
-    const cur = open.shift();
+    const cur = _rdHeapPop(open);
     if (closed.has(cur.key)) continue;
     closed.add(cur.key);
 
@@ -215,7 +252,7 @@ function rdFindRoute(opts) {
       if (!existing || tentG < existing.g) {
         nodes.set(candKey, { lat: cand.lat, lon: cand.lon, elev: candElev, parentKey: cur.key, g: tentG });
         const f = tentG + rdHaversine(cand.lat, cand.lon, endLat, endLon);
-        open.push({ f, key: candKey });
+        _rdHeapPush(open, { f, key: candKey });
       }
     }
   }

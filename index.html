@@ -4683,7 +4683,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.94.1';
+const APP_VER = 'v3.94.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -24927,12 +24927,21 @@ function _routeToVlaka() {
 // Rezultat postaje obična vlaka (_rdCreateVlaka, isti obrazac kao
 // _routeToVlaka) — besplatno nasljeđuje postojeći ručni editing
 // (buildEditHandles) i uzdužni profil (_renderElevProfile).
-let _rdPoints = { start: null, end: null };  // {lat,lon,elev|null}
-let _rdMarkers = { start: null, end: null }; // L.circleMarker
+let _rdPoints = { start: null, end: null, via: null };  // {lat,lon,elev|null}
+let _rdMarkers = { start: null, end: null, via: null }; // L.circleMarker
 let _rdDem = null;
 let _rdResultPath = null;
 let _rdResultVal = null;
 let _rdResultLayer = null;
+
+// Međutačka (via) je opciona — vidi tačku "dvije tačke su premalo" u
+// _rdIterBudget komentaru niže: korisnici su je ručno simulirali dijeljenjem
+// duge trase na dvije kraće, sad je to prva klasa opcija u alatu.
+const _RD_PT_CFG = {
+  start: { idPrefix: 'a', label: 'A', color: '#4ade80', infoId: 'rd-pt-a-info' },
+  end:   { idPrefix: 'b', label: 'B', color: '#f87171', infoId: 'rd-pt-b-info' },
+  via:   { idPrefix: 'c', label: 'M', color: '#fbbf24', infoId: 'rd-pt-c-info' }
+};
 
 function showRoadDesignModal() {
   const p = rdLoadParams();
@@ -24941,6 +24950,10 @@ function showRoadDesignModal() {
     if (el) el.value = p[k];
   });
   document.getElementById('rd-modal').style.display = 'flex';
+  // Ako je međutačka već postavljena (npr. iz prethodnog otvaranja modala),
+  // sekcija mora ostati otvorena umjesto da se vrati na "➕ Dodaj" dugme.
+  document.getElementById('rd-pt-via-add').style.display = _rdPoints.via ? 'none' : '';
+  document.getElementById('rd-pt-via').style.display = _rdPoints.via ? 'block' : 'none';
   _rdRenderPoints();
 }
 
@@ -24949,6 +24962,7 @@ function closeRoadDesignModal() {
   map.getContainer().style.cursor = '';
   map.off('click', _rdOnMapClickStart);
   map.off('click', _rdOnMapClickEnd);
+  map.off('click', _rdOnMapClickVia);
 }
 
 function _rdReadParamsFromForm() {
@@ -24964,41 +24978,61 @@ function _rdCollectParams() { const p = _rdReadParamsFromForm(); rdSaveParams(p)
 
 function _rdPickPoint(which) {
   document.getElementById('rd-modal').style.display = 'none';
-  showToast(which === 'start' ? '📍 Klikni na kartu: odaberi POČETNU tačku (A)' : '📍 Klikni na kartu: odaberi ZAVRŠNU tačku (B)');
+  const label = which === 'start' ? 'POČETNU tačku (A)' : which === 'end' ? 'ZAVRŠNU tačku (B)' : 'MEĐUTAČKU';
+  showToast('📍 Klikni na kartu: odaberi ' + label);
   map.getContainer().style.cursor = 'crosshair';
-  map.once('click', which === 'start' ? _rdOnMapClickStart : _rdOnMapClickEnd);
+  const handler = which === 'start' ? _rdOnMapClickStart : which === 'end' ? _rdOnMapClickEnd : _rdOnMapClickVia;
+  map.once('click', handler);
 }
 function _rdOnMapClickStart(e) { _rdSetPoint('start', e.latlng.lat, e.latlng.lng); }
 function _rdOnMapClickEnd(e) { _rdSetPoint('end', e.latlng.lat, e.latlng.lng); }
+function _rdOnMapClickVia(e) { _rdSetPoint('via', e.latlng.lat, e.latlng.lng); }
 
 function _rdApplyManual(which) {
-  const latEl = document.getElementById('rd-' + (which === 'start' ? 'a' : 'b') + '-lat');
-  const lonEl = document.getElementById('rd-' + (which === 'start' ? 'a' : 'b') + '-lon');
+  const cfg = _RD_PT_CFG[which];
+  const latEl = document.getElementById('rd-' + cfg.idPrefix + '-lat');
+  const lonEl = document.getElementById('rd-' + cfg.idPrefix + '-lon');
   const lat = parseFloat(latEl.value), lon = parseFloat(lonEl.value);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) { showToast('⚠ Unesite ispravne koordinate'); return; }
   _rdSetPoint(which, lat, lon);
 }
 
 function _rdSetPoint(which, lat, lon) {
+  const cfg = _RD_PT_CFG[which];
   _rdPoints[which] = { lat, lon, elev: null };
   _rdDem = null; // nevažeći nakon promjene tačke — ponovo se učitava pri sljedećem pregledu/generisanju
   if (_rdMarkers[which]) map.removeLayer(_rdMarkers[which]);
-  const col = which === 'start' ? '#4ade80' : '#f87171';
-  const mk = L.circleMarker([lat, lon], { radius: 7, color: col, fillColor: col, fillOpacity: 1 }).addTo(map);
-  mk.bindTooltip(which === 'start' ? 'A' : 'B', { permanent: true, direction: 'top', className: 'leaflet-tooltip' });
+  const mk = L.circleMarker([lat, lon], { radius: 7, color: cfg.color, fillColor: cfg.color, fillOpacity: 1 }).addTo(map);
+  mk.bindTooltip(cfg.label, { permanent: true, direction: 'top', className: 'leaflet-tooltip' });
   _rdMarkers[which] = mk;
   map.getContainer().style.cursor = '';
   document.getElementById('rd-modal').style.display = 'flex';
   _rdRenderPoints();
-  showToast('✓ Tačka ' + (which === 'start' ? 'A' : 'B') + ' postavljena');
+  showToast('✓ Tačka ' + cfg.label + ' postavljena');
+}
+
+function _rdRemoveVia() {
+  if (_rdMarkers.via) { map.removeLayer(_rdMarkers.via); _rdMarkers.via = null; }
+  _rdPoints.via = null;
+  _rdDem = null;
+  document.getElementById('rd-pt-via-add').style.display = '';
+  document.getElementById('rd-pt-via').style.display = 'none';
+  _rdRenderPoints();
+}
+
+function _rdShowViaSection() {
+  document.getElementById('rd-pt-via-add').style.display = 'none';
+  document.getElementById('rd-pt-via').style.display = 'block';
 }
 
 function _rdPaintPointInfo(which) {
+  const cfg = _RD_PT_CFG[which];
   const pt = _rdPoints[which];
-  const infoEl = document.getElementById(which === 'start' ? 'rd-pt-a-info' : 'rd-pt-b-info');
+  const infoEl = document.getElementById(cfg.infoId);
+  if (!infoEl) return; // via sekcija možda još nije otvorena u DOM-u
   if (!pt) { infoEl.textContent = 'Nije postavljena'; return; }
-  const latEl = document.getElementById('rd-' + (which === 'start' ? 'a' : 'b') + '-lat');
-  const lonEl = document.getElementById('rd-' + (which === 'start' ? 'a' : 'b') + '-lon');
+  const latEl = document.getElementById('rd-' + cfg.idPrefix + '-lat');
+  const lonEl = document.getElementById('rd-' + cfg.idPrefix + '-lon');
   latEl.value = pt.lat.toFixed(6);
   lonEl.value = pt.lon.toFixed(6);
   const mgi = typeof wgsToMGI === 'function' ? wgsToMGI(pt.lat, pt.lon) : null;
@@ -25009,6 +25043,7 @@ function _rdPaintPointInfo(which) {
 function _rdRenderPoints() {
   _rdPaintPointInfo('start');
   _rdPaintPointInfo('end');
+  if (_rdPoints.via) _rdPaintPointInfo('via');
   _rdUpdatePreviewAndButton();
 }
 
@@ -25024,7 +25059,7 @@ async function _rdUpdatePreviewAndButton() {
     prevEl.style.display = 'none';
     return;
   }
-  if (_rdDem && a.elev != null && b.elev != null) {
+  if (_rdDem && a.elev != null && b.elev != null && (!_rdPoints.via || _rdPoints.via.elev != null)) {
     // DEM već učitan za trenutne tačke (npr. poslije neuspjelog "Generiši" pa
     // ponovnog otvaranja modala) — nema potrebe za ponovnim preuzimanjem.
     _rdRenderPreviewStats(a, b);
@@ -25034,23 +25069,34 @@ async function _rdUpdatePreviewAndButton() {
   prevEl.style.display = 'grid';
   prevEl.innerHTML = '<span style="grid-column:1/3;color:#94a3b8;">⏳ Učitavam model terena…</span>';
   btn.disabled = true; btn.style.opacity = '0.5';
-  const bounds = L.latLngBounds([[a.lat, a.lon], [b.lat, b.lon]]).pad(0.3);
-  let dem = null;
+  const viaPt = _rdPoints.via;
+  const boundPts = [[a.lat, a.lon], [b.lat, b.lon]];
+  if (viaPt) boundPts.push([viaPt.lat, viaPt.lon]);
+  const bounds = L.latLngBounds(boundPts).pad(0.3);
+  let dem = null, fetchErr = null;
   try {
     dem = await _demForBounds(bounds);
-    if (!dem && navigator.onLine) dem = await _demFetchGrid(bounds, typeof _DEM_RES !== 'undefined' ? _DEM_RES : 30);
-  } catch(e) {}
+    if (!dem) {
+      // OS-S4: navigator.onLine zna lagati na terenu (vidi initAuth) — ne
+      // preskačemo fetch pretpostavkom da smo offline, nego pustimo mrežni
+      // poziv da SAM otkrije stvarno stanje (ima svoj 15s timeout).
+      dem = await _demFetchGrid(bounds, typeof _DEM_RES !== 'undefined' ? _DEM_RES : 30);
+    }
+  } catch(e) { fetchErr = e; }
   // Tačke su se možda promijenile dok je fetch bio u toku — ne prikazuj zastarjeli rezultat.
   if (_rdPoints.start !== a || _rdPoints.end !== b) return;
   _rdDem = dem;
   if (!dem) {
-    prevEl.innerHTML = '<span style="grid-column:1/3;color:#f87171;">⚠ Model terena nedostupan (offline i nije preuzet za ovu oblast). Preuzmite DEM u Vlake panelu (🏔 DEM offline) dok ste na mreži.</span>';
+    const reason = fetchErr ? fetchErr.message : 'nije preuzet za ovu oblast i nema mreže';
+    prevEl.innerHTML = `<span style="grid-column:1/3;color:#f87171;">⚠ Model terena nedostupan (${_escHtml ? _escHtml(reason) : reason}). Preuzmite DEM u Vlake panelu (🏔 DEM offline) dok ste na mreži, ili probajte ponovo ako ste online.</span>`;
     return;
   }
   a.elev = _demBilinearElev(dem, a.lat, a.lon);
   b.elev = _demBilinearElev(dem, b.lat, b.lon);
+  if (_rdPoints.via) _rdPoints.via.elev = _demBilinearElev(dem, _rdPoints.via.lat, _rdPoints.via.lon);
   _rdPaintPointInfo('start');
   _rdPaintPointInfo('end');
+  if (_rdPoints.via) _rdPaintPointInfo('via');
   _rdRenderPreviewStats(a, b);
   btn.disabled = false; btn.style.opacity = '1';
 }
@@ -25067,27 +25113,61 @@ function _rdRenderPreviewStats(a, b) {
   `;
 }
 
+// Budžet pretrage mora rasti sa udaljenošću — fiksnih 4000 iteracija je
+// dovoljno za kratku trasu (par stotina m) ali kod dužih trasa (posebno
+// preko složenijeg terena koje traži cik-cak zbog nagiba) pretraga zna
+// stati prije nego nađe rješenje koje stvarno postoji (lažni "nema trase").
+// To je (uz sporiju sortu koja je popravljena u rdFindRoute — vidi binarni
+// heap u road-design.js, ~8x brže po iteraciji) glavni uzrok prijavljenog
+// problema "dvije tačke su premalo" — korisnik je ručnim dodavanjem
+// međutačke (dijeljenjem duge trase na dvije kraće, svaka sa manjim
+// potrebnim budžetom) to zaobilazio; sad je i to formalno dostupno u alatu
+// (vidi _rdPoints.via), a budžet je ovdje realniji. Gornja granica (100000)
+// drži vrijeme pretrage razumnim na sporijem telefonu (~1-1.5s u najgorem
+// slučaju) — za ekstremne slučajeve (skoro nikakav bočni prostor za
+// cik-cak) i dalje je međutačka pouzdaniji put.
+function _rdIterBudget(straightDistM) {
+  return Math.max(6000, Math.min(100000, Math.round(straightDistM * 40)));
+}
+
+function _rdRouteLeg(dem, aLat, aLon, bLat, bLon, params) {
+  const straightDist = rdHaversine(aLat, aLon, bLat, bLon);
+  return rdFindRoute({
+    startLat: aLat, startLon: aLon, endLat: bLat, endLon: bLon,
+    sampleElev: (lat, lon) => _demBilinearElev(dem, lat, lon),
+    params,
+    maxIterations: _rdIterBudget(straightDist)
+  });
+}
+
 function _rdGenerate() {
-  const a = _rdPoints.start, b = _rdPoints.end;
+  const a = _rdPoints.start, b = _rdPoints.end, via = _rdPoints.via;
   if (!a || !b || !_rdDem || a.elev == null || b.elev == null) { showToast('⚠ Postavite obje tačke i sačekajte model terena'); return; }
+  if (via && via.elev == null) { showToast('⚠ Sačekajte da se učita visina međutačke'); return; }
   const params = _rdCollectParams();
   const dem = _rdDem;
   showToast('⏳ Tražim optimalnu trasu…');
   // setTimeout: pusti UI (toast) da se iscrta prije potencijalno duže sinhrone pretrage.
   setTimeout(() => {
-    const res = rdFindRoute({
-      startLat: a.lat, startLon: a.lon, endLat: b.lat, endLon: b.lon,
-      sampleElev: (lat, lon) => _demBilinearElev(dem, lat, lon),
-      params
-    });
-    if (!res.ok) {
-      showToast(res.reason === 'NO_ROUTE'
-        ? '⚠ Nije moguće naći trasu unutar zadanih parametara — probajte veći maksimalni nagib ili drugu tačku'
-        : '⚠ Model terena ne pokriva odabrane tačke');
-      return;
+    let path;
+    if (via) {
+      const leg1 = _rdRouteLeg(dem, a.lat, a.lon, via.lat, via.lon, params);
+      if (!leg1.ok) { showToast('⚠ Nije moguće naći trasu do međutačke — probajte veći maksimalni nagib ili pomjerite međutačku'); return; }
+      const leg2 = _rdRouteLeg(dem, via.lat, via.lon, b.lat, b.lon, params);
+      if (!leg2.ok) { showToast('⚠ Nije moguće naći trasu od međutačke do B — probajte veći maksimalni nagib ili pomjerite međutačku'); return; }
+      path = leg1.path.concat(leg2.path.slice(1)); // izbjegni duplu tačku na spoju
+    } else {
+      const res = _rdRouteLeg(dem, a.lat, a.lon, b.lat, b.lon, params);
+      if (!res.ok) {
+        showToast(res.reason === 'NO_ROUTE'
+          ? '⚠ Nije moguće naći trasu unutar zadanih parametara — probajte veći maksimalni nagib, dodajte međutačku, ili drugu tačku'
+          : '⚠ Model terena ne pokriva odabrane tačke');
+        return;
+      }
+      path = res.path;
     }
-    _rdResultPath = res.path;
-    _rdResultVal = rdValidateRoute(res.path, params);
+    _rdResultPath = path;
+    _rdResultVal = rdValidateRoute(path, params);
     _rdShowResult();
   }, 30);
 }
@@ -34081,6 +34161,26 @@ if (typeof AndroidDownload !== 'undefined') {
         <input id="rd-b-lat" type="number" step="0.00001" placeholder="lat" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
         <input id="rd-b-lon" type="number" step="0.00001" placeholder="lon" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
         <button onclick="_rdApplyManual('end')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:10px;cursor:pointer;">Primijeni</button>
+      </div>
+    </div>
+
+    <!-- MEĐUTAČKA (opciono) — korisno za duže/složenije trase gdje pretraga
+         u jednom skoku od A do B ne stigne naći rješenje na vrijeme; dijeli
+         trasu na A→M i M→B. -->
+    <button id="rd-pt-via-add" onclick="_rdShowViaSection()" style="width:100%;padding:6px;background:transparent;border:1px dashed #374151;border-radius:8px;color:#94a3b8;font-size:10.5px;cursor:pointer;margin-bottom:10px;">➕ Dodaj međutačku (za duže/složenije trase)</button>
+    <div id="rd-pt-via" style="display:none;background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:12px;font-weight:700;color:#fbbf24;">● M — međutačka</span>
+        <div style="display:flex;gap:4px;">
+          <button onclick="_rdPickPoint('via')" style="padding:4px 8px;background:#3a331e;border:1px solid #d97706;border-radius:6px;color:#fbbf24;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-pozicija"/></svg> Postavi na karti</button>
+          <button onclick="_rdRemoveVia()" style="padding:4px 6px;background:#374151;border:none;border-radius:6px;color:#94a3b8;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-zatvori"/></svg></button>
+        </div>
+      </div>
+      <div id="rd-pt-c-info" style="font-size:10.5px;color:#94a3b8;margin-top:4px;">Nije postavljena</div>
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <input id="rd-c-lat" type="number" step="0.00001" placeholder="lat" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
+        <input id="rd-c-lon" type="number" step="0.00001" placeholder="lon" style="width:0;flex:1;min-width:0;padding:5px 6px;background:#0b1220;border:1px solid #1e293b;border-radius:5px;color:#e2e8f0;font-size:11px;">
+        <button onclick="_rdApplyManual('via')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:10px;cursor:pointer;">Primijeni</button>
       </div>
     </div>
 
