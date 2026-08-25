@@ -185,6 +185,42 @@ test('Međutačka: A→M i M→B spojeni bez duple tačke, oba kraka poštuju ma
   assert.ok(!val.anyExceedsMax, 'spojena trasa preko međutačke ne smije prelaziti max nagib ni na jednom kraku');
 });
 
+// ── Checkbox "ne pravi serpentine" (params.bezSerpentina) ──────────────────
+test('bezSerpentina=true: na terenu koji NE zahtijeva serpentinu, trasa se ipak nađe normalno', () => {
+  const params = Object.assign({}, RD_DEFAULT_PARAMS, { bezSerpentina: true });
+  const sampleElev = (lat, lon) => 500 + Math.sin(lat*37)*0.3; // isti blagi teren kao TEST 1
+  const startLat = lat0, startLon = lon0;
+  const endLat = lat0 + 250/M_PER_DEG_LAT, endLon = lon0;
+
+  const res = rdFindRoute({ startLat, startLon, endLat, endLon, sampleElev, params });
+  assert.ok(res.ok, 'na blagom terenu bez potrebe za serpentinom, isključena opcija ne smije spriječiti trasu: ' + res.reason);
+  const val = rdValidateRoute(res.path, params);
+  assert.ok(!val.anyExceedsMax);
+});
+
+test('bezSerpentina=true: na terenu koji ZAHTIJEVA serpentinu (TEST 3 scenario), algoritam odustaje umjesto da je napravi', () => {
+  const params = Object.assign({}, RD_DEFAULT_PARAMS, { nagibMax: 8, nagibPreporuceni: 6, bezSerpentina: true });
+  // Identičan teren kao TEST 3 — direktna linija ima ~20% nagib, jedini način
+  // da SA serpentinama zadovolji max 8% je cik-cak istok-zapad. Sa isključenim
+  // serpentinama, TAJ cik-cak (koji zahtijeva zaokrete preko RD_MAX_TURN_NO_SERPENTINE)
+  // mora biti odbačen — algoritam mora vratiti ok:false, NE smije "prevariti"
+  // pravilo tako što će jednostavno napraviti serpentinu i dalje.
+  const climbGrade = 0.20;
+  const sampleElev = (lat, lon) => 400 + (lat - lat0)*M_PER_DEG_LAT*climbGrade;
+  const startLat = lat0, startLon = lon0;
+  const endLat = lat0 + 60/M_PER_DEG_LAT, endLon = lon0 + 5/M_PER_DEG_LAT/Math.cos(lat0*Math.PI/180);
+
+  const res = rdFindRoute({ startLat, startLon, endLat, endLon, sampleElev, params, maxIterations: 8000 });
+  assert.equal(res.ok, false, 'bez serpentina na terenu koje ih zahtijeva, mora vratiti ok:false, ne izmišljenu trasu');
+
+  // Kontrolna provjera — isti teren SA dozvoljenim serpentinama (default) i
+  // dalje mora naći trasu (TEST 3 iznad ovo već provjerava, ovdje se samo
+  // potvrđuje da je bezSerpentina STVARNI uzrok razlike, ne nešto drugo).
+  const paramsAllowed = Object.assign({}, params, { bezSerpentina: false });
+  const resAllowed = rdFindRoute({ startLat, startLon, endLat, endLon, sampleElev, params: paramsAllowed, maxIterations: 8000 });
+  assert.ok(resAllowed.ok, 'isti teren SA dozvoljenim serpentinama mora naći trasu — bezSerpentina je jedina razlika');
+});
+
 // ── "Pro level" zahtjev: nema cik-cak krivudanja na malom prostoru kad teren
 // to ne zahtijeva. Prije uvođenja turnPenalty + _rdSmoothPath, dinamička
 // pretraga je znala vraćati puno tačaka sa oštrim naizmjeničnim skretanjima

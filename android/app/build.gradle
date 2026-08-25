@@ -10,8 +10,8 @@ android {
         applicationId "ba.spd.uss.vlake"
         minSdk 24
         targetSdk 34
-        versionCode 255
-        versionName "3.95.3"
+        versionCode 256
+        versionName "3.96.0"
     }
 
     signingConfigs {

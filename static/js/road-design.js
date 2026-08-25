@@ -42,8 +42,17 @@ const RD_DEFAULT_PARAMS = {
   sirinaPuta: 4.5,           // m (kolovoz + bankine)
   duzinaMax: 8000,           // maksimalna dozvoljena dužina trase (m) — sigurnosna kočnica pretrage
   toleranNagib: 1,           // dozvoljena tolerancija nagiba (%) — rezervisano za Fazu 2 (blaže upozorenje)
-  minRazmakSerpentina: 40    // m — rezervisano za Fazu 2 (serpentine)
+  minRazmakSerpentina: 40,   // m — rezervisano za Fazu 2 (pune geometrijske serpentine)
+  bezSerpentina: false       // true = zabrani oštre zaokrete (skoro-obrtanje smjera) — vidi RD_MAX_TURN_NO_SERPENTINE
 };
+
+// Prag (°) preko kojeg se zaokret u pretrazi smatra "serpentinom" (skoro-
+// obrtanje smjera radi savladavanja nagiba na malom prostoru), a ne običnim
+// skretanjem oko prepreke/konture. Kad je params.bezSerpentina uključeno,
+// ovakvi kandidati se TVRDO odbacuju (isti princip kao hard-cutoff nagiba) —
+// ako terenu ipak treba serpentina da zadovolji max nagib, pretraga vraća
+// ok:false umjesto da je ipak napravi.
+const RD_MAX_TURN_NO_SERPENTINE = 100;
 
 function rdLoadParams() {
   try {
@@ -239,24 +248,30 @@ function rdFindRoute(opts) {
       const slopePct = Math.abs(candElev - node.elev)/L*100;
       if (slopePct > nagibMax) continue; // TVRDO odbačen kandidat — nikad se ne prelazi max nagib
 
+      // Ugao skretanja u odnosu na ULAZNI pravac u ovaj čvor (ne u odnosu na
+      // pravac ka cilju) — koristi se i za turnPenalty ispod i, ako je
+      // bezSerpentina uključeno, kao TVRDI cutoff (isto mjesto gdje se
+      // odbacuje nagib) koji sprječava rutu da ikad napravi serpentinu.
+      let turnDiff = 0;
+      if (node.azIn != null) {
+        turnDiff = Math.abs(az - node.azIn);
+        if (turnDiff > 180) turnDiff = 360 - turnDiff;
+      }
+      if (params.bezSerpentina && turnDiff > RD_MAX_TURN_NO_SERPENTINE) continue; // TVRDO odbačen — serpentina zabranjena
+
       let penalty = 1;
       if (slopePct > params.nagibPreporuceni*1.5) penalty = 3.5;
       else if (slopePct > params.nagibPreporuceni) penalty = 1.8;
       const angPenalty = 1 + Math.abs(off)/400; // blaga kazna za skretanje, da ne luta bez potrebe
 
-      // Kazna za promjenu smjera U ODNOSU NA PRETHODNI KORAK (ne u odnosu na
-      // pravac ka cilju) — bez ovoga svaki čvor bira ugao nezavisno prema
-      // trenutnom azimutu-ka-cilju, pa dva uzastopna koraka znaju blago
-      // skrenuti lijevo-desno-lijevo (cik-cak na malom prostoru) iako je
-      // ukupan napredak isti. Kvadratna kazna — blag zaokret je skoro
-      // besplatan, oštar zaokret/povratak unazad je skup — favorizuje
-      // "pro" izgled (glatke, produžene dionice) umjesto isprekidane linije.
-      let turnPenalty = 1;
-      if (node.azIn != null) {
-        let turnDiff = Math.abs(az - node.azIn);
-        if (turnDiff > 180) turnDiff = 360 - turnDiff;
-        turnPenalty = 1 + (turnDiff/180)*(turnDiff/180)*3;
-      }
+      // Kazna za promjenu smjera U ODNOSU NA PRETHODNI KORAK — bez ovoga
+      // svaki čvor bira ugao nezavisno prema trenutnom azimutu-ka-cilju, pa
+      // dva uzastopna koraka znaju blago skrenuti lijevo-desno-lijevo
+      // (cik-cak na malom prostoru) iako je ukupan napredak isti. Kvadratna
+      // kazna — blag zaokret je skoro besplatan, oštar zaokret/povratak
+      // unazad je skup — favorizuje "pro" izgled (glatke, produžene dionice)
+      // umjesto isprekidane linije.
+      const turnPenalty = node.azIn != null ? 1 + (turnDiff/180)*(turnDiff/180)*3 : 1;
 
       const candKey = keyFor(cand.lat, cand.lon);
       if (closed.has(candKey)) continue;
