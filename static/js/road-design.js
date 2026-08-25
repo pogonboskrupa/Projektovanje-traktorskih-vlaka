@@ -187,8 +187,8 @@ function rdFindRoute(opts) {
   };
 
   const startKey = keyFor(startLat, startLon);
-  const nodes = new Map();  // key -> {lat,lon,elev,parentKey,g}
-  nodes.set(startKey, { lat: startLat, lon: startLon, elev: elevStart, parentKey: null, g: 0 });
+  const nodes = new Map();  // key -> {lat,lon,elev,parentKey,g,azIn}
+  nodes.set(startKey, { lat: startLat, lon: startLon, elev: elevStart, parentKey: null, g: 0, azIn: null });
 
   const closed = new Set();
   const open = [];
@@ -244,13 +244,27 @@ function rdFindRoute(opts) {
       else if (slopePct > params.nagibPreporuceni) penalty = 1.8;
       const angPenalty = 1 + Math.abs(off)/400; // blaga kazna za skretanje, da ne luta bez potrebe
 
+      // Kazna za promjenu smjera U ODNOSU NA PRETHODNI KORAK (ne u odnosu na
+      // pravac ka cilju) — bez ovoga svaki čvor bira ugao nezavisno prema
+      // trenutnom azimutu-ka-cilju, pa dva uzastopna koraka znaju blago
+      // skrenuti lijevo-desno-lijevo (cik-cak na malom prostoru) iako je
+      // ukupan napredak isti. Kvadratna kazna — blag zaokret je skoro
+      // besplatan, oštar zaokret/povratak unazad je skup — favorizuje
+      // "pro" izgled (glatke, produžene dionice) umjesto isprekidane linije.
+      let turnPenalty = 1;
+      if (node.azIn != null) {
+        let turnDiff = Math.abs(az - node.azIn);
+        if (turnDiff > 180) turnDiff = 360 - turnDiff;
+        turnPenalty = 1 + (turnDiff/180)*(turnDiff/180)*3;
+      }
+
       const candKey = keyFor(cand.lat, cand.lon);
       if (closed.has(candKey)) continue;
-      const tentG = node.g + L*penalty*angPenalty;
+      const tentG = node.g + L*penalty*angPenalty*turnPenalty;
 
       const existing = nodes.get(candKey);
       if (!existing || tentG < existing.g) {
-        nodes.set(candKey, { lat: cand.lat, lon: cand.lon, elev: candElev, parentKey: cur.key, g: tentG });
+        nodes.set(candKey, { lat: cand.lat, lon: cand.lon, elev: candElev, parentKey: cur.key, g: tentG, azIn: az });
         const f = tentG + rdHaversine(cand.lat, cand.lon, endLat, endLon);
         _rdHeapPush(open, { f, key: candKey });
       }
@@ -272,7 +286,49 @@ function rdFindRoute(opts) {
   if (rdHaversine(last.lat, last.lon, endLat, endLon) > 0.5) {
     path.push({ lat: endLat, lon: endLon, elev: elevEnd });
   }
-  return { ok: true, reason: null, path };
+  return { ok: true, reason: null, path: _rdSmoothPath(path, sampleElev, nagibMax) };
+}
+
+// ─── Pro-level zaglađivanje trase (string-pulling / line-of-sight shortcut) ──
+// Pretraga bira ugao svakog koraka dinamički (šestarski princip), pa i uz
+// kaznu za zaokret (turnPenalty gore) zna ostaviti sitno cik-cak na malom
+// prostoru gdje bi prava linija između dvije NE-susjedne tačke trase bila
+// potpuno prihvatljiva. Ovaj prolaz to uklanja: za svaku tačku traži
+// NAJDALJU sljedeću tačku do koje prava linija — provjerena stvarnom DEM
+// elevacijom na svakih ~10m, ne samo na krajevima — nigdje ne prelazi
+// nagibMax, i preskače sve tačke između. Nikad ne može proizvesti segment
+// preko max nagiba: svaka kandidat-linija se provjerava punom rezolucijom
+// prije prihvatanja (isti hard-cutoff princip kao u samoj pretrazi).
+function _rdLineWithinGrade(a, b, sampleElev, nagibMax) {
+  const dist = rdHaversine(a.lat, a.lon, b.lat, b.lon);
+  if (dist < 0.5) return true;
+  const az = rdAzimuth(a.lat, a.lon, b.lat, b.lon);
+  const checkStep = 10; // m — rezolucija provjere nagiba duž kandidat-linije
+  const n = Math.max(1, Math.round(dist/checkStep));
+  let prevElev = a.elev, prevD = 0;
+  for (let s = 1; s <= n; s++) {
+    const d = dist*s/n;
+    const pt = rdDestPoint(a.lat, a.lon, az, d);
+    const e = s === n ? b.elev : sampleElev(pt.lat, pt.lon);
+    if (e == null) return false;
+    const segD = d - prevD;
+    if (segD > 0.01 && Math.abs(e - prevElev)/segD*100 > nagibMax) return false;
+    prevElev = e; prevD = d;
+  }
+  return true;
+}
+
+function _rdSmoothPath(path, sampleElev, nagibMax) {
+  if (path.length < 3) return path;
+  const out = [path[0]];
+  let i = 0;
+  while (i < path.length - 1) {
+    let j = path.length - 1;
+    while (j > i + 1 && !_rdLineWithinGrade(path[i], path[j], sampleElev, nagibMax)) j--;
+    out.push(path[j]);
+    i = j;
+  }
+  return out;
 }
 
 // ─── Validacija generisane trase (tačka 13 — osnovna verzija za Fazu 1) ───

@@ -185,5 +185,35 @@ test('Međutačka: A→M i M→B spojeni bez duple tačke, oba kraka poštuju ma
   assert.ok(!val.anyExceedsMax, 'spojena trasa preko međutačke ne smije prelaziti max nagib ni na jednom kraku');
 });
 
+// ── "Pro level" zahtjev: nema cik-cak krivudanja na malom prostoru kad teren
+// to ne zahtijeva. Prije uvođenja turnPenalty + _rdSmoothPath, dinamička
+// pretraga je znala vraćati puno tačaka sa oštrim naizmjeničnim skretanjima
+// čak i na skoro ravnom terenu (svaki čvor bira ugao nezavisno prema
+// trenutnom azimutu-ka-cilju). Provjerava se DIREKTNO: (1) nijedan zaokret
+// između dva uzastopna segmenta ne smije biti oštriji od razumne granice na
+// terenu koji ne postavlja nikakvu prepreku, (2) broj tačaka trase mora biti
+// blizu minimuma (skoro prava linija), ne desetine sitno izlomljenih koraka. ──
+test('Pro level: skoro ravan teren bez prepreka → nema oštrih naizmjeničnih zaokreta, trasa skoro prava linija', () => {
+  const params = Object.assign({}, RD_DEFAULT_PARAMS);
+  const sampleElev = (lat, lon) => 500 + Math.sin(lat*37)*0.3; // skoro ravno, sitan šum (isto kao TEST 1)
+  const startLat = lat0, startLon = lon0;
+  const endLat = lat0 + 250/M_PER_DEG_LAT, endLon = lon0;
+
+  const res = rdFindRoute({ startLat, startLon, endLat, endLon, sampleElev, params });
+  assert.ok(res.ok, 'trasa mora biti pronađena: ' + res.reason);
+
+  // Nema razloga za krivudanje na ravnom terenu bez prepreka — očekuje se
+  // gotovo minimalan broj tačaka (idealno samo A i B).
+  assert.ok(res.path.length <= 4, `predugačka izlomljena trasa na ravnom terenu (${res.path.length} tačaka)`);
+
+  for (let i = 1; i < res.path.length - 1; i++) {
+    const az1 = rdAzimuth(res.path[i-1].lat, res.path[i-1].lon, res.path[i].lat, res.path[i].lon);
+    const az2 = rdAzimuth(res.path[i].lat, res.path[i].lon, res.path[i+1].lat, res.path[i+1].lon);
+    let turn = Math.abs(az2 - az1);
+    if (turn > 180) turn = 360 - turn;
+    assert.ok(turn < 30, `oštar cik-cak zaokret na tački ${i}: ${turn.toFixed(0)}° na terenu bez prepreka`);
+  }
+});
+
 console.log(`\n${_pass} prošlo, ${_fail} palo`);
 process.exit(_fail > 0 ? 1 : 0);
