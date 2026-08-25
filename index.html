@@ -4683,7 +4683,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.94.5';
+const APP_VER = 'v3.94.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -11422,6 +11422,21 @@ async function _getTerrariumTile(z, x, y) {
     img.src = URL.createObjectURL(blob);
   });
 }
+// Dekoduje jednu 256x256 Terrarium pločicu (već preuzetu/keširanu preko
+// _getTerrariumTile) u Float32Array elevacija (elev = R*256 + G + B/256 -
+// 32768). Izvučeno iz _makeDemCanvasLayer/DemSlopeClass (bila dva identična
+// bloka) da bi ga i _demFetchGridTerrarium mogao koristiti bez treće kopije.
+function _terrariumDecodeTile(bitmapOrImg) {
+  const tmp = document.createElement('canvas');
+  tmp.width = tmp.height = 256;
+  const tc = tmp.getContext('2d', { willReadFrequently: true });
+  tc.drawImage(bitmapOrImg, 0, 0, 256, 256);
+  const raw = tc.getImageData(0, 0, 256, 256).data;
+  const elev = new Float32Array(256 * 256);
+  for (let i = 0; i < 256 * 256; i++)
+    elev[i] = raw[i*4]*256 + raw[i*4+1] + raw[i*4+2]/256 - 32768;
+  return elev;
+}
 function _makeDemCanvasLayer(mode) {
   return L.GridLayer.extend({
     createTile(coords, done) {
@@ -11429,15 +11444,7 @@ function _makeDemCanvasLayer(mode) {
       canvas.width = canvas.height = 256;
       _getTerrariumTile(coords.z, coords.x, coords.y).then(src => {
         if (!src) { done(null, canvas); return; }
-        const tmp = document.createElement('canvas');
-        tmp.width = tmp.height = 256;
-        const tc = tmp.getContext('2d', { willReadFrequently: true });
-        tc.drawImage(src, 0, 0, 256, 256);
-        const raw = tc.getImageData(0, 0, 256, 256).data;
-        // Decode terrarium: elev = R*256 + G + B/256 - 32768
-        const elev = new Float32Array(256*256);
-        for (let i=0; i<256*256; i++)
-          elev[i] = raw[i*4]*256 + raw[i*4+1] + raw[i*4+2]/256 - 32768;
+        const elev = _terrariumDecodeTile(src);
         const ctx = canvas.getContext('2d');
         const out = ctx.createImageData(256, 256);
         const od  = out.data;
@@ -11476,6 +11483,15 @@ function _tile2lat(y, z) {
   const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
   return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
+function _tile2lon(x, z) { return x / Math.pow(2, z) * 360 - 180; }
+// Web Mercator lon/lat → FRAKCIONI tile x/y (isti obrazac kao _PREWARM_LL2T,
+// ovdje samostalno da _demFetchGridTerrarium ne zavisi od tog nepovezanog
+// prewarm mehanizma; fractional — Math.floor() daje cijeli tile broj).
+function _termLon2x(lon, z) { return (lon + 180) / 360 * Math.pow(2, z); }
+function _termLat2y(lat, z) {
+  const r = lat * Math.PI / 180;
+  return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z);
+}
 function _slopeColor(pct) {
   if (pct < 30) return [0, 0, 0, 0];
   const t = Math.min(1, (pct - 30) / 80); // 0 pri 30%, 1 pri 110%+
@@ -11492,14 +11508,7 @@ const DemSlopeClass = L.GridLayer.extend({
     canvas.width = canvas.height = 256;
     _getTerrariumTile(coords.z, coords.x, coords.y).then(src => {
       if (!src) { done(null, canvas); return; }
-      const tmp = document.createElement('canvas');
-      tmp.width = tmp.height = 256;
-      const tc = tmp.getContext('2d', { willReadFrequently: true });
-      tc.drawImage(src, 0, 0, 256, 256);
-      const raw = tc.getImageData(0, 0, 256, 256).data;
-      const elev = new Float32Array(256 * 256);
-      for (let i = 0; i < 256 * 256; i++)
-        elev[i] = raw[i*4]*256 + raw[i*4+1] + raw[i*4+2]/256 - 32768;
+      const elev = _terrariumDecodeTile(src);
       // Geografska veličina piksela u metrima na ovoj geografskoj širini
       const lat  = _tile2lat(coords.y + 0.5, coords.z);
       const pixM = Math.cos(lat * Math.PI / 180) * 156543.03392 / Math.pow(2, coords.z);
@@ -24562,7 +24571,24 @@ const _DEM_RES = 60; // grid rezolucija u metrima
 const _DEM_IDB_PREFIX = 'dem:';
 let _demCache = {}; // key → { grid, meta }
 
+// v3.94.6: Open-Meteo je iscrpljen kao osnovni izvor — kroz tri kruga
+// popravki (v3.94.3-5) potvrđeno je da taj besplatni/bez-ključa API ima I
+// tvrd limit tačaka po zahtjevu (100) I nizak limit zahtjeva u minuti, i da
+// se to dešava i za relativno skromne gridove. Terrarium DEM pločice
+// (elevation-tiles-prod) su STATIČKI tile servis kao obične mapske pločice
+// (isti kao za nagib/ekspozicija/hilšejd slojeve, već keširane u sw.js) — bez
+// minutnog/po-zahtjevu limita. Open-Meteo ostaje kao FALLBACK (sa retry-om
+// na rate limit) samo ako Terrarium pločice nisu dostupne za traženu oblast.
 async function _demFetchGrid(bounds, res) {
+  try {
+    return await _demFetchGridTerrarium(bounds, res);
+  } catch(err) {
+    console.warn('Terrarium DEM neuspio, prelazim na Open-Meteo:', err.message);
+    return _demFetchGridOpenMeteo(bounds, res);
+  }
+}
+
+function _demGridBoundsAndStep(bounds, res) {
   const s = bounds.getSouth(), n = bounds.getNorth();
   const w = bounds.getWest(), e = bounds.getEast();
   const degPerM = 1 / 111320;
@@ -24570,16 +24596,90 @@ async function _demFetchGrid(bounds, res) {
   let rows = Math.ceil((n - s) / step);
   let cols = Math.ceil((e - w) / step);
   if (rows > 120 || cols > 120) {
-    // Ranije: Math.min(120, ...) je TIHO odsijecao sjeverni/istočni rub
-    // grida kad bi tražena oblast prešla 120x120 ćelija (npr. duža trasa u
-    // "Projektovanje šumskog puta" — DEM je originalno rađen za manje
-    // odjele). Umjesto da izgubi pokrivenost, sad grubi rezoluciju da CIJELA
-    // tražena oblast stane u 120x120 (manje tačno, ali potpuno).
+    // Math.min(120, ...) bi TIHO odsjekao sjeverni/istočni rub grida kad bi
+    // tražena oblast prešla 120x120 ćelija (npr. duža trasa u "Projektovanje
+    // šumskog puta" — DEM je originalno rađen za manje odjele). Umjesto da
+    // izgubi pokrivenost, rezolucija se grubi da CIJELA tražena oblast stane
+    // u 120x120 (manje tačno, ali potpuno).
     const scale = Math.max(rows / 120, cols / 120);
     step = step * scale;
     rows = Math.ceil((n - s) / step);
     cols = Math.ceil((e - w) / step);
   }
+  return { s, n, w, e, step, rows, cols };
+}
+
+// Elevacioni grid preko Terrarium DEM pločica — vidi napomenu iznad
+// _demFetchGrid. Izlazni oblik je IDENTIČAN starom Open-Meteo pristupu
+// ({grid,rows,cols,south,west,step,north,east}) — _demBilinearElev i sve
+// što ga koristi (rdFindRoute, _astarRoute, profil...) se ne mijenja.
+async function _demFetchGridTerrarium(bounds, res) {
+  const { s, n, w, e, step, rows, cols } = _demGridBoundsAndStep(bounds, res);
+  const centerLat = (s + n) / 2;
+
+  let z = Math.round(Math.log2(156543.03392 * Math.cos(centerLat * Math.PI/180) / res));
+  z = Math.max(8, Math.min(14, z));
+
+  const MAX_TILES_SIDE = 10;
+  let txMin, txMax, tyMin, tyMax;
+  for (;;) {
+    txMin = Math.floor(_termLon2x(w, z));
+    txMax = Math.floor(_termLon2x(e, z));
+    tyMin = Math.floor(_termLat2y(n, z)); // sjever = manji y u Web Mercator
+    tyMax = Math.floor(_termLat2y(s, z));
+    if ((txMax - txMin + 1) <= MAX_TILES_SIDE && (tyMax - tyMin + 1) <= MAX_TILES_SIDE) break;
+    z--;
+    if (z < 4) throw new Error('Oblast je prevelika za Terrarium pločice');
+  }
+
+  // Preuzmi + dekoduj sve potrebne pločice PARALELNO — bez rate limita nema
+  // razloga za sekvencijalno čekanje kao kod Open-Meteo.
+  const tileKeys = [];
+  const tilePromises = [];
+  for (let ty = tyMin; ty <= tyMax; ty++) {
+    for (let tx = txMin; tx <= txMax; tx++) {
+      tileKeys.push(tx + ':' + ty);
+      tilePromises.push(_getTerrariumTile(z, tx, ty));
+    }
+  }
+  const tileImgs = await Promise.all(tilePromises);
+  const tileElevs = new Map(); // "tx:ty" -> Float32Array(256*256) | null
+  tileImgs.forEach((img, i) => tileElevs.set(tileKeys[i], img ? _terrariumDecodeTile(img) : null));
+  if (![...tileElevs.values()].some(v => v !== null)) {
+    throw new Error('Terrarium DEM pločice nedostupne za ovu oblast');
+  }
+
+  // Resample iz Mercator pločica u ekvirektangularni izlazni grid (uniform
+  // lat/lon korak — isto što _demBilinearElev očekuje).
+  const grid = new Float32Array(rows * cols);
+  for (let r = 0; r < rows; r++) {
+    const lat = s + r * step;
+    const fy = _termLat2y(lat, z);
+    const ty = Math.max(tyMin, Math.min(tyMax, Math.floor(fy)));
+    const py = Math.max(0, Math.min(255, Math.round((fy - ty) * 256)));
+    for (let c = 0; c < cols; c++) {
+      const lon = w + c * step;
+      const fx = _termLon2x(lon, z);
+      const tx = Math.max(txMin, Math.min(txMax, Math.floor(fx)));
+      const px = Math.max(0, Math.min(255, Math.round((fx - tx) * 256)));
+      const tileElev = tileElevs.get(tx + ':' + ty);
+      grid[r * cols + c] = tileElev ? tileElev[py * 256 + px] : NaN;
+    }
+  }
+  if (grid.some(v => Number.isNaN(v))) {
+    // Rupa u Terrarium pokrivenosti za dio tražene oblasti — radije prijavi
+    // grešku (pa pozivalac padne na Open-Meteo fallback) nego vrati grid s
+    // rupama koje bi tiho pokvarile A* pretragu.
+    throw new Error('Nepotpuna Terrarium pokrivenost za ovu oblast');
+  }
+
+  return { grid, rows, cols, south: s, west: w, step, north: n, east: e };
+}
+
+// Fallback na Open-Meteo (samo kad Terrarium ne uspije) — isti pristup kao
+// prije, sa retry-with-backoff na "rate limit" grešku (v3.94.3-5 uzrok).
+async function _demFetchGridOpenMeteo(bounds, res) {
+  const { s, n, w, e, step, rows, cols } = _demGridBoundsAndStep(bounds, res);
   const lats = [], lons = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -24587,29 +24687,33 @@ async function _demFetchGrid(bounds, res) {
       lons.push((w + c * step).toFixed(5));
     }
   }
-  // v3.94.5: ISPOSTAVILO SE DA POSTOJE OBA limita, potvrđeno stvarnim
-  // porukama servera u dva koraka: (1) "Latitude and longitude must not
-  // exceed 100 coordinates" — TVRD limit tačaka PO ZAHTJEVU, batchSize
-  // NIKAD ne smije preći 100 (v3.94.4 ga je pogrešno digao na 250 zbog
-  // pogrešnog zaključka da je taj limit izmišljen — nije, samo je POSTOJAO
-  // I DRUGI limit uz njega). (2) "Minutely API request limit exceeded" —
-  // limit broja zahtjeva U MINUTI, otud pauza između zahtjeva ispod i niža
-  // _DEM_RES (manje tačaka ukupno = manje zahtjeva čak i uz batchSize 100).
+  // Open-Meteo elevation API: max 100 koordinata PO ZAHTJEVU (tvrd limit,
+  // potvrđeno porukom servera) I max broj zahtjeva U MINUTI (nezavisan
+  // limit, isto potvrđeno).
   const batchSize = 100;
   const elevArr = new Float32Array(rows * cols);
   for (let i = 0; i < lats.length; i += batchSize) {
     if (i > 0) await new Promise(res => setTimeout(res, 200));
     const bLats = lats.slice(i, i + batchSize).join(',');
     const bLons = lons.slice(i, i + batchSize).join(',');
-    let r, d;
-    try {
-      const sig = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(15000) : undefined;
-      r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${bLats}&longitude=${bLons}`, sig ? {signal:sig} : {});
-    } catch(err) {
-      throw new Error('Mrežna greška — provjerite konekciju');
+    let d;
+    for (let attempt = 0; ; attempt++) {
+      let r;
+      try {
+        const sig = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(15000) : undefined;
+        r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${bLats}&longitude=${bLons}`, sig ? {signal:sig} : {});
+      } catch(err) {
+        throw new Error('Mrežna greška — provjerite konekciju');
+      }
+      try { d = await r.json(); } catch { throw new Error('Neispravan odgovor servera'); }
+      if (Array.isArray(d.elevation)) break;
+      const isRateLimit = /minut|limit/i.test(d.reason || '');
+      if (isRateLimit && attempt < 2) {
+        await new Promise(res => setTimeout(res, attempt === 0 ? 3000 : 8000));
+        continue;
+      }
+      throw new Error('Server nije vratio podatke o terenu' + (d.reason ? (': ' + d.reason) : ''));
     }
-    try { d = await r.json(); } catch { throw new Error('Neispravan odgovor servera'); }
-    if (!Array.isArray(d.elevation)) throw new Error('Server nije vratio podatke o terenu' + (d.reason ? (': ' + d.reason) : ''));
     for (let j = 0; j < d.elevation.length; j++) elevArr[i + j] = d.elevation[j];
   }
   return { grid: elevArr, rows, cols, south: s, west: w, step, north: n, east: e };
