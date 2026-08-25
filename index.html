@@ -4683,7 +4683,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.94.6';
+const APP_VER = 'v3.95.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -25056,9 +25056,10 @@ function _routeToVlaka() {
 // (_demForBounds/_demFetchGrid/_demBilinearElev — isti izvor kao "Predloži
 // trasu"/analiza nagiba/profil) predloži JEDNU trasu vođenu šestarskim
 // korakom koja NIKAD ne prelazi maksimalni dozvoljeni nagib (rdFindRoute).
-// Rezultat postaje obična vlaka (_rdCreateVlaka, isti obrazac kao
-// _routeToVlaka) — besplatno nasljeđuje postojeći ručni editing
-// (buildEditHandles) i uzdužni profil (_renderElevProfile).
+// Rezultat se čuva kao ZASEBNA "sačuvana trasa" unutar ovog alata (_rdSaveRoute,
+// localStorage tvlake_sumski_putevi) — namjerno NE kao "vlaka" niti vezano za
+// aktivni projekat, jer projektovanje puta nema veze sa tim konceptom. Uzdužni
+// profil i dalje radi nad rezultatom prije čuvanja (_renderElevProfile).
 let _rdPoints = { start: null, end: null, via: null };  // {lat,lon,elev|null}
 let _rdMarkers = { start: null, end: null, via: null }; // L.circleMarker
 let _rdDem = null;
@@ -25087,6 +25088,7 @@ function showRoadDesignModal() {
   document.getElementById('rd-pt-via-add').style.display = _rdPoints.via ? 'none' : '';
   document.getElementById('rd-pt-via').style.display = _rdPoints.via ? 'block' : 'none';
   _rdRenderPoints();
+  _rdRenderSavedRoutes();
 }
 
 function closeRoadDesignModal() {
@@ -25336,7 +25338,7 @@ function _rdShowResult() {
     ${badgeHtml}
     <div style="display:flex;gap:6px;margin-top:8px;">
       <button onclick="_rdShowProfile()" style="flex:1;padding:8px;background:#1d4ed8;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-statistika"/></svg> Uzdužni profil</button>
-      <button onclick="_rdCreateVlaka()" style="flex:1;padding:8px;background:#059669;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-potvrdi"/></svg> Kreiraj vlaku</button>
+      <button onclick="_rdSaveRoute()" style="flex:1;padding:8px;background:#059669;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-sacuvaj"/></svg> Sačuvaj rutu</button>
     </div>
   `;
   showToast(`✓ Trasa: ${fmtL(v.totalDist)}, max nagib ${v.maxSlopePct.toFixed(1)}%`);
@@ -25350,25 +25352,103 @@ function _rdShowProfile() {
   _renderElevProfile('Projektovana trasa (A→B)', pts, alts, 'DEM model terena');
 }
 
-// Pretvori predloženu trasu u vlaku (isti obrazac kao _routeToVlaka) — time
-// korisnik odmah dobija postojeći ručni editing (buildEditHandles) i sve
-// ostale alate iz Vlake panela. al=stvarna DEM visina (bolje od _routeToVlaka
-// koji za crtane/predložene trase stavlja al:0 jer ih ovdje već imamo).
-function _rdCreateVlaka() {
-  if (!_rdResultPath) return;
-  if (!_aktivniProjektId && !confirm('Nema aktivnog projekta. Kreirati vlaku bez projekta?')) return;
+// Projektovanje šumskog puta NEMA veze sa "vlaka"/"projekat" konceptom iz
+// Vlake alata — put se ne kreira kao vlaka unutar (eventualno nepostojećeg)
+// projekta, nego se vodi kao ZASEBAN spisak unutar same opcije "Projektovanje
+// šumskog puta" (lokalno, localStorage, isti obrazac kao _DOZ_TREES_DATA_KEY
+// i sl.). Time nestaje i pitanje "Nema aktivnog projekta..." koje je zbunjivalo
+// korisnika — put nikad nije ni trebao zavisiti od projekta vlaka.
+const _RD_ROUTES_KEY = 'tvlake_sumski_putevi';
+let _rdShownRouteLayers = {}; // id -> L.polyline (samo za trenutno prikazane na karti)
 
-  const nm = 'Šumski put ' + (vlake.length + 1);
-  const pts = _rdResultPath.map(p => ({ la: p.lat, lo: p.lon, al: p.elev }));
-  const col = PAL[vlake.length % PAL.length];
-  const poly = L.polyline(pts.map(p => [p.la, p.lo]), { color: col, weight: 3 });
-  poly.addTo(map);
-  vlake.push({ nm, br: vlake.length, kr: 0, color: col, lager: '', pts, poly, wpts: [], sbId: null, projektId: _aktivniProjektId || null, projektantIme: typeof getIme === 'function' ? getIme() : '', labelMk: null, lagerMk: null, extraLabels: [], updatedAt: new Date().toISOString() });
-  rndList();
-  if (_rdResultLayer) { map.removeLayer(_rdResultLayer); _rdResultLayer = null; }
-  closeRoadDesignModal();
-  showToast('✅ Vlaka kreirana: ' + nm);
-  switchTab('vlake');
+function _rdGetSavedRoutes() {
+  try { return JSON.parse(localStorage.getItem(_RD_ROUTES_KEY) || '[]'); }
+  catch { return []; }
+}
+function _rdSetSavedRoutes(list) {
+  try { localStorage.setItem(_RD_ROUTES_KEY, JSON.stringify(list)); } catch(e) {}
+}
+
+// Sačuvaj predloženu trasu u zaseban spisak "Sačuvane trase" (unutar ovog
+// modala) — al=stvarna DEM visina.
+function _rdSaveRoute() {
+  if (!_rdResultPath || !_rdResultVal) return;
+  const routes = _rdGetSavedRoutes();
+  const nm = 'Šumski put ' + (routes.length + 1);
+  routes.push({
+    id: typeof _genUUID === 'function' ? _genUUID() : ('rd' + Date.now()),
+    nm,
+    pts: _rdResultPath.map(p => ({ la: p.lat, lo: p.lon, al: p.elev })),
+    totalDist: _rdResultVal.totalDist,
+    maxSlopePct: _rdResultVal.maxSlopePct,
+    avgSlopePct: _rdResultVal.avgSlopePct,
+    createdAt: new Date().toISOString()
+  });
+  _rdSetSavedRoutes(routes);
+  _rdRenderSavedRoutes();
+  showToast('✅ Ruta sačuvana: ' + nm);
+}
+
+function _rdRenderSavedRoutes() {
+  const wrap = document.getElementById('rd-saved-routes-list');
+  if (!wrap) return;
+  const routes = _rdGetSavedRoutes();
+  const countEl = document.getElementById('rd-saved-routes-count');
+  if (countEl) countEl.textContent = routes.length ? String(routes.length) : '';
+  if (!routes.length) {
+    wrap.innerHTML = '<div style="font-size:10.5px;color:#64748b;padding:4px 0;">Nema sačuvanih trasa.</div>';
+    return;
+  }
+  wrap.innerHTML = routes.map(r => {
+    const shown = !!_rdShownRouteLayers[r.id];
+    return `
+      <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:6px 8px;margin-bottom:5px;font-size:10.5px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+          <span style="color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.nm)}</span>
+          <span style="color:#94a3b8;white-space:nowrap;">${fmtL(r.totalDist)} · maks ${r.maxSlopePct.toFixed(1)}%</span>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:5px;">
+          <button onclick="_rdToggleSavedRouteOnMap('${r.id}')" style="flex:1;padding:5px;background:${shown ? '#7c3aed' : '#374151'};border:none;border-radius:5px;color:#fff;font-size:10px;cursor:pointer;">${shown ? '🗺 Sakrij' : '🗺 Prikaži'}</button>
+          <button onclick="_rdRenameSavedRoute('${r.id}')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-crtaj"/></svg></button>
+          <button onclick="_rdDeleteSavedRoute('${r.id}')" style="padding:5px 8px;background:#3a1e1e;border:none;border-radius:5px;color:#f87171;font-size:10px;cursor:pointer;"><svg class="ic"><use href="#ic-obrisi"/></svg></button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function _rdToggleSavedRouteOnMap(id) {
+  if (_rdShownRouteLayers[id]) {
+    map.removeLayer(_rdShownRouteLayers[id]);
+    delete _rdShownRouteLayers[id];
+    _rdRenderSavedRoutes();
+    return;
+  }
+  const r = _rdGetSavedRoutes().find(x => x.id === id);
+  if (!r) return;
+  const poly = L.polyline(r.pts.map(p => [p.la, p.lo]), { color: '#a78bfa', weight: 4, dashArray: '8,6' }).addTo(map);
+  poly.bindPopup(_escHtml(r.nm));
+  _rdShownRouteLayers[id] = poly;
+  map.fitBounds(poly.getBounds(), { padding: [40, 40] });
+  _rdRenderSavedRoutes();
+}
+
+async function _rdRenameSavedRoute(id) {
+  const routes = _rdGetSavedRoutes();
+  const r = routes.find(x => x.id === id);
+  if (!r) return;
+  const nw = await _dlgPrompt('Novi naziv trase:', r.nm, { title: 'Preimenuj trasu' });
+  if (!nw || !nw.trim()) return;
+  r.nm = nw.trim();
+  _rdSetSavedRoutes(routes);
+  if (_rdShownRouteLayers[id]) _rdShownRouteLayers[id].bindPopup(_escHtml(r.nm));
+  _rdRenderSavedRoutes();
+}
+
+async function _rdDeleteSavedRoute(id) {
+  if (!await _dlgConfirm('Trajno obrisati ovu trasu?', { danger: true })) return;
+  if (_rdShownRouteLayers[id]) { map.removeLayer(_rdShownRouteLayers[id]); delete _rdShownRouteLayers[id]; }
+  _rdSetSavedRoutes(_rdGetSavedRoutes().filter(x => x.id !== id));
+  _rdRenderSavedRoutes();
 }
 
 // Arhitektura: Web Worker za sve SQL operacije (ne blokira UI).
@@ -34342,6 +34422,12 @@ if (typeof AndroidDownload !== 'undefined') {
     <button id="rd-generate-btn" disabled onclick="_rdGenerate()" style="width:100%;padding:10px;background:#7c3aed;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;opacity:0.5;">🚀 Generiši trasu</button>
 
     <div id="rd-result" style="display:none;margin-top:10px;"></div>
+
+    <!-- SAČUVANE TRASE — zaseban spisak, nezavisan od "vlaka"/projekat koncepta -->
+    <details style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#cbd5e1;padding:4px 0;">📂 Sačuvane trase <span id="rd-saved-routes-count" style="color:#a78bfa;"></span></summary>
+      <div id="rd-saved-routes-list" style="margin-top:6px;"></div>
+    </details>
   </div>
 </div>
 
