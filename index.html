@@ -80,8 +80,11 @@ window.addEventListener('DOMContentLoaded',function(){
 .leaflet-tile-loaded { opacity:1; }
 .leaflet-zoom-animated { will-change: transform; }
 .leaflet-map-pane { will-change: transform; }
-.leaflet-tile-pane { will-change: transform; background: #2d3a2e; }
-.leaflet-container { background: #2d3a2e; }
+/* Pozadina iza neučitanih pločica (viđa se na periferiji dok panuješ) —
+   Leaflet-ov vlastiti default je #ddd upravo iz ovog razloga: tamna boja
+   ovdje bi se doživljavala kao "crn" flash prije nego pločica stigne. */
+.leaflet-tile-pane { will-change: transform; background: #ddd; }
+.leaflet-container { background: #ddd; }
 .leaflet-proxy { will-change: transform; }
 .leaflet-fade-anim .leaflet-tile,.leaflet-fade-anim .leaflet-popup { transition: none !important; }
 
@@ -4680,7 +4683,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.93.0';
+const APP_VER = 'v3.93.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -11522,10 +11525,10 @@ const DemSlopeClass = L.GridLayer.extend({
 });
 
 const _OVL = {
-  elev:  new CachedElev('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', { pane:'demOverlay', maxZoom:18, opacity:0.7, attribution:'' }),
-  slope: new DemSlopeClass({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:1.0, attribution:'' }),
-  nv:    new DemNV(   { pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.75, attribution:'' }),
-  ekspo: new DemEkspo({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.80, attribution:'' })
+  elev:  new CachedElev('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', { pane:'demOverlay', maxZoom:18, opacity:0.7, attribution:'', keepBuffer:6 }),
+  slope: new DemSlopeClass({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:1.0, attribution:'', keepBuffer:6 }),
+  nv:    new DemNV(   { pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.75, attribution:'', keepBuffer:6 }),
+  ekspo: new DemEkspo({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.80, attribution:'', keepBuffer:6 })
 };
 let _ovlState = { elev: false, slope: false, nv: false, ekspo: false };
 try { Object.assign(_ovlState, JSON.parse(localStorage.getItem('tvlake_ovl_state') || '{}')); } catch {}
