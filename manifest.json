@@ -1,6 +1,6 @@
 {
-  "name": "ŠPD Unsko-sanske šume — Vlake",
-  "short_name": "USS Vlake",
+  "name": "Dendro Map",
+  "short_name": "Dendro Map",
   "description": "Projektovanje traktorskih vlaka — offline GIS alat za šumare ŠPD Unsko-sanske šume",
   "id": "/",
   "start_url": "./index.html",

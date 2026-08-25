@@ -3,8 +3,12 @@
     <!-- Tema aplikacije — identično manifest.json theme_color i background_color -->
     <color name="colorPrimary">#16213e</color>
     <color name="colorBackground">#0f172a</color>
-    <!-- Splash pozadina = zelena iz logoa -->
-    <color name="colorSplash">#376638</color>
+    <!-- Splash pozadina — v3.94.x "Dendro Map" rebrend: ista tamnozelena kao
+         ic_launcher_background (#42523C) da splash i ikonica budu dosljedni.
+         drawable/splash_logo.png je isto zamijenjen (stara ŠPD US-ŠUME/
+         Bosanska Krupa grafika → novi Dendro Map lockup sa tekstom, izvučen
+         iz docs/DENDRO_MAP_source.jpg istim postupkom kao login logo). -->
+    <color name="colorSplash">#42523C</color>
     <!-- Adaptive icon background — v3.92.0 "Dendro Map" rebrand: tamnozelena kartica
          (#42523C, uzorkovana iz DENDRO MAP.jpg pozadine) umjesto bijele iz v3.81.0.
          Bijela je i dalje bila sigurna (safe-zone margina se ne mijenja), ali novi
