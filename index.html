@@ -4683,7 +4683,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.94.3';
+const APP_VER = 'v3.94.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -24550,7 +24550,15 @@ async function _guideShareRoute(id) {
 }
 
 // ─── OFFLINE DEM GRID (keširanje visina odjela) ────────────────────────────────
-const _DEM_RES = 30; // grid rezolucija u metrima (~1 arc-second)
+// 60m umjesto ranijih 30m (v3.94.4) — Open-Meteo besplatni/bez-ključa nivo ima
+// MINUTNI limit broja zahtjeva (ne limit tačaka po zahtjevu, kako je ranije
+// pretpostavljeno — potvrđeno stvarnom porukom servera "Minutely API request
+// limit exceeded"). 30m je i onako bio lažna preciznost (Open-Meteo elevation
+// podaci su realno ~90m rezolucije), a duplo veći korak = četvorostruko manje
+// tačaka = četvorostruko manje zahtjeva za isti geografski obuhvat. Ovo
+// popravlja i "DEM offline" dugme (Vlake panel), ne samo predlaganje trase —
+// oba prolaze kroz istu _demFetchGrid.
+const _DEM_RES = 60; // grid rezolucija u metrima
 const _DEM_IDB_PREFIX = 'dem:';
 let _demCache = {}; // key → { grid, meta }
 
@@ -24579,13 +24587,17 @@ async function _demFetchGrid(bounds, res) {
       lons.push((w + c * step).toFixed(5));
     }
   }
-  // Open-Meteo elevation API ima limit tačaka po zahtjevu — 300 je bilo
-  // preveliko (server bi vratio grešku umjesto elevation niza, korisnik bi
-  // vidio "Server nije vratio podatke o terenu" za SVAKI grid preko par
-  // stotina tačaka, što je čest slučaj za dužu trasu). 100 je siguran limit.
-  const batchSize = 100;
+  // v3.94.4: prošla pretpostavka ("limit tačaka po zahtjevu") je bila
+  // pogrešna — stvarna poruka servera je "Minutely API request limit
+  // exceeded", tj. limit je na BROJU ZAHTJEVA U MINUTI, ne na veličini
+  // jednog zahtjeva. Zato je manji batchSize (100) bio kontraproduktivan —
+  // pravio je VIŠE zahtjeva za isti grid, ne manje. Sad je batchSize veći
+  // (manje zahtjeva ukupno) i dodata je mala pauza IZMEĐU zahtjeva da se ne
+  // šalju u rafalu — obje mjere ciljaju stvarni (minutni) limit, ne izmišljeni.
+  const batchSize = 250;
   const elevArr = new Float32Array(rows * cols);
   for (let i = 0; i < lats.length; i += batchSize) {
+    if (i > 0) await new Promise(res => setTimeout(res, 200));
     const bLats = lats.slice(i, i + batchSize).join(',');
     const bLons = lons.slice(i, i + batchSize).join(',');
     let r, d;
