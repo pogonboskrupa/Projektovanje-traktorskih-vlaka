@@ -1,4 +1,4 @@
-# build-apk.ps1 — Pull, kopiraj assets, buildi APK
+﻿# build-apk.ps1 — Pull, kopiraj assets, buildi APK
 # Pokrenuti iz korijena projekta: powershell -ExecutionPolicy Bypass -File android\build-apk.ps1
 # Ili iz android/ foldera:         powershell -ExecutionPolicy Bypass -File build-apk.ps1
 
@@ -45,7 +45,7 @@ git checkout $Branch
 if ($LASTEXITCODE -ne 0) { Write-Host "`n[GRESKA] git checkout $Branch nije uspio." -ForegroundColor Red; exit 1 }
 
 git pull origin $Branch
-if ($LASTEXITCODE -ne 0) { Write-Host "`n[GRESKA] git pull nije uspio — vidi poruku iznad." -ForegroundColor Red; exit 1 }
+if ($LASTEXITCODE -ne 0) { Write-Host "`n[GRESKA] git pull nije uspio - vidi poruku iznad." -ForegroundColor Red; exit 1 }
 
 $LocalHead  = git rev-parse HEAD
 $RemoteHead = git rev-parse "origin/$Branch"
@@ -103,7 +103,7 @@ $AssetVer  = (Select-String -Path "$AssetsDir\index.html" -Pattern "const APP_VE
 $GradleVer = (Select-String -Path "$AndroidDir\app\build.gradle" -Pattern 'versionName "([0-9.]+)"').Matches.Groups[1].Value
 Write-Host "      Verzija u assets/index.html: $AssetVer   |   build.gradle versionName: $GradleVer" -ForegroundColor Cyan
 if ($AssetVer -ne "v$GradleVer") {
-    Write-Host "`n[GRESKA] Verzije se ne poklapaju (index.html=$AssetVer, build.gradle=v$GradleVer) — stari assets ili stari build.gradle." -ForegroundColor Red
+    Write-Host "`n[GRESKA] Verzije se ne poklapaju (index.html=$AssetVer, build.gradle=v$GradleVer) - stari assets ili stari build.gradle." -ForegroundColor Red
     exit 1
 }
 
