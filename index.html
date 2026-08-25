@@ -4683,7 +4683,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.95.1';
+const APP_VER = 'v3.95.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -25097,6 +25097,22 @@ function closeRoadDesignModal() {
   map.off('click', _rdOnMapClickStart);
   map.off('click', _rdOnMapClickEnd);
   map.off('click', _rdOnMapClickVia);
+  // Neseačuvani predloženi prikaz (ljubičasta isprekidana linija) inače ostaje
+  // trajno na karti bez ikakvog načina da se ukloni (nije "vlaka", ne pripada
+  // Sačuvanim trasama dok se eksplicitno ne sačuva) — zatvaranje modala bez
+  // čuvanja se tretira kao odustajanje od prijedloga.
+  _rdDiscardResult();
+}
+
+// Ukloni NESAČUVANI predloženi prikaz trase sa karte (bug: "ne mogu obrisati
+// projektovani put" — prijedlog je ostajao na karti zauvijek jer nije bio ni
+// vlaka ni sačuvana trasa, pa nije imao NIŠTA što bi ga moglo obrisati).
+function _rdDiscardResult() {
+  if (_rdResultLayer) { map.removeLayer(_rdResultLayer); _rdResultLayer = null; }
+  _rdResultPath = null;
+  _rdResultVal = null;
+  const resEl = document.getElementById('rd-result');
+  if (resEl) { resEl.style.display = 'none'; resEl.innerHTML = ''; }
 }
 
 function _rdReadParamsFromForm() {
@@ -25326,20 +25342,27 @@ function _rdShowResult() {
     badgeHtml = `<div style="background:#1e3a2e;border:1px solid #16a34a;color:#4ade80;padding:6px 8px;border-radius:6px;font-size:11px;">✅ Cijela trasa unutar preporučenog nagiba</div>`;
   }
 
+  const first = _rdResultPath[0], last = _rdResultPath[_rdResultPath.length - 1];
+  const azOverall = rdAzimuth(first.lat, first.lon, last.lat, last.lon);
+  const dhOverall = last.elev - first.elev;
+
   const resEl = document.getElementById('rd-result');
   resEl.style.display = 'block';
   resEl.innerHTML = `
-    <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;font-size:11px;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;color:#e2e8f0;margin-bottom:6px;">
-      <span style="color:#94a3b8;">Dužina trase</span><span>${fmtL(v.totalDist)}</span>
-      <span style="color:#94a3b8;">Maksimalni nagib</span><span>${v.maxSlopePct.toFixed(1)}%</span>
-      <span style="color:#94a3b8;">Prosječni nagib</span><span>${v.avgSlopePct.toFixed(1)}%</span>
-      <span style="color:#94a3b8;">Broj tačaka trase</span><span>${_rdResultPath.length}</span>
+    <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;font-size:11px;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;color:#e2e8f0;font-variant-numeric:tabular-nums;margin-bottom:6px;">
+      <span style="color:#94a3b8;">Dužina trase</span><span style="font-family:monospace;">${fmtL(v.totalDist)}</span>
+      <span style="color:#94a3b8;">Azimut (A→B)</span><span style="font-family:monospace;">${azOverall.toFixed(1)}°</span>
+      <span style="color:#94a3b8;">Visinska razlika</span><span style="font-family:monospace;">${dhOverall >= 0 ? '+' : ''}${dhOverall.toFixed(0)} m</span>
+      <span style="color:#94a3b8;">Maksimalni nagib</span><span style="font-family:monospace;">${v.maxSlopePct.toFixed(1)}%</span>
+      <span style="color:#94a3b8;">Prosječni nagib</span><span style="font-family:monospace;">${v.avgSlopePct.toFixed(1)}%</span>
+      <span style="color:#94a3b8;">Broj tačaka trase</span><span style="font-family:monospace;">${_rdResultPath.length}</span>
     </div>
     ${badgeHtml}
     <div style="display:flex;gap:6px;margin-top:8px;">
       <button onclick="_rdShowProfile()" style="flex:1;padding:8px;background:#1d4ed8;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-statistika"/></svg> Uzdužni profil</button>
       <button onclick="_rdSaveRoute()" style="flex:1;padding:8px;background:#059669;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-sacuvaj"/></svg> Sačuvaj rutu</button>
     </div>
+    <button onclick="_rdDiscardResult()" style="width:100%;padding:6px;margin-top:6px;background:transparent;border:none;color:#64748b;font-size:10.5px;cursor:pointer;text-decoration:underline;"><svg class="ic"><use href="#ic-obrisi"/></svg> Odbaci prijedlog (ukloni s karte)</button>
   `;
   showToast(`✓ Trasa: ${fmtL(v.totalDist)}, max nagib ${v.maxSlopePct.toFixed(1)}%`);
 }
@@ -25348,7 +25371,10 @@ function _rdShowProfile() {
   if (!_rdResultPath) return;
   const pts = _rdResultPath.map(p => ({ la: p.lat, lo: p.lon }));
   const alts = _rdResultPath.map(p => p.elev);
-  closeRoadDesignModal(); // #profil-modal ima niži z-index — mora se prvo skloniti RD modal
+  // Pregled profila NIJE odustajanje od prijedloga (za razliku od X/zatvori) —
+  // koristi varijantu koja ne briše nesačuvani prikaz, korisnik se mora moći
+  // vratiti i sačuvati trasu poslije pregleda profila.
+  closeRoadDesignModalKeepingLayer(); // #profil-modal ima niži z-index — mora se prvo skloniti RD modal
   _renderElevProfile('Projektovana trasa (A→B)', pts, alts, 'DEM model terena');
 }
 
@@ -25375,6 +25401,7 @@ function _rdSaveRoute() {
   if (!_rdResultPath || !_rdResultVal) return;
   const routes = _rdGetSavedRoutes();
   const nm = 'Šumski put ' + (routes.length + 1);
+  const first = _rdResultPath[0], last = _rdResultPath[_rdResultPath.length - 1];
   routes.push({
     id: typeof _genUUID === 'function' ? _genUUID() : ('rd' + Date.now()),
     nm,
@@ -25382,9 +25409,15 @@ function _rdSaveRoute() {
     totalDist: _rdResultVal.totalDist,
     maxSlopePct: _rdResultVal.maxSlopePct,
     avgSlopePct: _rdResultVal.avgSlopePct,
+    azimuthDeg: rdAzimuth(first.lat, first.lon, last.lat, last.lon),
+    deltaH: last.elev - first.elev,
     createdAt: new Date().toISOString()
   });
   _rdSetSavedRoutes(routes);
+  // Prijedlog je sad trajno u "Sačuvane trase" (ponovo se prikazuje preko
+  // Prikaži/Sakrij) — privremeni preview sloj više nije potreban, ukloni ga
+  // da ne ostanu dvije preklopljene linije na karti.
+  _rdDiscardResult();
   _rdRenderSavedRoutes();
   showToast('✅ Ruta sačuvana: ' + nm);
 }
@@ -25401,11 +25434,19 @@ function _rdRenderSavedRoutes() {
   }
   wrap.innerHTML = routes.map(r => {
     const shown = !!_rdShownRouteLayers[r.id];
+    // Trase sačuvane prije uvođenja azimuth/deltaH polja (starije verzije) —
+    // dopuni izračunom iz pts umjesto praznog prikaza.
+    const first = r.pts[0], last = r.pts[r.pts.length - 1];
+    const az = r.azimuthDeg != null ? r.azimuthDeg : rdAzimuth(first.la, first.lo, last.la, last.lo);
+    const dh = r.deltaH != null ? r.deltaH : (last.al - first.al);
     return `
       <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:6px 8px;margin-bottom:5px;font-size:10.5px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
           <span style="color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.nm)}</span>
-          <span style="color:#94a3b8;white-space:nowrap;">${fmtL(r.totalDist)} · maks ${r.maxSlopePct.toFixed(1)}%</span>
+          ${shown ? '<span style="color:#a78bfa;white-space:nowrap;font-size:9.5px;">● na karti</span>' : ''}
+        </div>
+        <div style="color:#94a3b8;font-family:monospace;font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          ${fmtL(r.totalDist)} · azimut ${az.toFixed(0)}° · Δh ${dh >= 0 ? '+' : ''}${dh.toFixed(0)} m · maks ${r.maxSlopePct.toFixed(1)}%
         </div>
         <div style="display:flex;gap:4px;margin-top:5px;">
           <button onclick="_rdToggleSavedRouteOnMap('${r.id}')" style="flex:1;padding:5px;background:${shown ? '#7c3aed' : '#374151'};border:none;border-radius:5px;color:#fff;font-size:10px;cursor:pointer;">${shown ? '🗺 Sakrij' : '🗺 Prikaži'}</button>
@@ -25429,7 +25470,23 @@ function _rdToggleSavedRouteOnMap(id) {
   poly.bindPopup(_escHtml(r.nm));
   _rdShownRouteLayers[id] = poly;
   map.fitBounds(poly.getBounds(), { padding: [40, 40] });
-  _rdRenderSavedRoutes();
+  // Modal prekriva cijeli ekran (tamni overlay) — bez zatvaranja korisnik ne
+  // vidi kartu ispod pa izgleda kao da "Prikaži" ne radi ništa (prijavljeni
+  // bug: "nema ga kad kliknem prikaži"). Zatvori modal da se trasa STVARNO vidi.
+  closeRoadDesignModalKeepingLayer();
+  showToast('🗺 Prikazano na karti: ' + r.nm);
+}
+
+// Isto kao closeRoadDesignModal, ALI bez _rdDiscardResult poziva — koristi se
+// kad zatvaranje modala nije "odustajanje" nego posljedica akcije koja treba
+// da otkrije kartu (Prikaži sačuvane trase). Neseačuvani prijedlog (ako
+// postoji) tako ostaje netaknut, korisnik se može vratiti na njega.
+function closeRoadDesignModalKeepingLayer() {
+  document.getElementById('rd-modal').style.display = 'none';
+  map.getContainer().style.cursor = '';
+  map.off('click', _rdOnMapClickStart);
+  map.off('click', _rdOnMapClickEnd);
+  map.off('click', _rdOnMapClickVia);
 }
 
 async function _rdRenameSavedRoute(id) {
