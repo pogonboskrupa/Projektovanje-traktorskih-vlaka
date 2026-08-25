@@ -2574,12 +2574,19 @@ select:focus { outline:none; border-color:#3b82f6; }
 
 /* ── Custom dialog sheet — iOS style ─────────────────────── */
 #dlg-overlay {
-  display:none; position:fixed; inset:0; z-index:9800;
+  /* z-index MORA biti veći od SVIH modala u app-u (najviši drugi je 99999) —
+     _dlgConfirm/_dlgPrompt se pozivaju IZ UNUTRA drugih otvorenih modala
+     (npr. brisanje sačuvane trase dok je #rd-modal otvoren, z-index 99000).
+     Sa starim 9800 ovaj dijalog je bio ISCRTAN ISPOD tog modala — vidljiv
+     samo poslije zatvaranja modala, izgledalo je kao da brisanje ne traži
+     potvrdu. Provjereno: nema drugog UI elementa iznad ovog opsega osim
+     info toastova (99999, namjerno neblokirajući, ne smetaju). */
+  display:none; position:fixed; inset:0; z-index:999900;
   background:rgba(0,0,0,0.3); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);
 }
 #dlg-overlay.show { display:block; }
 #dlg-sheet {
-  position:fixed; bottom:0; left:0; right:0; z-index:9801;
+  position:fixed; bottom:0; left:0; right:0; z-index:999901;
   background:#fff;
   border-radius:20px 20px 0 0;
   box-shadow:0 -8px 40px rgba(0,0,0,0.12), 0 -1px 0 rgba(0,0,0,0.04);
@@ -4683,7 +4690,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.96.2';
+const APP_VER = 'v3.96.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
