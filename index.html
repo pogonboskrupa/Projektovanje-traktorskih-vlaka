@@ -1157,28 +1157,36 @@ select:focus { outline:none; border-color:#3b82f6; }
   scrollbar-width:none;
 }
 #tab-bar::-webkit-scrollbar { display:none; }
+/* v3.93.0: ikona gore / tekst ispod (bottom-nav obrazac), umjesto ikone i
+   teksta u istom redu — na uskim telefonima 5 tabova (Meni/Karta/Projekat/
+   Vlake/Doznaka) nije stalo bez horizontalnog skrola, "Vlake" tekst se
+   sudarao s notif-bedžom ("Vlak"+broj), a "Doznaka" znala biti odsječena
+   bez ikakvog znaka da ima još tabova van ekrana. Vertikalni raspored je
+   uži po tabu (nema teksta pored ikone) pa svih 5 sad stane bez skrola. */
 .tab-btn {
-  padding:8px 0; border:none; border-radius:6px 6px 0 0;
-  font-size:14px; font-weight:bold; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:2px;
+  padding:6px 2px 5px; border:none; border-radius:6px 6px 0 0;
+  font-size:10.5px; font-weight:bold; cursor:pointer;
   background:transparent; color:#64748b;
   border-bottom:2px solid transparent;
   transition:all 0.15s; margin-bottom:-2px;
   position:relative;
-  flex:1; white-space:nowrap; text-align:center;
+  flex:1; min-width:52px; white-space:nowrap; text-align:center;
 }
 .tab-btn:hover { color:#94a3b8; }
 .tab-btn.active { color:#4ade80; border-bottom-color:#4ade80; background:rgba(74,222,128,0.07); }
 /* Ikonice trake (Meni + 7 tabova) — crtane umjesto emoji, jer se emoji na
    raznim telefonima/OS verzijama renderuje potpuno drugačije (Samsung/Xiaomi/
-   stariji Android), a ponekad i kao prazan kvadratić. em-veličina (ne px) prati
-   font-size dugmeta — automatski manje na mobilnom breakpointu (vidi media
-   query ispod), bez posebne media-query grane samo za ikonicu. currentColor
-   znači da ikonica prati boju dugmeta identično kao i tekst do sada (zelena pri
-   aktivnom tabu, ili trajna amber/ljubičasta/zelena za Korisnici/Postavke/Teren
-   — ista pravila, nula JS izmjena). Backup prijašnjeg emoji markupa:
-   docs/BACKUP_traka_ikonice_emoji.md */
+   stariji Android), a ponekad i kao prazan kvadratić. Fiksna px veličina (ne
+   em kao ranije) — otkad je tekst ispod ikone (ne pored), više nema potrebe
+   za vertical-align/font-size trikom; veličina za mobilni breakpoint je
+   posebno podešena ispod. currentColor znači da ikonica prati boju dugmeta
+   identično kao i tekst (zelena pri aktivnom tabu, ili trajna amber/
+   ljubičasta/zelena za Korisnici/Postavke/Teren — ista pravila, nula JS
+   izmjena). Backup prijašnjeg emoji markupa: docs/BACKUP_traka_ikonice_emoji.md */
 .tbi {
-  width:1.15em; height:1.15em; vertical-align:-0.22em; margin-right:2px;
+  width:20px; height:20px;
   fill:none; stroke:currentColor; stroke-width:2;
   stroke-linecap:round; stroke-linejoin:round;
 }
@@ -1192,11 +1200,11 @@ select:focus { outline:none; border-color:#3b82f6; }
   flex-shrink:0;
 }
 .tab-notif {
-  display:none; position:absolute; top:4px; right:4px;
-  min-width:16px; height:16px; border-radius:8px;
-  background:#ef4444; color:#fff; font-size:9px; font-weight:bold;
-  line-height:16px; text-align:center; padding:0 4px;
-  box-shadow:0 0 0 2px #0f172a;
+  display:none; position:absolute; top:0; left:calc(50% + 4px);
+  min-width:15px; height:15px; border-radius:8px;
+  background:#ef4444; color:#fff; font-size:8.5px; font-weight:bold;
+  line-height:15px; text-align:center; padding:0 3px;
+  box-shadow:0 0 0 2px #16213e;
   animation: notif-pop .3s ease;
 }
 .tab-notif.show { display:inline-block; }
@@ -1413,9 +1421,10 @@ select:focus { outline:none; border-color:#3b82f6; }
     z-index:700;
   }
   #mbtn { display:block !important; }
-  /* Bottom bar: smanji dugmad da svih 6 tabova stane na telefonu */
+  /* Top bar: smanji dugmad/ikonicu da svih 5-6 tabova stane na telefonu */
   #tab-bar { gap:1px; padding:0 2px; }
-  .tab-btn { padding:8px 0; font-size:12px; }
+  .tab-btn { padding:5px 1px 4px; font-size:9.5px; min-width:0; }
+  .tbi { width:18px; height:18px; }
   #offline-badge { margin-left:4px !important; }
 }
 
@@ -4671,7 +4680,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.92.2';
+const APP_VER = 'v3.93.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
