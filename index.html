@@ -4690,7 +4690,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.96.3';
+const APP_VER = 'v3.97.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -25421,6 +25421,7 @@ function _rdShowProfile() {
 // i sl.). Time nestaje i pitanje "Nema aktivnog projekta..." koje je zbunjivalo
 // korisnika — put nikad nije ni trebao zavisiti od projekta vlaka.
 const _RD_ROUTES_KEY = 'tvlake_sumski_putevi';
+const _RD_ROUTE_DEFAULT_COLOR = '#a78bfa'; // stare trase (prije boje po ruti) padaju nazad na ovu
 let _rdShownRouteLayers = {}; // id -> L.polyline (samo za trenutno prikazane na karti)
 
 function _rdGetSavedRoutes() {
@@ -25447,6 +25448,7 @@ function _rdSaveRoute() {
     avgSlopePct: _rdResultVal.avgSlopePct,
     azimuthDeg: rdAzimuth(first.lat, first.lon, last.lat, last.lon),
     deltaH: last.elev - first.elev,
+    color: _RD_ROUTE_DEFAULT_COLOR,
     createdAt: new Date().toISOString()
   });
   _rdSetSavedRoutes(routes);
@@ -25470,6 +25472,7 @@ function _rdRenderSavedRoutes() {
   }
   wrap.innerHTML = routes.map(r => {
     const shown = !!_rdShownRouteLayers[r.id];
+    const col = r.color || _RD_ROUTE_DEFAULT_COLOR;
     // Trase sačuvane prije uvođenja azimuth/deltaH polja (starije verzije) —
     // dopuni izračunom iz pts umjesto praznog prikaza.
     const first = r.pts[0], last = r.pts[r.pts.length - 1];
@@ -25478,8 +25481,11 @@ function _rdRenderSavedRoutes() {
     return `
       <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:6px 8px;margin-bottom:5px;font-size:10.5px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
-          <span style="color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.nm)}</span>
-          ${shown ? '<span style="color:#a78bfa;white-space:nowrap;font-size:9.5px;">● na karti</span>' : ''}
+          <span style="display:flex;align-items:center;gap:6px;min-width:0;">
+            <input type="color" value="${col}" onchange="_rdSetRouteColor('${r.id}',this.value)" title="Boja trase" style="width:20px;height:20px;border:1px solid #334155;border-radius:4px;cursor:pointer;padding:0;background:none;flex-shrink:0;">
+            <span style="color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(r.nm)}</span>
+          </span>
+          ${shown ? `<span style="color:${col};white-space:nowrap;font-size:9.5px;">● na karti</span>` : ''}
         </div>
         <div style="color:#94a3b8;font-family:monospace;font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
           ${fmtL(r.totalDist)} · azimut ${az.toFixed(0)}° · Δh ${dh >= 0 ? '+' : ''}${dh.toFixed(0)} m · maks ${r.maxSlopePct.toFixed(1)}%
@@ -25502,7 +25508,7 @@ function _rdToggleSavedRouteOnMap(id) {
   }
   const r = _rdGetSavedRoutes().find(x => x.id === id);
   if (!r) return;
-  const poly = L.polyline(r.pts.map(p => [p.la, p.lo]), { color: '#a78bfa', weight: 4, dashArray: '8,6' }).addTo(map);
+  const poly = L.polyline(r.pts.map(p => [p.la, p.lo]), { color: r.color || _RD_ROUTE_DEFAULT_COLOR, weight: 4, dashArray: '8,6' }).addTo(map);
   poly.bindPopup(_escHtml(r.nm));
   _rdShownRouteLayers[id] = poly;
   map.fitBounds(poly.getBounds(), { padding: [40, 40] });
@@ -25511,6 +25517,16 @@ function _rdToggleSavedRouteOnMap(id) {
   // bug: "nema ga kad kliknem prikaži"). Zatvori modal da se trasa STVARNO vidi.
   closeRoadDesignModalKeepingLayer();
   showToast('🗺 Prikazano na karti: ' + r.nm);
+}
+
+function _rdSetRouteColor(id, col) {
+  const routes = _rdGetSavedRoutes();
+  const r = routes.find(x => x.id === id);
+  if (!r) return;
+  r.color = col;
+  _rdSetSavedRoutes(routes);
+  if (_rdShownRouteLayers[id]) _rdShownRouteLayers[id].setStyle({ color: col });
+  _rdRenderSavedRoutes();
 }
 
 // Isto kao closeRoadDesignModal, ALI bez _rdDiscardResult poziva — koristi se
