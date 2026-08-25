@@ -4683,7 +4683,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.94.2';
+const APP_VER = 'v3.94.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -24558,9 +24558,20 @@ async function _demFetchGrid(bounds, res) {
   const s = bounds.getSouth(), n = bounds.getNorth();
   const w = bounds.getWest(), e = bounds.getEast();
   const degPerM = 1 / 111320;
-  const step = res * degPerM;
-  const rows = Math.min(120, Math.ceil((n - s) / step));
-  const cols = Math.min(120, Math.ceil((e - w) / step));
+  let step = res * degPerM;
+  let rows = Math.ceil((n - s) / step);
+  let cols = Math.ceil((e - w) / step);
+  if (rows > 120 || cols > 120) {
+    // Ranije: Math.min(120, ...) je TIHO odsijecao sjeverni/istočni rub
+    // grida kad bi tražena oblast prešla 120x120 ćelija (npr. duža trasa u
+    // "Projektovanje šumskog puta" — DEM je originalno rađen za manje
+    // odjele). Umjesto da izgubi pokrivenost, sad grubi rezoluciju da CIJELA
+    // tražena oblast stane u 120x120 (manje tačno, ali potpuno).
+    const scale = Math.max(rows / 120, cols / 120);
+    step = step * scale;
+    rows = Math.ceil((n - s) / step);
+    cols = Math.ceil((e - w) / step);
+  }
   const lats = [], lons = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -24568,7 +24579,11 @@ async function _demFetchGrid(bounds, res) {
       lons.push((w + c * step).toFixed(5));
     }
   }
-  const batchSize = 300;
+  // Open-Meteo elevation API ima limit tačaka po zahtjevu — 300 je bilo
+  // preveliko (server bi vratio grešku umjesto elevation niza, korisnik bi
+  // vidio "Server nije vratio podatke o terenu" za SVAKI grid preko par
+  // stotina tačaka, što je čest slučaj za dužu trasu). 100 je siguran limit.
+  const batchSize = 100;
   const elevArr = new Float32Array(rows * cols);
   for (let i = 0; i < lats.length; i += batchSize) {
     const bLats = lats.slice(i, i + batchSize).join(',');
@@ -24581,7 +24596,7 @@ async function _demFetchGrid(bounds, res) {
       throw new Error('Mrežna greška — provjerite konekciju');
     }
     try { d = await r.json(); } catch { throw new Error('Neispravan odgovor servera'); }
-    if (!Array.isArray(d.elevation)) throw new Error('Server nije vratio podatke o terenu');
+    if (!Array.isArray(d.elevation)) throw new Error('Server nije vratio podatke o terenu' + (d.reason ? (': ' + d.reason) : ''));
     for (let j = 0; j < d.elevation.length; j++) elevArr[i + j] = d.elevation[j];
   }
   return { grid: elevArr, rows, cols, south: s, west: w, step, north: n, east: e };
