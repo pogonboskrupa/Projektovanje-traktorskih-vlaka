@@ -1,4 +1,4 @@
-# Kopira web fajlove u android/app/src/main/assets/ (Windows / PowerShell verzija copy-assets.sh)
+﻿# Kopira web fajlove u android/app/src/main/assets/ (Windows / PowerShell verzija copy-assets.sh)
 # Pokrenuti iz KORIJENSKOG direktorija projekta:  .\android\copy-assets.ps1
 $ErrorActionPreference = 'Stop'
 
