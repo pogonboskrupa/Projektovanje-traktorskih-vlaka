@@ -4690,7 +4690,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.97.2';
+const APP_VER = 'v3.98.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -24141,8 +24141,15 @@ function _resampleLinePts(pts, maxN) {
   return out;
 }
 
-function _renderElevProfile(name, pts, alts, src, extraStatsHtml = '') {
+// slopeThresh: {warn, bad} % pragovi za bojenje dionica — podrazumijevano
+// 12/18 (generički pragovi za GPS tragove/vlake). "Projektovanje šumskog
+// puta" prosljeđuje STVARNO konfigurisane nagibPreporuceni/nagibMax za tu
+// trasu — bez ovoga bi profil obojio dionicu zeleno iako već prelazi
+// preporučeni/maksimalni nagib te KONKRETNE trase (12/18 su generički, ne
+// nužno isti kao parametri koje je korisnik postavio za put).
+function _renderElevProfile(name, pts, alts, src, extraStatsHtml = '', slopeThresh = null) {
   if (pts.length < 2 || alts.length !== pts.length) return;
+  const thWarn = slopeThresh?.warn ?? 12, thBad = slopeThresh?.bad ?? 18;
 
   // Kumulativne distance duž trase
   const cumD = [0];
@@ -24168,7 +24175,7 @@ function _renderElevProfile(name, pts, alts, src, extraStatsHtml = '') {
     if (isGapSeg) gapCount++;
     const d = dst(pts[i-1].la, pts[i-1].lo, pts[i].la, pts[i].lo);
     const slope = d > 0.5 ? Math.abs((alts[i]-alts[i-1])/d*100) : 0;
-    const col = isGapSeg ? '#64748b' : (slope>18?'#f87171':slope>12?'#fbbf24':'#4ade80');
+    const col = isGapSeg ? '#64748b' : (slope>thBad?'#f87171':slope>thWarn?'#fbbf24':'#4ade80');
     const dash = isGapSeg ? ' stroke-dasharray="4,3"' : '';
     segs += `<line x1="${sx(i-1).toFixed(1)}" y1="${sy(i-1).toFixed(1)}" x2="${sx(i).toFixed(1)}" y2="${sy(i).toFixed(1)}" stroke="${col}" stroke-width="2.5" stroke-linecap="round"${dash}/>`;
   }
@@ -24215,7 +24222,7 @@ function _renderElevProfile(name, pts, alts, src, extraStatsHtml = '') {
     `<span style="color:#94a3b8">Min: <b style="color:#e2e8f0">${Math.round(minAlt)} m</b></span>` +
     `<span style="color:#94a3b8">Max: <b style="color:#e2e8f0">${Math.round(maxAlt)} m</b></span>` +
     `<span style="color:#94a3b8">Razlika: <b style="color:#e2e8f0">${Math.round(maxAlt-minAlt)} m</b></span>` +
-    `<span style="color:#94a3b8">Max nagib: <b style="color:${maxSlope>18?'#f87171':maxSlope>12?'#fbbf24':'#4ade80'}">${maxSlope.toFixed(1)}%</b></span>` +
+    `<span style="color:#94a3b8">Max nagib: <b style="color:${maxSlope>thBad?'#f87171':maxSlope>thWarn?'#fbbf24':'#4ade80'}">${maxSlope.toFixed(1)}%</b></span>` +
     `<span style="color:#94a3b8">Prosj. nagib: <b style="color:#e2e8f0">${avgSlope.toFixed(1)}%</b></span>${gapNote}` +
     extraStatsHtml;
 
@@ -25082,6 +25089,7 @@ let _rdDem = null;
 let _rdResultPath = null;
 let _rdResultVal = null;
 let _rdResultLayer = null;
+let _rdResultParams = null; // params korišteni za _rdResultPath — potrebno profilu (bojenje po STVARNIM pragovima ove trase)
 
 // Međutačka (via) je opciona — vidi tačku "dvije tačke su premalo" u
 // _rdIterBudget komentaru niže: korisnici su je ručno simulirali dijeljenjem
@@ -25129,6 +25137,7 @@ function _rdDiscardResult() {
   if (_rdResultLayer) { map.removeLayer(_rdResultLayer); _rdResultLayer = null; }
   _rdResultPath = null;
   _rdResultVal = null;
+  _rdResultParams = null;
   const resEl = document.getElementById('rd-result');
   if (resEl) { resEl.style.display = 'none'; resEl.innerHTML = ''; }
 }
@@ -25363,6 +25372,7 @@ function _rdGenerate() {
     }
     _rdResultPath = path;
     _rdResultVal = rdValidateRoute(path, params);
+    _rdResultParams = params;
     _rdShowResult();
   }, 30);
 }
@@ -25420,7 +25430,19 @@ function _rdShowProfile() {
   // koristi varijantu koja ne briše nesačuvani prikaz, korisnik se mora moći
   // vratiti i sačuvati trasu poslije pregleda profila.
   closeRoadDesignModalKeepingLayer(); // #profil-modal ima niži z-index — mora se prvo skloniti RD modal
-  _renderElevProfile('Projektovana trasa (A→B)', pts, alts, 'DEM model terena');
+  _rdRenderProfileWithLimits('Projektovana trasa (A→B)', pts, alts, _rdResultParams);
+}
+
+// Zajednička za _rdShowProfile i _rdShowSavedRouteProfile — boji dionice po
+// STVARNO konfigurisanim pragovima OVE trase (ne generičkim 12/18% koje
+// koristi profil za GPS tragove), i dodaje red sa tim pragovima u statistiku
+// da se odmah vidi da li je neki dio trase blizu/na granici bez otvaranja
+// panela "Parametri trase".
+function _rdRenderProfileWithLimits(name, pts, alts, params) {
+  const nagibMax = params?.nagibMax ?? RD_DEFAULT_PARAMS.nagibMax;
+  const nagibPreporuceni = params?.nagibPreporuceni ?? RD_DEFAULT_PARAMS.nagibPreporuceni;
+  const limitsHtml = `<span style="color:#94a3b8">Ograničenje: <b style="color:#e2e8f0">preporučeno ${nagibPreporuceni}% / max ${nagibMax}%</b></span>`;
+  _renderElevProfile(name, pts, alts, 'DEM model terena', limitsHtml, { warn: nagibPreporuceni, bad: nagibMax });
 }
 
 // Projektovanje šumskog puta NEMA veze sa "vlaka"/"projekat" konceptom iz
@@ -25458,6 +25480,13 @@ function _rdSaveRoute() {
     azimuthDeg: rdAzimuth(first.lat, first.lon, last.lat, last.lon),
     deltaH: last.elev - first.elev,
     color: _RD_ROUTE_DEFAULT_COLOR,
+    // Pragovi KOJI SU STVARNO KORIŠTENI za ovu trasu — čuva se uz nju (ne
+    // čita se iz trenutnog stanja panela "Parametri trase") da profil poslije
+    // (danas ili za mjesec dana) boji dionice po ISTIM pragovima koji su
+    // vrijedili kad je trasa projektovana, čak i ako korisnik poslije
+    // promijeni default parametre za nove trase.
+    nagibMax: _rdResultParams?.nagibMax ?? RD_DEFAULT_PARAMS.nagibMax,
+    nagibPreporuceni: _rdResultParams?.nagibPreporuceni ?? RD_DEFAULT_PARAMS.nagibPreporuceni,
     createdAt: new Date().toISOString()
   });
   _rdSetSavedRoutes(routes);
@@ -25501,11 +25530,25 @@ function _rdRenderSavedRoutes() {
         </div>
         <div style="display:flex;gap:4px;margin-top:6px;">
           <button onclick="_rdToggleSavedRouteOnMap('${r.id}')" style="flex:1;padding:5px;background:${shown ? '#7c3aed' : '#374151'};border:none;border-radius:5px;color:#fff;font-size:11px;cursor:pointer;">${shown ? '🗺 Sakrij' : '🗺 Prikaži'}</button>
+          <button onclick="_rdShowSavedRouteProfile('${r.id}')" style="padding:5px 8px;background:#1d4ed8;border:none;border-radius:5px;color:#fff;font-size:11px;cursor:pointer;" title="Uzdužni profil"><svg class="ic"><use href="#ic-statistika"/></svg></button>
           <button onclick="_rdRenameSavedRoute('${r.id}')" style="padding:5px 8px;background:#374151;border:none;border-radius:5px;color:#e2e8f0;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-crtaj"/></svg></button>
           <button onclick="_rdDeleteSavedRoute('${r.id}')" style="padding:5px 8px;background:#3a1e1e;border:none;border-radius:5px;color:#f87171;font-size:11px;cursor:pointer;"><svg class="ic"><use href="#ic-obrisi"/></svg></button>
         </div>
       </div>`;
   }).join('');
+}
+
+// Rekonstruiše pts/alts iz sačuvane trase (r.pts je {la,lo,al}) — profil za
+// SAČUVANU trasu je do sad bio potpuno nedostupan (dugme "Uzdužni profil" je
+// postojalo samo u privremenom rezultatu prije čuvanja, nestajalo je čim se
+// trasa sačuva). Prijavljeni bug "nema uzdužnog profila".
+function _rdShowSavedRouteProfile(id) {
+  const r = _rdGetSavedRoutes().find(x => x.id === id);
+  if (!r) return;
+  const pts = r.pts.map(p => ({ la: p.la, lo: p.lo }));
+  const alts = r.pts.map(p => p.al);
+  closeRoadDesignModalKeepingLayer();
+  _rdRenderProfileWithLimits(r.nm, pts, alts, { nagibMax: r.nagibMax, nagibPreporuceni: r.nagibPreporuceni });
 }
 
 function _rdToggleSavedRouteOnMap(id) {
