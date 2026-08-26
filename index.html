@@ -4690,7 +4690,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.97.1';
+const APP_VER = 'v3.97.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -11405,19 +11405,28 @@ function _aspColor(deg, mag) {
 }
 async function _getTerrariumTile(z, x, y) {
   const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+  // Slab signal (ne isto što i offline!) zna ostaviti fetch da visi neodređeno
+  // dugo umjesto da brzo padne — bez ovog timeout-a, _demFetchGridTerrarium
+  // (Promise.all nad više pločica) bi se zaglavio ZAUVIJEK na "Učitavam model
+  // terena…" jer nijedna pločica ne bi ni uspjela ni pala. Sa timeout-om
+  // pločica jednostavno vrati null (isti tretman kao svaka druga greška
+  // ispod) — pozivalac to već zna da protumači kao "nedostupno" i pređe na
+  // Open-Meteo fallback (koji ima svoj 15s timeout).
+  const sig = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(10000) : undefined;
+  const fetchOpts = sig ? { mode:'cors', signal: sig } : { mode:'cors' };
   let blob = null;
   if ('caches' in window) {
     try {
       const cache = await caches.open(_TERR_CACHE);
       let resp = await cache.match(url);
       if (!resp) {
-        resp = await fetch(url, { mode:'cors' });
+        resp = await fetch(url, fetchOpts);
         if (resp?.ok) { cache.put(url, resp.clone()); } else return null;
       }
       blob = await resp.blob();
     } catch { return null; }
   } else {
-    blob = await fetch(url, { mode:'cors' }).then(r=>r.ok?r.blob():null).catch(()=>null);
+    blob = await fetch(url, fetchOpts).then(r=>r.ok?r.blob():null).catch(()=>null);
   }
   if (!blob) return null;
   if (typeof createImageBitmap !== 'undefined') return createImageBitmap(blob);
