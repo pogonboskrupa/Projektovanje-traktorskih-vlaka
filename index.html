@@ -4695,7 +4695,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.99.0';
+const APP_VER = 'v3.99.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -13831,6 +13831,7 @@ function stopRec() {
   recOn = false; recPaused = false; _recParentIdx = null;
   _setFreeView(false);
   _clearRecPreview();
+  _clearGpsGapMarkers();
   _kfReset(); _lastRecTime = 0;
   if (_precizActive) _precizReset();  // D3-Q: ne ostavljaj dugme zaglavljeno na "n/10"
   _stopGpsWatchdog();   // watchdog je vlaka-specifičan — uvijek stani
@@ -14698,6 +14699,31 @@ const GPS_RESTART_COOLDOWN = 5000;
 // tačno mjeri prekid, umjesto da se prekid tiho utopi u geometriju traga.
 let _lastPtAcceptedAt   = 0;
 const GPS_GAP_WARN_MS   = 60000;
+// Trajna vizuelna oznaka na karti za dionicu preko prekida — prije je
+// postojao samo toast (nestane za par sekundi, lako se propusti ako korisnik
+// baš tad ne gleda telefon, npr. dok se vraća u app iz pozadine nakon
+// prekida). Marker (NE linija preko dionice) namjerno — nezavisan je od
+// v.pts/v.poly, pa ga ne diraju _simplifyRecordedPts (Douglas-Peucker pri
+// stopRec) niti pomjeranje indeksa u pts nizu.
+let _vlakaGapMarkers = [];
+function _markGpsGapOnMap(la, lo, gapMs) {
+  const gapSec = Math.round(gapMs / 1000);
+  const label = gapSec >= 60 ? Math.round(gapSec / 60) + ' min' : gapSec + ' s';
+  const m = L.marker([la, lo], {
+    icon: L.divIcon({
+      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+      html: '<div style="width:22px;height:22px;border-radius:50%;background:#f59e0b;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,0.5);">⚠</div>'
+    })
+  }).addTo(map);
+  m.bindTooltip('GPS prekid ' + label + ' — dionica prije ove tačke je ravna linija (stvarna putanja nije snimljena)', { direction: 'top' });
+  _vlakaGapMarkers.push(m);
+}
+// Ukloni sve oznake prekida sa karte (poziva se pri stopRec — nove oznake se
+// pojavljuju samo tokom SLJEDEĆEG snimanja, ne treba ih čuvati poslije).
+function _clearGpsGapMarkers() {
+  _vlakaGapMarkers.forEach(m => { try { map.removeLayer(m); } catch(e) {} });
+  _vlakaGapMarkers = [];
+}
 
 // Adaptivno po tačnosti: odličan signal (≤6m — otvoren teren, uz put) ne treba
 // medijanu-5 ni u šumskom modu — medijana od 5 prostorno KASNI ~2 fixa iza stvarne
@@ -15070,7 +15096,10 @@ function _vlakaProcessGpsPoint(la, lo, ac, alt, gpsSpeed, tsMs) {
   // GAP DETEKCIJA (D3-C) — dugi prekid bez tačaka ne smije se tiho utopiti u geometriju
   const gapMs = _lastPtAcceptedAt > 0 ? nowMs - _lastPtAcceptedAt : 0;
   const isGap = gapMs > GPS_GAP_WARN_MS;
-  if (isGap) showToast('⚠ GPS prekid ' + Math.round(gapMs / 1000) + 's — provjeri ovaj dio traga');
+  if (isGap) {
+    showToast('⚠ GPS prekid ' + Math.round(gapMs / 1000) + 's — provjeri ovaj dio traga');
+    _markGpsGapOnMap(sla, slo, gapMs);
+  }
   addPt(actI, sla, slo, alt, isGap);
   _lastPtAcceptedAt = nowMs;
 }
