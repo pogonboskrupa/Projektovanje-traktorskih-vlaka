@@ -3513,7 +3513,11 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 <script>
 (function() {
   try {
-    if (localStorage.getItem('tvlake_ol_profile') && localStorage.getItem('tvlake_saved_user')) {
+    // Keširani profil je SAM PO SEBI dovoljan (isti uslov koji initAuth() koristi
+    // za offline-first ulazak) — ranije se ovdje tražio I zapamćen PIN, pa je
+    // korisnik bez "Zapamti me" pri svakom ulasku vidio treptaj login forme
+    // iako ide pravo u app.
+    if (localStorage.getItem('tvlake_ol_profile')) {
       document.getElementById('auth-screen').style.display = 'none';
     }
   } catch(e) {}
@@ -4706,7 +4710,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.99.3';
+const APP_VER = 'v3.100.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5265,6 +5269,35 @@ function _showAuthScreen() {
   authShowLogin();
 }
 
+// Je li showApp() već pozvan u ovoj sesiji stranice. Sprječava DRUGI poziv
+// showApp()-a (koji bi ponovo pokrenuo sve restore-e: slojeve karte, tačke,
+// fotose, SQLite karte — dupli slojevi) kad kasnija online nadogradnja stigne
+// poslije offline-first ulaska.
+let _appEntered = false;
+
+// Prelazak sa keširanog (offline-first) ulaska na PUNU online sesiju. Poziva se
+// tek kad Supabase STVARNO potvrdi sesiju. Namjerno NE zove showApp() ponovo —
+// korisnik je već u app-u i radi; ovdje se dovršava samo ono što offline ulazak
+// nije mogao: skida se OFFLINE oznaka, povlače svježi podaci sa servera i gura
+// se red čekanja. _reloadCoreData je po dizajnu idempotentan (svaki njegov
+// poziv ima vlastite keš guardove), pa je ponovni poziv jeftin i siguran.
+async function _upgradeToOnlineSession() {
+  _setOfflineMode(!navigator.onLine);
+  try { await sbLoadProfile(); } catch(e) {}
+  // Prvi put kad opet imamo pravu sesiju saznajemo i je li pristup u
+  // međuvremenu OPOZVAN (dok se radilo offline na keširanom profilu). Isti
+  // tretman kao _provjeriOpozivOdobrenja — bez ovoga bi opozvan korisnik ostao
+  // u app-u do sljedećeg vraćanja iz pozadine.
+  if (sbProfile && sbProfile.odobren === false && !sbProfile.is_admin) {
+    _showAuthScreen();
+    authShowPending();
+    return;
+  }
+  try { sbStartRealtime(); } catch(e) {}
+  try { _reloadCoreData(); } catch(e) {}
+  try { _processOfflineQueue(); } catch(e) {}
+}
+
 async function initAuth() {
   const cached = _OL.load(_OL.PROFILE);
   const saved = _loadSavedUser();
@@ -5282,31 +5315,49 @@ async function initAuth() {
   // dalje koristi samo za pokušaj TIHOG re-logina (dobija svježu sesiju, pa
   // sync ponovo radi), ne kao uslov za offline ulazak.
 
-  // OFFLINE FAST PATH: postoji keširani profil = odmah u app, bez obzira na
-  // zapamćen PIN. Ovo pokriva: povratak iz kamere (Android ubije WebView),
-  // avionski mod, teren bez signala.
-  if (cached && (!navigator.onLine || !sb)) {
-    sbUser = { id: cached.id, email: cached.email || '' };
+  // OFFLINE-FIRST ULAZAK (v3.100.0): keširani profil = ODMAH u app, BEZ ikakvog
+  // čekanja na mrežu. Ranije se ulazilo odmah samo ako je navigator.onLine već
+  // javljao false ili Supabase klijent nije postojao — a na terenu navigator
+  // .onLine notorno laže 'true' na mrtvoj/slaboj vezi (OS-S4), pa se ulazilo u
+  // sporiji "prvo probaj online" put: korisnik čeka 1.5-4.5s (ili duže, jer
+  // spor poziv VISI umjesto da padne) prije nego uopšte vidi kartu, a znao je
+  // završiti i na login ekranu iako je uredno prijavljen.
+  //
+  // Sad je redoslijed obrnut i odgovara stvarnoj upotrebi u šumi: karta,
+  // lokacija i lokalni podaci rade UVIJEK i odmah, a puna online sesija se
+  // dohvaća TIHO U POZADINI (_upgradeToOnlineSession ispod). Ako je stvarno
+  // ima — sve online mogućnosti se uključe same; ako nema — sve ostaje u
+  // lokalnom redu čekanja i ode na server kad se veza stvarno pojavi
+  // (postojeći 'online' event → _processOfflineQueue + _reloadCoreData).
+  if (cached) {
+    // _cachedStub: označava da je ovo profil iz keša, a NE stvarna Supabase
+    // sesija — po tome niže znamo da online nadogradnju treba još pokušati.
+    sbUser = { id: cached.id, email: cached.email || '', _cachedStub: true };
     sbProfile = cached;
-    _setOfflineMode(true);
+    _setOfflineMode(!navigator.onLine);
     showApp();
-    showToast('📴 Offline pristup — lokalni podaci');
-    return;
-  }
-
-  // Ako nema keširanog profila, nema se na šta osloniti — odmah prikaži login
-  if (!cached) {
+    if (!navigator.onLine || !sb) {
+      showToast('📴 Offline pristup — lokalni podaci');
+      return;   // stvarno nema šta pokušati online
+    }
+    // Ima (navodno) mreže — nastavi ISPOD na tihu online nadogradnju. Korisnik
+    // je već u app-u; ništa ispod ne smije vratiti login ekran preko njega.
+  } else {
+    // Nema keširanog profila — nema se na šta osloniti, mora login
     _showAuthScreen();
   }
 
   // 1. Pokušaj Supabase sesiju
-  if(!sb){_showAuthScreen();return;}
+  if(!sb){ if(!_appEntered) _showAuthScreen(); return; }
   sb.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'INITIAL_SESSION' && session && !sbUser) {
+    // Uslov uključuje _cachedStub: kod offline-first ulaska sbUser JEST postavljen
+    // (iz keša), ali to nije prava sesija — kad Supabase potvrdi stvarnu, ovdje se
+    // radi tiha nadogradnja umjesto da se događaj preskoči.
+    if (event === 'INITIAL_SESSION' && session && (!sbUser || sbUser._cachedStub)) {
       try {
         sbUser = session.user;
-        await sbLoadProfile();
-        showApp();
+        if (_appEntered) { await _upgradeToOnlineSession(); }
+        else { await sbLoadProfile(); showApp(); }
         return;
       } catch(e) {
         console.error('Auth init error:', e);
@@ -5323,8 +5374,19 @@ async function initAuth() {
   // NIKAD ne smije izbaciti korisnika na login ni obrisati kredencijale —
   // na terenu navigator.onLine zna lažno biti true, a Supabase tiho vrati null.
   const goOfflineOrLogin = () => {
+    if (_appEntered) {
+      // Offline-first ulazak je već pustio korisnika u app — online nadogradnja
+      // nije uspjela. NE diramo ekran (nikakav login preko korisnika koji radi),
+      // samo označimo stvarno stanje: radi se lokalno, red čekanja ide na server
+      // kad se veza stvarno pojavi ('online' event → _processOfflineQueue).
+      if (!_isOfflineMode) {
+        _setOfflineMode(true);
+        showToast('📴 Offline pristup — lokalni podaci');
+      }
+      return;
+    }
     if (cached) {
-      sbUser = { id: cached.id, email: cached.email || '' };
+      sbUser = { id: cached.id, email: cached.email || '', _cachedStub: true };
       sbProfile = cached;
       _setOfflineMode(true);
       showApp();
@@ -5337,7 +5399,7 @@ async function initAuth() {
   // 2. Fallback: auto-login sa zapamćenim kredencijalima (ako PIN nije
   //    zapamćen, nemamo šta pokušati online — odmah offline-ili-login)
   setTimeout(async () => {
-    if (sbUser) return;
+    if (sbUser && !sbUser._cachedStub) return;   // već imamo PRAVU sesiju
     if (!saved) { goOfflineOrLogin(); return; }
     try {
       // OS-S4: navigator.onLine na terenu zna lagati 'true' na mrtvoj vezi — RPC bi
@@ -5353,17 +5415,17 @@ async function initAuth() {
       const { error } = await sb.auth.signInWithPassword({ email, password: saved.pin.padEnd(6, '0') });
       if (error) { goOfflineOrLogin(); return; }
       sbUser = (await sb.auth.getUser()).data.user;
-      await sbLoadProfile();
-      showApp();
+      if (_appEntered) { await _upgradeToOnlineSession(); }
+      else { await sbLoadProfile(); showApp(); }
     } catch(e) {
       if (e?.message !== '_autologin_timeout') console.error('Auto-login error:', e);
-      if (!sbUser) goOfflineOrLogin();
+      if (!sbUser || sbUser._cachedStub) goOfflineOrLogin();
     }
   }, 800);
 
-  // 3. Offline fallback — ako nema mreže ali postoji keširani profil
+  // 3. Offline fallback — ako mreža nije dala pravu sesiju do sada
   setTimeout(async () => {
-    if (sbUser) return;
+    if (sbUser && !sbUser._cachedStub) return;
     goOfflineOrLogin();
   }, 4500);
 }
@@ -5473,6 +5535,11 @@ async function showApp() {
   if (sbUser) await _checkDeviceUserSwitch(sbUser.id);
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('wrapper').style.display = 'flex';
+  // Jedino mjesto gdje se postavlja — tek OVDJE je korisnik stvarno u app-u
+  // (poslije gate-a odobrenja, koji zna vratiti login/pending ekran). Sve
+  // kasnije auth putanje po ovome znaju da NE smiju dizati login preko njega
+  // niti ponovo zvati showApp() (dupli restore slojeva).
+  _appEntered = true;
   _setOfflineMode(!navigator.onLine);
   switchTab('karta');
   loadProj();      // lokalni podaci odmah (sinhrono, brzo)

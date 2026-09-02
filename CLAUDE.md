@@ -80,6 +80,29 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 - **`LOAD_CACHE_ELSE_NETWORK` nikad ne koristiti** — servira ustajale Supabase
   odgovore i offline i online. Cache mode je `LOAD_DEFAULT` + Supabase klijent
   ima `cache:'no-store'` fetch. Ne dirati ni jedno ni drugo.
+- **Pokretanje je OFFLINE-FIRST — nikad ne čekati mrežu da se odluči šta
+  prikazati** (v3.100.0). Ovo je najčešće prijavljivan bug s terena, vraćao se
+  u više oblika: login ekran preko uredno prijavljenog korisnika na slabom
+  signalu. Uzrok je uvijek isti obrazac: `navigator.onLine` na terenu laže
+  `true` na mrtvoj vezi (OS-S4), pa mrežni poziv ne padne nego **VISI** — a
+  startup logika koja čeka njegov ishod stoji s njim. Pravilo: ako postoji
+  keširani profil (`_OL.PROFILE`), `initAuth()` ulazi u app **odmah**
+  (`showApp()`), a prava Supabase sesija se dohvaća tiho u pozadini
+  (`_upgradeToOnlineSession()`). Iz toga slijedi:
+  - `_appEntered` se postavlja na **jednom jedinom mjestu** — u `showApp()`,
+    tek POSLIJE gate-a odobrenja. Nijedna auth putanja ne smije dizati login
+    ekran ni zvati `showApp()` drugi put kad je ta zastavica `true` (drugi
+    poziv = dupli restore svih slojeva karte).
+  - `sbUser` iz keša nosi `_cachedStub: true` — po tome se zna da prava sesija
+    još nije dobijena. Svaka provjera "imamo li sesiju" mora glasiti
+    `sbUser && !sbUser._cachedStub`, ne samo `sbUser`.
+  - Tajmer-sigurnosne mreže (npr. onaj koji forsira login ako se ništa ne
+    prikaže) moraju biti **sporije** od najsporijeg legitimnog offline puta —
+    inače baš one izazovu bug koji treba spriječiti (bio 2000ms vs legitimnih
+    4500ms → v3.99.3).
+  - Testovi: `tests/js/auth-offline-first.test.js` izvlači STVARNI `initAuth`
+    iz `index.html` i pušta ga nad mockovima (mreža koja visi, opoziv pristupa,
+    nema keša...). Pokrenuti ga pri svakoj izmjeni auth/startup toka.
 - **Autofill na dijeljenim uređajima**: login polja imaju `autocomplete="off"`
   i PIN se NE pre-popunjava — sprječava prijavu pod tuđim nalogom.
 - **Sintaks-checker** (regex nad `<script>` blokovima) se zbuni ako komentar
