@@ -4710,7 +4710,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.100.1';
+const APP_VER = 'v3.100.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5663,7 +5663,19 @@ function _zaboravljenPin(e) {
   _dlgConfirm('Za reset PIN-a obratite se administratoru — recite mu svoje ime i prezime, pa će Vam postaviti novi PIN.',
     { title: '🔑 Zaboravljen PIN', okLabel: 'U redu' });
 }
+// Tokom MREŽNOG dijela prijave sakrij logo. Bez ovoga korisnik, poslije što je
+// pritisnuo "Prijavi se", još sekundama gleda veliku sliku — između tog klika i
+// otvaranja app-a idu ČETIRI uzastopna mrežna poziva (get_login_email,
+// signInWithPassword, getUser, sbLoadProfile), pa tek onda showApp(). Forma i
+// statusna poruka ("Povezivanje sa serverom...") ostaju vidljive — nestaje samo
+// slika, tačno kako je traženo. Vraća se ako prijava ne uspije, da ekran ne
+// ostane osakaćen za sljedeći pokušaj.
+function _authBusy(on) {
+  const box = document.querySelector('.auth-logo-box');
+  if (box) box.style.display = on ? 'none' : '';
+}
 function authShowLogin() {
+  _authBusy(false);
   document.getElementById('auth-login-form').style.display = 'block';
   document.getElementById('auth-reg-form').style.display = 'none';
   document.getElementById('auth-err').style.display = 'none';
@@ -5728,6 +5740,7 @@ async function doLogin() {
   }
 
   showAuthErr('Povezivanje sa serverom...');
+  _authBusy(true);   // sakrij logo — slijede 4 mrežna poziva prije showApp()
 
   // Look up internal email by name (prezime može biti prazan za org naloge)
   let email, lookupErr;
@@ -5757,7 +5770,12 @@ async function doLogin() {
   await sbLoadProfile();
   showApp();
   } catch(e) { showAuthErr('Greška: ' + e.message); }
-  finally { _authInFlight = false; }
+  finally {
+    _authInFlight = false;
+    // Ako prijava nije uspjela (nismo ušli u app), vrati logo da ekran ostane
+    // normalan za sljedeći pokušaj.
+    if (!_appEntered) _authBusy(false);
+  }
 }
 
 // --- Register ---

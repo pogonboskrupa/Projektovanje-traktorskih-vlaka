@@ -49,6 +49,8 @@ function extractPlainFn(name) {
   throw new Error('nezatvorena funkcija ' + name);
 }
 const SRC_REVEAL = extractPlainFn('_revealApp');
+const SRC_DO_LOGIN = extractFn('doLogin');
+const SRC_AUTH_BUSY = extractPlainFn('_authBusy');
 
 // ── Mock okruženje ────────────────────────────────────────────────────
 // Vraća { run, adv, log, state } — `run` pokreće initAuth, `adv` pomjera
@@ -266,6 +268,48 @@ await test('showApp: login ekran (logo) se sklanja PRIJE sporih provjera, ne pos
   assert.ok(seen.some(s => s === 'switch:auth-screen=none'),
     'i tokom spore provjere promjene korisnika logo mora već biti sklonjen');
   assert.ok(!seen.includes('AUTH_SCREEN'), 'odobrenom korisniku se login ekran ne smije vratiti');
+});
+
+// ── 8. Logo nestaje ODMAH po pritisku "Prijavi se" ───────────────────
+// Između klika i showApp() idu ČETIRI mrežna poziva; na slaboj vezi to su
+// sekunde tokom kojih se velika slika ne smije zadržati na ekranu.
+await test('doLogin: logo se sakriva čim prijava krene, ne tek kad se app otvori', async () => {
+  const logoBox = { style: { display: '' } };
+  const fields = { 'auth-ime': { value: 'Test' }, 'auth-prezime': { value: 'K' },
+                   'auth-pin': { value: '123456' }, 'auth-err': { style: {} },
+                   'auth-zapamti': { checked: false } };
+  let logoWhenNetworkStarted = null;
+
+  const env = {
+    document: {
+      getElementById: (id) => fields[id] || { style: {}, value: '' },
+      querySelector: (sel) => sel === '.auth-logo-box' ? logoBox : null,
+    },
+    _OL: { load: () => null, PROFILE: 'p' }, _loadSavedUser: () => null,
+    _clearSavedUser: () => {}, _setOfflineMode: () => {}, showToast: () => {},
+    showAuthErr: () => {}, localStorage: { setItem: () => {} },
+    navigator: { onLine: true },
+    sbLoadProfile: async () => {}, showApp: async () => {},
+    sb: {
+      // Prvi mrežni poziv — u tom trenutku logo VEĆ mora biti sakriven
+      rpc: async () => { logoWhenNetworkStarted = logoBox.style.display; return { data: 'a@b.c', error: null }; },
+      auth: {
+        signInWithPassword: async () => ({ error: null }),
+        getUser: async () => ({ data: { user: { id: 'u1' } } }),
+      },
+    },
+    console: { error(){}, warn(){}, log(){} },
+  };
+  const params = Object.keys(env);
+  const api = new Function(params.join(','),
+    `let _authInFlight = false, _appEntered = false;
+     ${SRC_AUTH_BUSY}
+     ${SRC_DO_LOGIN}
+     return { doLogin };`)(...params.map(k => env[k]));
+
+  await api.doLogin();
+  assert.equal(logoWhenNetworkStarted, 'none',
+    'logo mora biti sakriven PRIJE prvog mrežnog poziva, ne poslije prijave');
 });
 
 console.log(`\n${_pass} prošlo, ${_fail} palo`);
