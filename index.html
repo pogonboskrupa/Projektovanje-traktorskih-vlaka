@@ -4706,7 +4706,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.99.2';
+const APP_VER = 'v3.99.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -4744,6 +4744,18 @@ try {
   console.error('Supabase init greška:', e);
   sb = null;
 }
+// Sigurnosna mreža ako initAuth() nekako nikad ne odluči ništa (npr. JS greška
+// prije nego stigne do prve grane) — bez ovoga bi korisnik ostao zaglavljen na
+// praznom/crnom ekranu zauvijek. NE smije biti brži od initAuth()-ovog VLASTITOG
+// robusnog offline lanca ispod (auto-login race 800+1500ms, pa tvrdi fallback
+// na 4500ms) — inače baš OVA "sigurnosna" provjera preduhitri legitimno-sporiji
+// (ali ispravan) offline ulazak na slabom signalu i prisili login ekran preko
+// keširanog korisnika koji je zapravo uredno prijavljen. Prijavljeno s terena:
+// login ekran se znao pojaviti nasred korištenja na slabom/nikakvom signalu
+// (Android zna u pozadini ubiti/rekreirati WebView pod pritiskom memorije, što
+// ponovo pokrene CIJELU stranicu — uklj. ovaj tajmer — a spor/trom mrežni poziv
+// baš tad nije stigao ni uspjeti ni pasti prije 2s). 6000ms je sigurno iznad
+// initAuth()-ovog najsporijeg legitimnog puta (4500ms + obrada).
 setTimeout(()=>{
   const as=document.getElementById('auth-screen');
   const wr=document.getElementById('wrapper');
@@ -4751,7 +4763,7 @@ setTimeout(()=>{
     as.style.display='flex';
     if(typeof authShowLogin==='function') authShowLogin();
   }
-},2000);
+},6000);
 
 let sbUser = null;
 let sbProfile = null;
