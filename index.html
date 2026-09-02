@@ -4710,7 +4710,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.100.0';
+const APP_VER = 'v3.100.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5281,6 +5281,18 @@ let _appEntered = false;
 // nije mogao: skida se OFFLINE oznaka, povlače svježi podaci sa servera i gura
 // se red čekanja. _reloadCoreData je po dizajnu idempotentan (svaki njegov
 // poziv ima vlastite keš guardove), pa je ponovni poziv jeftin i siguran.
+// Otkriva app (skida login ekran, prikazuje glavni prozor). Idempotentno —
+// showApp() ga zove dvaput: rano (čim se zna da gate odobrenja ne blokira, da
+// korisnik ne gleda logo dok traju provjere) i na starom mjestu, poslije njih.
+// Ovdje je JEDINO mjesto gdje se postavlja _appEntered: tek tu je korisnik
+// stvarno u app-u, pa kasnije auth putanje po tome znaju da ne smiju dizati
+// login preko njega niti ponovo zvati showApp() (dupli restore slojeva).
+function _revealApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('wrapper').style.display = 'flex';
+  _appEntered = true;
+}
+
 async function _upgradeToOnlineSession() {
   _setOfflineMode(!navigator.onLine);
   try { await sbLoadProfile(); } catch(e) {}
@@ -5512,6 +5524,17 @@ async function showApp() {
   // Ne oslanjamo se na navigator.onLine (zna lagati na terenu — vidi OS-S4 komentar
   // niže) nego pokušamo sa kratkim timeout-om; na neuspjeh/offline gate ispod radi
   // kao prije (bez regresije za stvarno neodobrene ili stvarno offline korisnike).
+  // Login ekran (sa velikim logom) se sklanja ČIM se zna da gate odobrenja ne
+  // može blokirati — ne tek poslije provjera ispod. Bez ovoga korisnik poslije
+  // uspješne prijave još gleda logo dok traju _checkDeviceUserSwitch i (kad je
+  // profil neodobren) 3s recheck; na sporijem telefonu/vezi to su sekunde i
+  // izgleda kao da se "slika zaglavila" preko app-a. Uslov !_appEntered znači
+  // "prva prijava u ovom učitavanju stranice" — tada u app-u još ništa nije
+  // restaurirano, pa rano otkrivanje ne može pokazati podatke prethodnog
+  // korisnika prije nego _checkDeviceUserSwitch odradi brisanje.
+  const _gateMozeBlokirati = !!(sbProfile && sbProfile.odobren === false && !sbProfile.is_admin);
+  if (!_gateMozeBlokirati && !_appEntered) _revealApp();
+
   if (sbProfile && sbProfile.odobren === false && !sbProfile.is_admin && sbUser && sb) {
     try {
       const _tmo = new Promise((_, rej) => setTimeout(() => rej(new Error('_recheck_timeout')), 3000));
@@ -5533,13 +5556,7 @@ async function showApp() {
   // lokalni sadržaj (offline karte, KML, granice, tačke...) PRIJE restore poziva ispod,
   // da ne dođe do curenja podataka između korisnika na dijeljenom uređaju.
   if (sbUser) await _checkDeviceUserSwitch(sbUser.id);
-  document.getElementById('auth-screen').style.display = 'none';
-  document.getElementById('wrapper').style.display = 'flex';
-  // Jedino mjesto gdje se postavlja — tek OVDJE je korisnik stvarno u app-u
-  // (poslije gate-a odobrenja, koji zna vratiti login/pending ekran). Sve
-  // kasnije auth putanje po ovome znaju da NE smiju dizati login preko njega
-  // niti ponovo zvati showApp() (dupli restore slojeva).
-  _appEntered = true;
+  _revealApp();   // idempotentno — ako je gore već otkriveno, ovo ne mijenja ništa
   _setOfflineMode(!navigator.onLine);
   switchTab('karta');
   loadProj();      // lokalni podaci odmah (sinhrono, brzo)

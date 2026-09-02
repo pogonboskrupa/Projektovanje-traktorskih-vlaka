@@ -35,6 +35,20 @@ function extractFn(name) {
 
 const SRC_INIT_AUTH = extractFn('initAuth');
 const SRC_UPGRADE   = extractFn('_upgradeToOnlineSession');
+const SRC_SHOW_APP  = extractFn('showApp');
+
+// _revealApp nije async — izvuci ga posebno
+function extractPlainFn(name) {
+  const start = HTML.indexOf('function ' + name + '(');
+  assert.ok(start >= 0, 'nije nađena funkcija ' + name);
+  let i = HTML.indexOf('{', start), depth = 0;
+  for (; i < HTML.length; i++) {
+    if (HTML[i] === '{') depth++;
+    else if (HTML[i] === '}') { depth--; if (depth === 0) return HTML.slice(start, i + 1); }
+  }
+  throw new Error('nezatvorena funkcija ' + name);
+}
+const SRC_REVEAL = extractPlainFn('_revealApp');
 
 // ── Mock okruženje ────────────────────────────────────────────────────
 // Vraća { run, adv, log, state } — `run` pokreće initAuth, `adv` pomjera
@@ -202,6 +216,56 @@ await test('Pristup opozvan dok se radilo offline → nadogradnja ga uhvati (pen
     'opozvan pristup mora odmah završiti na ekranu "čeka se odobrenje"');
   assert.ok(!env.log.includes('_reloadCoreData'),
     'opozvanom korisniku se NE smiju povlačiti podaci sa servera');
+});
+
+// ── 7. Logo se NE smije zadržati na ekranu poslije uspješne prijave ──
+// Prijavljeno: "ne smije se pokazivati slika poslije logovanja". showApp() je
+// ranije sklanjao login ekran TEK poslije _checkDeviceUserSwitch (i eventualne
+// 3s provjere odobrenja) — sve to vrijeme je uvećani logo stajao preko app-a.
+await test('showApp: login ekran (logo) se sklanja PRIJE sporih provjera, ne poslije', async () => {
+  const seen = [];
+  const el = () => ({ style: new Proxy({}, { set: (t, k, v) => { t[k] = v; return true; } }) });
+  const els = { 'auth-screen': el(), 'wrapper': el() };
+  let switchResolved = false;
+
+  const env = {
+    document: { getElementById: (id) => els[id] || el() },
+    // Odobren korisnik (odobren nije false) — gate ne blokira. MORA biti
+    // postavljeno PRIJE konstrukcije sandboxa: vrijednosti se hvataju tada.
+    sbProfile: { id: 'u1', odobren: true },
+    sbUser: { id: 'u1' },
+    // Namjerno SPORA provjera promjene korisnika — simulira stvarni slučaj
+    _checkDeviceUserSwitch: async () => {
+      // U trenutku dok ovo traje, login ekran već MORA biti sklonjen.
+      seen.push('switch:auth-screen=' + els['auth-screen'].style.display);
+      await new Promise(r => setTimeout(r, 20));
+      switchResolved = true;
+    },
+    _showAuthScreen: () => seen.push('AUTH_SCREEN'),
+    authShowPending: () => {}, _OL: { save: () => {}, PROFILE: 'p' },
+    sb: null, switchTab: () => {}, loadProj: () => {}, sbInitData: () => {},
+    _processOfflineQueue: () => {}, sqlmapRestoreAll: () => {}, _setOfflineMode: () => {},
+    navigator: { onLine: true, storage: null }, isVodeci: () => false,
+    setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
+    console: { error(){}, warn(){}, log(){} },
+  };
+  const params = Object.keys(env);
+  const api = new Function(params.join(','),
+    `let _appEntered = false;
+     ${SRC_REVEAL}
+     ${SRC_SHOW_APP}
+     return { showApp, entered: () => _appEntered };`)(...params.map(k => env[k]));
+
+  const p = api.showApp();
+  // ODMAH, prije nego se ijedan await razriješi:
+  assert.equal(els['auth-screen'].style.display, 'none',
+    'login ekran mora biti sklonjen ODMAH, ne poslije provjera');
+  assert.equal(els['wrapper'].style.display, 'flex', 'glavni prozor mora biti prikazan odmah');
+  assert.ok(!switchResolved, 'test mora provjeravati stanje PRIJE nego spora provjera završi');
+  await p;
+  assert.ok(seen.some(s => s === 'switch:auth-screen=none'),
+    'i tokom spore provjere promjene korisnika logo mora već biti sklonjen');
+  assert.ok(!seen.includes('AUTH_SCREEN'), 'odobrenom korisniku se login ekran ne smije vratiti');
 });
 
 console.log(`\n${_pass} prošlo, ${_fail} palo`);
