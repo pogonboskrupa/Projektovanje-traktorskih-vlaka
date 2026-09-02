@@ -4710,7 +4710,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.100.2';
+const APP_VER = 'v3.101.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12254,6 +12254,12 @@ map.on('click', e => {
   if (_activeTab !== 'karta') { switchTab('karta'); return; }
   if (_msrOn) return; // izmjera preuzima klikove
   if (_dblClickGuard) return; // suppress the 2nd click of a dblclick
+  // Odabir odjela iz KML-a (doznaka) — mora prije svih alata; klik do samog
+  // poligona često ne stigne jer ga gornji canvas pokupi (vidi _kmlHitTest).
+  if (_dozKmlSelMode) {
+    const kp = _kmlHitTest(e.latlng, true);
+    if (kp) { _dozKmlSelToggle(kp); return; }
+  }
   if (_tackaPlaceMode) {
     const nm = _tackaPlaceNm;
     _tackaExitPlaceMode();
@@ -12305,6 +12311,13 @@ map.on('click', e => {
       selI(bestI);
       showVlakaPopup(bestI, e.latlng);
       return;
+    }
+    // Uvezeni KML/SHP — isti razlog kao proximity fallback iznad: klik do sloja
+    // najčešće uopšte ne stigne jer ga gornji canvas (vlake/tragovi) pokupi.
+    // Vlake imaju prednost (provjerene su gore), pa tek onda uvezeni slojevi.
+    if (_activeTab !== 'teren') {
+      const kl = _kmlHitTest(e.latlng);
+      if (kl) { _kmlOpenPopup(kl, e.latlng); return; }
     }
   }
   // Teren: tap na kartu → prikaži info o lokaciji
@@ -18470,19 +18483,23 @@ function _parseKmlExtData(pm) {
   return ext;
 }
 
+// Otvara info-popup za jedan KML/SHP feature. Izdvojeno iz _bindKmlPopup jer se
+// isti popup mora moći otvoriti i "izvana" — iz map.on('click') fallback-a
+// (_kmlHitTest), kad DOM klik uopšte ne stigne do sloja (vidi napomenu tamo).
+function _kmlOpenPopup(layer, latlng) {
+  if (_dozKmlSelMode && layer._kmlIsPolygon) { _dozKmlSelToggle(layer); return; }
+  const uid = '_kp_' + Math.random().toString(36).slice(2, 8);
+  layer._kmlPopupId = uid;
+  L.popup({ maxWidth: 300, minWidth: 200, className: 'kml-info-popup' })
+    .setLatLng(latlng)
+    .setContent(_kmlPopupHtml(layer, uid))
+    .openOn(map);
+}
+
 function _bindKmlPopup(layer) {
   const _onClick = function(e) {
     L.DomEvent.stopPropagation(e);
-    if (_dozKmlSelMode && layer._kmlIsPolygon) {
-      _dozKmlSelToggle(layer);
-      return;
-    }
-    const uid = '_kp_' + Math.random().toString(36).slice(2, 8);
-    layer._kmlPopupId = uid;
-    const popup = L.popup({ maxWidth: 300, minWidth: 200, className: 'kml-info-popup' })
-      .setLatLng(e.latlng)
-      .setContent(_kmlPopupHtml(layer, uid))
-      .openOn(map);
+    _kmlOpenPopup(layer, e.latlng);
   };
   layer.on('click', _onClick);
 
@@ -18501,6 +18518,98 @@ function _bindKmlPopup(layer) {
     if (layer._map) { try { hit.addTo(layer._map); } catch(e) {} }
     hit.on('click', _onClick);
   }
+}
+
+// ── Zašto KML klik treba fallback preko map.on('click') ──────────────────────
+// Karta radi u canvas modu (preferCanvas:true). Svaki Leaflet canvas renderer je
+// JEDAN <canvas> preko CIJELE karte i sam hvata DOM klik pa tek onda traži koji
+// mu je sloj ispod prsta. Uvezeni KML/SHP crta se u podrazumijevanom canvas-u
+// (overlayPane, z-index 400), a vlake u svom (_vlakeRenderer, pane 'vlakeLines',
+// TAKOĐE z-index 400 — ali kasnije u DOM-u, dakle iznad). Čim u projektu postoji
+// makar JEDNA vlaka, taj gornji canvas prekriva cijelu kartu i pokupi SVAKI klik
+// — bez obzira gdje je vlaka stvarno nacrtana. Klik onda nikad ne stigne do
+// KML canvas-a, pa `layer.on('click')` iz _bindKmlPopup nikad ne opali:
+// uvezeni KML izgleda "mrtav" (tooltip na hover radi, klik ne radi). Isto važi
+// i za pane 'tragMsrLines' (z-index 410) kad se izmjera/tragovi jednom nacrtaju.
+// Isti razlog zašto vlake već imaju svoj proximity fallback niže u map.on('click').
+//
+// Rješenje: kad klik ipak dođe do mape (canvas renderer uvijek proslijedi klik
+// mapi kad pod prstom nema NJEGOV sloj), sami provjerimo KML slojeve. Koristi se
+// Leafletov vlastiti `_containsPoint` gdje postoji — ista semantika kao da je
+// canvas sam pogodio sloj — uz tolerancije za prst na telefonu.
+function _kmlHitTest(latlng, onlyPolygons) {
+  if (!map || !kmlLs.length) return null;
+  const lp  = map.latLngToLayerPoint(latlng);
+  const cp  = map.latLngToContainerPoint(latlng);
+  const TOL_LINE = 20, TOL_POINT = 16, TOL_RING = 12;
+  let best = null;
+
+  // Unazad: kasnije uvezeni sloj je "iznad" i ima prednost, isto kao u canvasu.
+  for (let i = kmlLs.length - 1; i >= 0; i--) {
+    const k = kmlLs[i];
+    if (!k || !k.grp || k.vis === false) continue;
+    if (!map.hasLayer(k.grp)) continue;
+    // SHP slojevi su ugniježđeni (featureGroup → L.geoJSON grupa → path), pa se
+    // silazi kroz grupe dok se ne dođe do samih geometrija.
+    const kids = [];
+    try {
+      const walk = grp => grp.eachLayer(l => (l.eachLayer && l._kmlName === undefined) ? walk(l) : kids.push(l));
+      walk(k.grp);
+    } catch(e) { continue; }
+    for (let j = kids.length - 1; j >= 0; j--) {
+      const l = kids[j];
+      if (l._kmlName === undefined) continue;   // labela ili nevezani sloj
+      if (onlyPolygons && !l._kmlIsPolygon) continue;
+
+      if (l._kmlIsPoint) {
+        if (onlyPolygons) continue;
+        try {
+          const d = cp.distanceTo(map.latLngToContainerPoint(l.getLatLng()));
+          if (d <= TOL_POINT) return l;   // tačka je najsitniji cilj — odmah uzmi
+        } catch(e) {}
+        continue;
+      }
+
+      if (l._kmlIsPolygon) {
+        let inside = false;
+        try { inside = !!(l._containsPoint && l._containsPoint(lp)); } catch(e) {}
+        // Rezerva: prazan (nepopunjen) poligon u nekim slučajevima ne odgovara na
+        // _containsPoint — provjeri i blizinu same granice.
+        if (!inside) {
+          try {
+            if (l.getBounds().pad(0.02).contains(latlng) &&
+                _kmlRingDistPx(l.getLatLngs(), cp) <= TOL_RING) inside = true;
+          } catch(e) {}
+        }
+        if (inside && !best) best = l;      // poligon je "najslabiji" pogodak
+        continue;
+      }
+
+      // Linija — tolerancija u pikselima (isti prag kao nevidljivi hit-sloj)
+      try {
+        if (_kmlRingDistPx(l.getLatLngs(), cp) <= TOL_LINE) return l;
+      } catch(e) {}
+    }
+  }
+  return best;
+}
+
+// Najmanja udaljenost (px) od tačke do bilo kojeg segmenta (ugniježđeni nizovi
+// latlng-ova: linija, prsten poligona, multi-geometrija).
+function _kmlRingDistPx(latlngs, cp) {
+  if (!latlngs || !latlngs.length) return Infinity;
+  if (Array.isArray(latlngs[0])) {
+    let m = Infinity;
+    for (const sub of latlngs) m = Math.min(m, _kmlRingDistPx(sub, cp));
+    return m;
+  }
+  let m = Infinity, prev = null;
+  for (const ll of latlngs) {
+    const p = map.latLngToContainerPoint(ll);
+    if (prev) m = Math.min(m, _distToSegPx(cp, prev, p));
+    prev = p;
+  }
+  return m;
 }
 
 function _kmlPopupHtml(layer, uid) {
@@ -30609,6 +30718,18 @@ async function _loadOneShp(bucketName, file, opts, extractOdjeli, existingPaths)
         pointToLayer: (_, ll) => L.circleMarker(ll, { radius: 4, ...styleOpts }),
       });
       if (nm) layer.bindTooltip(_escHtml(String(nm)), { sticky: true, opacity: 0.9 });
+      // Isti info-popup kao za KML: SHP je u istoj listi "Granice" i korisnik s
+      // razlogom očekuje da se i on može kliknuti. Atributi iz .dbf-a idu u
+      // _kmlExtData pa se prikažu kao tabela u popupu.
+      layer.eachLayer(child => {
+        const gt = f.geometry?.type || '';
+        child._kmlIsPolygon = /Polygon/.test(gt);
+        child._kmlIsPoint   = /Point/.test(gt);
+        child._kmlName    = nm ? String(nm) : '';
+        child._kmlDesc    = '';
+        child._kmlExtData = f.properties || {};
+        _bindKmlPopup(child);
+      });
       layer.addTo(grp);
       // Permanentna labela na centru poligona
       if (nm && f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')) {

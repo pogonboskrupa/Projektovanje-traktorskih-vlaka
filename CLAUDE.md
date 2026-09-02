@@ -107,6 +107,21 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   i PIN se NE pre-popunjava — sprječava prijavu pod tuđim nalogom.
 - **Sintaks-checker** (regex nad `<script>` blokovima) se zbuni ako komentar
   sadrži doslovno `<script>` — u komentarima pisati "JS blok".
+- **Canvas pane iznad drugog "pojede" sve klikove** (v3.101.0): karta je
+  `preferCanvas:true`, a svaki Leaflet canvas renderer je JEDAN `<canvas>` preko
+  CIJELE karte koji sam hvata DOM klik pa tek onda traži svoj sloj pod prstom.
+  Uvezeni KML/SHP se crta u podrazumijevanom canvas-u (`overlayPane`, z-index
+  400), vlake u svom (`_vlakeRenderer`, pane `vlakeLines`, **također 400** ali
+  kasnije u DOM-u = iznad). Čim u projektu postoji makar JEDNA vlaka — bilo gdje
+  na svijetu, geometrija nije bitna — gornji canvas pokupi svaki klik i
+  `layer.on('click')` na KML sloju nikad ne opali: uvezeni KML izgleda "mrtav"
+  (hover tooltip radi, klik ne radi). Isto važi za `tragMsrLines` (410) čim se
+  nacrta trag/izmjera. Zato vlake odavno imaju proximity fallback u
+  `map.on('click')`, a od v3.101.0 ga ima i KML (`_kmlHitTest` → `_kmlOpenPopup`,
+  koristi Leafletov `_containsPoint` gdje postoji + piksel-tolerancije za prst).
+  **Novi interaktivni canvas pane = novi sloj koji krade klikove svemu ispod** —
+  ili mu daj vlastiti fallback, ili ga ne pravi. Test:
+  `tests/js/kml-click.test.js` (izvlači STVARNI `_kmlHitTest` iz index.html).
 - **UI keševi nisu izvor istine**: `_dozVlakeIdxs` i slični nizovi indeksa su
   samo za prikaz liste — svaka analiza/izračun mora raditi svjež filter nad
   `vlake[]` (bug "Osvježi analizu ne vidi nove vlake").
