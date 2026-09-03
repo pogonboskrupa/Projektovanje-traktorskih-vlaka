@@ -365,7 +365,7 @@ html, body { height:100%; font-family: Arial, sans-serif; background:#1a1a2e; co
    postavke (Teren/Postavke/Tragovi) — bez -webkit-overflow-scrolling touch skrol
    u WebView-u zna biti trom/isprekidan. overscroll-behavior:contain sprječava da
    skrol panela "procuri" u pozadinsku kartu. */
-#teren-panel, #postavke-panel, #tragovi-panel {
+#teren-panel, #postavke-panel, #tragovi-panel, #pozari-panel {
   -webkit-overflow-scrolling:touch;
   overscroll-behavior:contain;
   touch-action:pan-y;
@@ -377,7 +377,7 @@ html, body { height:100%; font-family: Arial, sans-serif; background:#1a1a2e; co
    komad karte. Isto pravilo kao Vlake/Projekat/Doznaka: na ≤580px panel uzima
    cijeli ekran. Desktop (sidebar pored karte) ostaje nepromijenjen. */
 @media (max-width:580px) {
-  #teren-panel, #postavke-panel, #tragovi-panel, #admin-panel {
+  #teren-panel, #postavke-panel, #tragovi-panel, #admin-panel, #pozari-panel {
     flex:1 1 100%; width:100%; min-width:0;
   }
 }
@@ -1792,6 +1792,19 @@ select:focus { outline:none; border-color:#3b82f6; }
 .map-text-label.editing div { outline: 2px dashed #fbbf24; padding: 2px 4px; border-radius: 3px; }
 /* Sakrij tekstualne labele pri krupnoj razmjeri */
 #map.labels-hidden .map-text-label { visibility: hidden; pointer-events: none; }
+
+/* ── Marker detekcije požara (v3.103.1) ─────────────────────────── */
+.poz-mk {
+  width:16px; height:16px; margin:3px; border-radius:50%;
+  border:2px solid rgba(255,255,255,0.9);
+  box-shadow:0 0 6px rgba(0,0,0,0.6);
+}
+/* Svježa detekcija (< 6h) pulsira — na karti punoj slojeva se inače izgubi */
+.poz-mk.svjez { animation:pozPuls 1.6s ease-in-out infinite; }
+@keyframes pozPuls {
+  0%,100% { transform:scale(1);    box-shadow:0 0 6px rgba(0,0,0,0.6), 0 0 0 0 rgba(239,68,68,0.55); }
+  50%     { transform:scale(1.12); box-shadow:0 0 6px rgba(0,0,0,0.6), 0 0 0 9px rgba(239,68,68,0); }
+}
 
 /* ── KML/SHP permanentne oznake odjela ──────────────────── */
 .kml-label {
@@ -3586,6 +3599,10 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
     <button class="tab-btn" onclick="switchTab('projekat')"><svg class="tbi" viewBox="0 0 24 24"><polygon points="3,7 3,19 21,19 21,9 11,9 9,6 3,6"/></svg> Projekat</button>
     <button class="tab-btn" onclick="switchTab('vlake')"><svg class="tbi" viewBox="0 0 24 24"><polygon points="4,19 4,6 19,19"/><g stroke-width="1.3"><line x1="7.75" y1="9.25" x2="8.93" y2="7.89"/><line x1="10.75" y1="11.85" x2="11.93" y2="10.49"/><line x1="13.75" y1="14.45" x2="14.93" y2="13.09"/><line x1="16.75" y1="17.05" x2="17.93" y2="15.69"/></g></svg> Vlake<span class="tab-notif" id="notif-vlake"></span></button>
     <button class="tab-btn" onclick="switchTab('doznaka')"><svg class="tbi" viewBox="0 0 24 24"><polygon points="12,3 6,11 18,11"/><polygon points="12,8 5,17 19,17"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="18" cy="6" r="3.2" stroke-width="1.6"/></svg> Doznaka<span class="tab-notif" id="notif-doznaka"></span></button>
+    <!-- Požari — vidljiv svima (v3.103.1). Bez inline boje: obojene tab labele u
+         ovoj traci znače "tab vezan za ulogu" (Korisnici/Obavještenja/Teren), a ovaj
+         je za sve korisnike pa ide standardni stil. -->
+    <button class="tab-btn" onclick="switchTab('pozari')"><svg class="tbi" viewBox="0 0 24 24"><path d="M12 2.6c.5 2.7 2.3 4 3.6 5.6 1.3 1.7 2.1 3.4 2.1 5.4 0 3.5-2.6 6.4-5.7 6.4s-5.7-2.9-5.7-6.4c0-1.6.5-2.9 1.4-4.1.3 1 .9 1.9 1.8 2.3-.5-3 .9-6.6 2.5-9.2z"/><path d="M12 20c1.7 0 3-1.3 3-3 0-1.9-1.9-2.8-1.9-4.9-1.5 1-2.4 2.3-2.4 3.8 0 .5.1.9.2 1.3-.4-.3-.7-.8-.9-1.3-.6.7-1 1.5-1 2.4 0 1.5 1.3 2.7 3 2.7z" stroke-width="1.3"/></svg> Požari</button>
     <button class="tab-btn" id="admin-tab-btn" style="display:none;color:#fbbf24;" onclick="switchTab('admin')"><svg class="tbi" viewBox="0 0 24 24"><circle cx="16.5" cy="8.5" r="2.6"/><path d="M11 21c0-3.6 2.5-6.3 5.5-6.3S22 17.4 22 21"/><circle cx="9" cy="8" r="3.3"/><path d="M2.5 21c0-4.3 3-7.5 6.5-7.5s6.5 3.2 6.5 7.5"/></svg> Korisnici<span class="tab-notif" id="notif-admin"></span></button>
     <button class="tab-btn" id="postavke-tab-btn" style="display:none;color:#a78bfa;" onclick="switchTab('postavke')"><svg class="tbi" viewBox="0 0 24 24" stroke-width="1.5"><polygon points="22.1,12 19.39,15.06 19.14,19.14 15.06,19.39 12,22.1 8.94,19.39 4.86,19.14 4.61,15.06 1.9,12 4.61,8.94 4.86,4.86 8.94,4.61 12,1.9 15.06,4.61 19.14,4.86 19.39,8.94"/><circle cx="12" cy="12" r="5.3" stroke-width="1.6"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg> Obavještenja</button>
     <button class="tab-btn" id="teren-tab-btn" style="display:none;color:#34d399;" onclick="switchTab('teren')"><svg class="tbi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polygon points="12,5.5 15,12 12,18.5" stroke-width="1.2"/><polygon points="12,5.5 9,12 12,18.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg> Teren</button>
@@ -4077,6 +4094,15 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
     </div>
 
     <!-- ═══ TEREN PANEL (ŠPD US ŠUME terenski korisnici) ═══ -->
+    <!-- ═══ POŽARI PANEL ═══ -->
+    <div id="pozari-panel" style="display:none;flex-direction:column;height:100%;overflow-y:auto;background:#0f172a;">
+      <div style="padding:14px 16px 10px;border-bottom:1px solid #1e3a5f;flex-shrink:0;">
+        <div style="font-weight:700;color:#f97316;font-size:15px;">🔥 Požari</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px;">Detekcija, opožarene površine i opasnost</div>
+      </div>
+      <div id="poz-body" style="padding:14px 16px;"></div>
+    </div>
+
     <div id="teren-panel" style="display:none;flex-direction:column;height:100%;overflow-y:auto;background:#0f172a;">
       <!-- Header -->
       <div style="padding:14px 16px 10px;border-bottom:1px solid #14532d;flex-shrink:0;background:linear-gradient(135deg,#064e3b22,transparent);">
@@ -4774,7 +4800,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.103.0';
+const APP_VER = 'v3.103.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5670,6 +5696,19 @@ function _startupRestore() {
     korak('localKml',  () => _localKmlRestore());
     korak('kmlcInit',  () => _kmlcInit());   // lista IDB ključeva za offline bedž
     korak('temRestore',() => _temRestore()); // tematska .gpkg karta iz IDB (async)
+    // Požari: ako je prikaz bio uključen, vrati ga — prvo iz keša (odmah,
+    // radi i offline), pa tihi osvježavajući dohvat ako ima mreže.
+    korak('pozari', () => {
+      if (localStorage.getItem(_POZ_ON_KEY) !== '1') return;
+      _poziOn = true;
+      const c = _poziLoadCache();
+      if (c && c.pts) {
+        _poziPts = _poziFilterBlizu(c.pts, _poziRefTacka());
+        _poziMeta = { izvor:c.izvor, naziv:c.naziv, dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true };
+        _poziRender();
+      }
+      if (navigator.onLine) _poziLoad(true);
+    });
     // Trajna pohrana: bez persist() browser pod pritiskom diska smije obrisati
     // CIJELI Cache Storage/IDB (sve offline pločice i karte odjednom). Uz persist()
     // pregledano/preuzeto ostaje dok korisnik sam ne obriše.
@@ -11616,17 +11655,22 @@ function _vlNagibToggle(on) {
 }
 
 map.createPane('refKarte');    map.getPane('refKarte').style.zIndex    = 620;
+// Požari iznad markera (600) — moraju se vidjeti preko svega. DIV markeri, ne
+// canvas: canvas sloj preko cijele karte bi krao klikove svemu ispod (vidi
+// zamku "Canvas pane iznad drugog" u CLAUDE.md); DIV ikonica hvata klik samo
+// na svojih 22px.
+map.createPane('pozariPane'); map.getPane('pozariPane').style.zIndex  = 645;
 map.createPane('putevi');      map.getPane('putevi').style.zIndex      = 390;
 map.createPane('demOverlay'); map.getPane('demOverlay').style.zIndex = 250;
 const _puteviRenderer = L.canvas({ pane: 'putevi', padding: 0.3 });
 // _WC_CACHE/CachedWCover moraju biti definisani PRIJE TL (referenciran unutar
-// njega) — _FIRMS_CACHE/CachedFirms grupisan ovdje iz istog razloga (koristi
-// ga _OVL.pozari niže), iako TL njega ne treba.
-const _FIRMS_CACHE = 'tvlake-firms-v1';
+// njega) — _EFFIS_CACHE/CachedEffis grupisan ovdje iz istog razloga (koriste
+// ga _OVL.fwi i _OVL.opozareno niže), iako TL njega ne treba.
+const _EFFIS_CACHE = 'tvlake-effis-v1';
 const _WC_CACHE    = 'tvlake-wcover-v1';
 // WMS varijanta iste keš/timeout/retry logike kao CachedTopo/CachedSat (vidi
 // napomenu kod makeCachedTileLayer) — bbox GetMap zahtjev umjesto XYZ predloška.
-const CachedFirms  = makeCachedTileLayer(_FIRMS_CACHE, L.TileLayer.WMS);
+const CachedEffis  = makeCachedTileLayer(_EFFIS_CACHE, L.TileLayer.WMS);
 const CachedWCover = makeCachedTileLayer(_WC_CACHE, L.TileLayer.WMS);
 const TL = {
   '⛰ Topo':    new CachedTopo('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxNativeZoom:17,maxZoom:22,subdomains:['a','b','c'],keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
@@ -11927,21 +11971,497 @@ const _OVL = {
   nv:    new DemNV(   { pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.75, attribution:'', keepBuffer:6 }),
   ekspo: new DemEkspo({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.80, attribution:'', keepBuffer:6 }),
   kont:  new DemContour({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.9, attribution:'', keepBuffer:6 }),
-  // NASA FIRMS — aktivni požari zadnjih 24h (VIIRS/SNPP). Besplatan WMS bez
-  // ključa. Endpoint/naziv sloja NIJE moguće provjeriti iz ovog sandboxa
-  // (egress dozvoljava samo uzak spisak domena čak i za postojeće, uredno
-  // radeće slojeve — vidi napomenu kod _WC_CACHE ispod) — provjeriti na
-  // stvarnom terenskom uređaju prije oslanjanja na ovaj sloj.
-  pozari: new CachedFirms('https://firms.modaps.eosdis.nasa.gov/wms/', {
-    layers: 'fires_viirs_snpp_24hrs', format: 'image/png', transparent: true,
-    version: '1.1.1', pane: 'demOverlay', maxZoom: 22, opacity: 0.9, attribution: 'NASA FIRMS'
+  // ── EFFIS (Copernicus / JRC) — evropski sistem za šumske požare ──────────
+  // v3.103.1: rasterski FIRMS WMS sloj koji je ovdje stajao je kod korisnika
+  // bio PRAZAN i nije se moglo utvrditi zašto (nema fires? pao endpoint? nema
+  // CORS?). Zamijenjen je PODATKOVNIM slojem detekcija (_poziLoad niže) koji
+  // uvijek zna reći ŠTA se desilo, plus ova dva EFFIS rasterska sloja koja
+  // daju ono što tačkasta detekcija ne može:
+  //   fwi — indeks opasnosti od požara (prognoza, gdje je danas rizično)
+  //   opozareno — opožarene površine (gdje je STVARNO gorjelo, za sanaciju)
+  // EFFIS pokriva cijelu Evropu uključujući BiH, besplatan i bez ključa.
+  // Endpoint nije bilo moguće provjeriti iz sandboxa (vidi CLAUDE.md, sekcija
+  // o dodavanju novog mrežnog sloja) — "Provjeri izvore" dugme u panelu
+  // Požari testira sve ovo NA UREĐAJU i kaže tačno šta radi a šta ne.
+  fwi: new CachedEffis('https://maps.effis.emergency.copernicus.eu/gwis', {
+    layers: 'ecmwf.fwi', format: 'image/png', transparent: true,
+    version: '1.1.1', pane: 'demOverlay', maxZoom: 22, opacity: 0.55, attribution: 'Copernicus EFFIS'
+  }),
+  opozareno: new CachedEffis('https://maps.effis.emergency.copernicus.eu/gwis', {
+    layers: 'modis.ba', format: 'image/png', transparent: true,
+    version: '1.1.1', pane: 'demOverlay', maxZoom: 22, opacity: 0.75, attribution: 'Copernicus EFFIS'
   })
 };
-let _ovlState = { elev: false, slope: false, nv: false, ekspo: false, kont: false, pozari: false };
+let _ovlState = { elev: false, slope: false, nv: false, ekspo: false, kont: false, fwi: false, opozareno: false };
 try { Object.assign(_ovlState, JSON.parse(localStorage.getItem('tvlake_ovl_state') || '{}')); } catch {}
 // Restore overlay visibility
 Object.entries(_ovlState).forEach(([k,v]) => { if (v && _OVL[k]) _OVL[k].addTo(map); });
 setTimeout(_demLegendUpdate, 0); // after DOM ready
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POŽARI — detekcija sa satelita kao PODACI, ne kao slika (v3.103.1)
+// ---------------------------------------------------------------------------
+// Prva verzija (v3.103.0) je bila rasterski FIRMS WMS sloj i kod korisnika je
+// ostala PRAZNA. Problem nije samo bio "ne radi" nego što se iz prazne karte
+// NE MOŽE zaključiti zašto: nema požara u okolini (najčešći i sasvim ispravan
+// ishod!), pao endpoint, pogrešan naziv sloja, ili server ne šalje CORS
+// zaglavlja pa fetch padne. Sve to izgleda identično — prazno.
+//
+// Zato se detekcije sada povlače kao PODACI (CSV sa tačkama), ne kao gotova
+// slika. Prednosti koje slika ne može dati:
+//   • "0 požara u krugu 150 km" je jasan, tačan odgovor — ne dvosmislena praznina
+//   • udaljenost i azimut od MOJE pozicije do svakog požara
+//   • popup sa vremenom detekcije, satelitom, pouzdanošću i snagom (FRP)
+//   • radi na svakom zumu (rasterski FIRMS sloj je grub i mutan na z14+)
+//   • keš zadnjeg dohvata je par KB → radi offline, sa jasnom starošću podatka
+//
+// Izvori se probavaju REDOM dok jedan ne uspije; koji je uspio pamti se pa
+// sljedeći put ide prvi. "Provjeri izvore" (_poziProvjeriIzvore) testira sve
+// redom i kaže tačno šta koji vraća — to je alat kojim se sa terena utvrdi
+// šta radi, jer se iz razvojnog okruženja nijedan vanjski server ne može
+// dozvati (vidi CLAUDE.md).
+// ═══════════════════════════════════════════════════════════════════════════
+const _POZ_CACHE_KEY = 'tvlake_pozari_cache';
+const _POZ_SRC_KEY   = 'tvlake_pozari_izvor';
+const _POZ_ON_KEY    = 'tvlake_pozari_on';
+const _POZ_RADIUS_KM = 150;    // šire od bilo koje šumarije — da se vidi i šta se približava
+
+// Kandidati. FIRMS objavljuje gotove regionalne CSV izvoze bez ključa; Europe
+// pokriva BiH. Tri satelita jer svaki ima svoje preletе — ako jedan ne odgovori
+// ili nema podataka, sljedeći obično ima.
+const _POZ_IZVORI = [
+  { id:'viirs_snpp', naziv:'VIIRS S-NPP (375m)',
+    url:'https://firms.modaps.eosdis.nasa.gov/data/active_fire/suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_Europe_24h.csv' },
+  { id:'viirs_noaa20', naziv:'VIIRS NOAA-20 (375m)',
+    url:'https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_Europe_24h.csv' },
+  { id:'viirs_noaa21', naziv:'VIIRS NOAA-21 (375m)',
+    url:'https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-21-viirs-c2/csv/J2_VIIRS_C2_Europe_24h.csv' },
+  { id:'modis', naziv:'MODIS Terra/Aqua (1km)',
+    url:'https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis-c6.1/csv/MODIS_C6_1_Europe_24h.csv' }
+];
+
+let _poziPts = [];          // [{la,lo,dt,sat,conf,frp}]
+let _poziLayer = null;      // L.layerGroup markera
+let _poziMeta = null;       // {izvor, naziv, dohvacenoMs, ukupno}
+let _poziOn = false;
+let _poziBusy = false;
+
+// FIRMS CSV: header pa redovi. Kolone se traže PO IMENU (ne po poziciji) jer
+// VIIRS i MODIS nemaju isti raspored (bright_ti4 vs brightness itd.).
+function _poziParseCsv(txt) {
+  const lines = String(txt || '').trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const head = lines[0].split(',').map(s => s.trim().toLowerCase());
+  const ix = n => head.indexOf(n);
+  const iLa = ix('latitude'), iLo = ix('longitude');
+  if (iLa < 0 || iLo < 0) return [];                    // nije FIRMS CSV
+  const iDat = ix('acq_date'), iVri = ix('acq_time'), iSat = ix('satellite');
+  const iConf = ix('confidence'), iFrp = ix('frp'), iDn = ix('daynight');
+  const out = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split(',');
+    if (c.length < head.length) continue;
+    const la = parseFloat(c[iLa]), lo = parseFloat(c[iLo]);
+    if (!isFinite(la) || !isFinite(lo)) continue;
+    // acq_time je HHMM ili HMM (npr. "134" = 01:34 UTC)
+    const hhmm = String(iVri >= 0 ? c[iVri] : '').trim().padStart(4, '0');
+    const dt = (iDat >= 0 ? c[iDat] : '') + 'T' + hhmm.slice(0, 2) + ':' + hhmm.slice(2, 4) + ':00Z';
+    out.push({
+      la, lo,
+      dt,
+      sat:  iSat  >= 0 ? String(c[iSat]).trim()  : '',
+      conf: iConf >= 0 ? String(c[iConf]).trim() : '',
+      frp:  iFrp  >= 0 ? parseFloat(c[iFrp])     : NaN,
+      noc:  iDn   >= 0 ? String(c[iDn]).trim().toUpperCase() === 'N' : false
+    });
+  }
+  return out;
+}
+
+// Pouzdanost: VIIRS daje l/n/h, MODIS broj 0-100 — normalizuj na jedno.
+function _poziPouzdanost(conf) {
+  const s = String(conf).trim().toLowerCase();
+  if (s === 'h' || s === 'high')    return { txt:'visoka',  boja:'#dc2626', rang:3 };
+  if (s === 'n' || s === 'nominal') return { txt:'srednja', boja:'#f97316', rang:2 };
+  if (s === 'l' || s === 'low')     return { txt:'niska',   boja:'#facc15', rang:1 };
+  const n = parseFloat(s);
+  if (isFinite(n)) {
+    if (n >= 80) return { txt:'visoka ('  + n + '%)', boja:'#dc2626', rang:3 };
+    if (n >= 50) return { txt:'srednja (' + n + '%)', boja:'#f97316', rang:2 };
+    return          { txt:'niska ('   + n + '%)', boja:'#facc15', rang:1 };
+  }
+  return { txt:'nepoznata', boja:'#f97316', rang:2 };
+}
+
+// Referentna tačka za "blizu mene": GPS ako ga ima, inače centar karte.
+function _poziRefTacka() {
+  if (typeof lastP !== 'undefined' && lastP && isFinite(lastP.la)) return { la:lastP.la, lo:lastP.lo, gps:true };
+  const c = map.getCenter();
+  return { la:c.lat, lo:c.lng, gps:false };
+}
+
+function _poziFilterBlizu(pts, ref) {
+  return pts
+    .map(p => ({ ...p, d: dst(ref.la, ref.lo, p.la, p.lo) }))
+    .filter(p => p.d <= _POZ_RADIUS_KM * 1000)
+    .sort((a, b) => a.d - b.d);
+}
+
+// Dohvat: probaj izvore redom (zapamćeni prvi), vrati {ok, pts, izvor, greska}.
+async function _poziDohvati() {
+  const zapamcen = localStorage.getItem(_POZ_SRC_KEY);
+  const redom = zapamcen
+    ? [..._POZ_IZVORI.filter(i => i.id === zapamcen), ..._POZ_IZVORI.filter(i => i.id !== zapamcen)]
+    : _POZ_IZVORI.slice();
+  const greske = [];
+  for (const izv of redom) {
+    try {
+      const r = await _fetchT(izv.url, 15000, { mode:'cors' });
+      if (!r.ok) { greske.push(izv.naziv + ': HTTP ' + r.status); continue; }
+      const txt = await r.text();
+      const pts = _poziParseCsv(txt);
+      if (!pts.length && !/latitude/i.test(txt)) { greske.push(izv.naziv + ': neočekivan odgovor'); continue; }
+      localStorage.setItem(_POZ_SRC_KEY, izv.id);
+      return { ok:true, pts, izvor:izv };
+    } catch(e) {
+      // Najčešće: nema CORS zaglavlja ili nema mreže. Poruka to razdvaja.
+      greske.push(izv.naziv + ': ' + (e?.name === 'TypeError' ? 'blokiran (CORS/mreža)' : (e?.message || 'greška')));
+    }
+  }
+  return { ok:false, greska: greske.join(' · ') };
+}
+
+function _poziSaveCache(pts, izvor) {
+  try {
+    localStorage.setItem(_POZ_CACHE_KEY, JSON.stringify({
+      ts: Date.now(), izvor: izvor.id, naziv: izvor.naziv,
+      // Keširaj samo okolinu — cijela Evropa zna biti par hiljada tačaka.
+      pts: _poziFilterBlizu(pts, _poziRefTacka()).slice(0, 500).map(p => ({ la:p.la, lo:p.lo, dt:p.dt, sat:p.sat, conf:p.conf, frp:p.frp, noc:p.noc }))
+    }));
+  } catch(e) {}
+}
+function _poziLoadCache() {
+  try { return JSON.parse(localStorage.getItem(_POZ_CACHE_KEY)); } catch(e) { return null; }
+}
+
+// Bosanska množina: 1 detekcija, 2-4 detekcije, 5+ detekcija (i 11-14 → detekcija)
+function _poziBrojRijec(n) {
+  const d1 = n % 10, d2 = n % 100;
+  if (d1 === 1 && d2 !== 11) return n + ' aktivna detekcija';
+  if (d1 >= 2 && d1 <= 4 && (d2 < 12 || d2 > 14)) return n + ' aktivne detekcije';
+  return n + ' aktivnih detekcija';
+}
+
+// FIRMS u CSV-u daje kratke kodove satelita — razvij ih u čitljivo ime.
+function _poziSatelit(kod) {
+  const orig = String(kod || '').trim();
+  const k = orig.toUpperCase();
+  // Fallback vraća ORIGINAL, ne verziju velikim slovima — MODIS u CSV-u već
+  // piše puno ime ("Terra"/"Aqua") pa bi ga uppercase pretvorio u "TERRA".
+  return { 'N':'Suomi-NPP', '1':'NOAA-20', 'J1':'NOAA-20', '2':'NOAA-21', 'J2':'NOAA-21',
+           'T':'Terra', 'A':'Aqua' }[k] || (orig || '—');
+}
+
+function _poziStarost(ms) {
+  const min = Math.round((Date.now() - ms) / 60000);
+  if (min < 2)  return 'upravo';
+  if (min < 60) return 'prije ' + min + ' min';
+  const h = Math.round(min / 60);
+  if (h < 48) return 'prije ' + h + ' h';
+  return 'prije ' + Math.round(h / 24) + ' dana';
+}
+
+// Glavni ulaz: dohvati (ili uzmi keš) pa nacrtaj.
+async function _poziLoad(tiho) {
+  if (_poziBusy) return;
+  _poziBusy = true;
+  _poziStatusSet('⏳ Dohvatam detekcije…');
+  try {
+    const r = await _poziDohvati();
+    const ref = _poziRefTacka();
+    if (r.ok) {
+      _poziSaveCache(r.pts, r.izvor);
+      _poziPts = _poziFilterBlizu(r.pts, ref);
+      _poziMeta = { izvor:r.izvor.id, naziv:r.izvor.naziv, dohvacenoMs:Date.now(), ukupno:r.pts.length, kes:false };
+    } else {
+      const c = _poziLoadCache();
+      if (!c) {
+        _poziMeta = { greska: r.greska };
+        _poziPts = [];
+        _poziRender();
+        _poziStatusSet('❌ Nijedan izvor nije dostupan');
+        if (!tiho) _dlgConfirm(
+          'Nijedan izvor detekcija nije odgovorio.\n\n' + r.greska +
+          '\n\nAko si offline, ovo je očekivano — podaci o požarima traže internet. ' +
+          'Ako ima interneta, otvori "Provjeri izvore" za detalje.',
+          { title:'🔥 Požari — nema podataka', okLabel:'U redu' });
+        return;
+      }
+      _poziPts = _poziFilterBlizu(c.pts || [], ref);
+      _poziMeta = { izvor:c.izvor, naziv:c.naziv, dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true };
+    }
+    _poziRender();
+    const s = _poziSazetak();
+    _poziStatusSet(s.kratko);
+    if (!tiho) showToast(s.toast);
+  } finally {
+    _poziBusy = false;
+  }
+}
+
+// Sažetak koji NIKAD nije dvosmislen — "nema požara" i "ne mogu dohvatiti"
+// su dvije jasno različite poruke.
+function _poziSazetak() {
+  const m = _poziMeta || {};
+  if (m.greska) return { kratko:'❌ nedostupno', toast:'❌ Požari: nijedan izvor nije dostupan' };
+  const st = m.dohvacenoMs ? _poziStarost(m.dohvacenoMs) : '';
+  const izv = (m.naziv || '') + (m.kes ? ' · iz keša' : '');
+  if (!_poziPts.length) {
+    return {
+      kratko: '✓ nema požara · ' + izv + (st ? ' · ' + st : ''),
+      toast:  '✓ Nema aktivnih požara u krugu ' + _POZ_RADIUS_KM + ' km (' + izv + ', ' + st + ')'
+    };
+  }
+  const naj = _poziPts[0];
+  const ref2 = _poziRefTacka();
+  const smjer = _azimutSmjer(_bearing(ref2.la, ref2.lo, naj.la, naj.lo));
+  return {
+    kratko: '🔥 ' + _poziPts.length + ' · najbliža ' + fmtL(naj.d) + ' ' + smjer + ' · ' + izv,
+    toast:  '🔥 ' + _poziBrojRijec(_poziPts.length) +
+            ' — najbliža ' + fmtL(naj.d) + ' ' + smjer + ' (' + izv + ', ' + st + ')'
+  };
+}
+
+function _poziStatusSet(txt) {
+  const el = document.getElementById('poz-status');
+  if (el) el.textContent = txt;
+  _poziRenderPanel();
+}
+
+// Marker: DIV ikonica (ne canvas!) — canvas sloj preko cijele karte bi krao
+// klikove svemu ispod (vidi zamku "Canvas pane iznad drugog" u CLAUDE.md).
+function _poziIcon(p) {
+  const pz = _poziPouzdanost(p.conf);
+  const svjez = (Date.now() - Date.parse(p.dt || 0)) < 6 * 3600 * 1000;
+  return L.divIcon({
+    className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+    html: `<div class="poz-mk${svjez ? ' svjez' : ''}" style="background:${pz.boja};"></div>`
+  });
+}
+
+function _poziRender() {
+  if (_poziLayer) { try { map.removeLayer(_poziLayer); } catch(e) {} }
+  _poziLayer = L.layerGroup([], { pane:'pozariPane' });
+  const ref = _poziRefTacka();
+  _poziPts.forEach((p, i) => {
+    const mk = L.marker([p.la, p.lo], { icon:_poziIcon(p), pane:'pozariPane', zIndexOffset:900 });
+    mk.bindPopup(_poziPopupHtml(p, ref), { maxWidth:280, className:'kml-info-popup' });
+    mk.addTo(_poziLayer);
+  });
+  if (_poziOn) _poziLayer.addTo(map);
+}
+
+function _poziPopupHtml(p, ref) {
+  const pz = _poziPouzdanost(p.conf);
+  const d = dst(ref.la, ref.lo, p.la, p.lo);
+  const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, p.la, p.lo));
+  const t = Date.parse(p.dt);
+  const vrijeme = isFinite(t)
+    ? new Date(t).toLocaleString('bs-BA', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+    : '—';
+  const gk = wgsToMGI(p.la, p.lo);
+  const red = (l, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0;font-size:11px;">
+    <span style="color:#94a3b8;">${l}</span><span style="color:#e2e8f0;text-align:right;">${v}</span></div>`;
+  return `<div style="background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:10px;min-width:200px;">
+    <div style="font-size:14px;font-weight:700;color:#f87171;margin-bottom:6px;">🔥 Detekcija požara</div>
+    ${red('Udaljenost', `<b style="color:#fbbf24;">${fmtL(d)}</b> ${smjer}${ref.gps ? '' : ' <span style="color:#64748b;">(od centra karte)</span>'}`)}
+    ${red('Vrijeme (lok.)', vrijeme + (p.noc ? ' 🌙' : ' ☀'))}
+    ${red('Pouzdanost', `<span style="color:${pz.boja};">${pz.txt}</span>`)}
+    ${isFinite(p.frp) ? red('Snaga (FRP)', p.frp.toFixed(1) + ' MW') : ''}
+    ${p.sat ? red('Satelit', _poziSatelit(p.sat)) : ''}
+    ${gk ? `<div style="font-size:11px;color:#fbbf24;font-family:monospace;margin-top:6px;">Y: ${gk.y} · X: ${gk.x}</div>` : ''}
+    <div style="font-size:10px;color:#475569;margin-top:8px;line-height:1.4;">
+      Satelitska detekcija toplotne anomalije — nije potvrda požara na terenu.
+    </div>
+  </div>`;
+}
+
+function _poziListaHtml() {
+  if (!_poziOn) return '';
+  const m = _poziMeta || {};
+  if (m.greska) {
+    return `<div style="font-size:11px;color:#f87171;padding:6px 0;line-height:1.5;">${_escHtml(m.greska)}</div>`;
+  }
+  if (!_poziPts.length) {
+    return `<div style="font-size:11px;color:#4ade80;padding:6px 0;">✓ Nema detekcija u krugu ${_POZ_RADIUS_KM} km.</div>`;
+  }
+  const ref = _poziRefTacka();
+  return _poziPts.slice(0, 8).map((p, i) => {
+    const pz = _poziPouzdanost(p.conf);
+    const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, p.la, p.lo));
+    return `<div onclick="_poziZoom(${i})" style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #1e293b;cursor:pointer;">
+      <span style="width:9px;height:9px;border-radius:50%;background:${pz.boja};flex-shrink:0;"></span>
+      <span style="flex:1;font-size:12px;color:#e2e8f0;">${fmtL(p.d)} <span style="color:#64748b;">${smjer}</span></span>
+      <span style="font-size:10px;color:#64748b;">${pz.txt}</span>
+    </div>`;
+  }).join('') + (_poziPts.length > 8
+    ? `<div style="font-size:10px;color:#475569;padding:4px;">…i još ${_poziPts.length - 8}</div>` : '');
+}
+
+function _poziZoom(i) {
+  const p = _poziPts[i];
+  if (!p) return;
+  closeLayerSheet();
+  map.setView([p.la, p.lo], Math.max(map.getZoom(), 13));
+  const mk = _poziLayer && _poziLayer.getLayers()[i];
+  if (mk) setTimeout(() => mk.openPopup(), 250);
+}
+
+function _poziToggle(on) {
+  _poziOn = on;
+  try { localStorage.setItem(_POZ_ON_KEY, on ? '1' : '0'); } catch(e) {}
+  if (!on) {
+    if (_poziLayer) { try { map.removeLayer(_poziLayer); } catch(e) {} }
+    _poziStatusSet('—');
+    return;
+  }
+  if (_poziLayer) _poziLayer.addTo(map);
+  _poziLoad(false);
+}
+
+// Dijagnostika: proba SVAKI izvor i kaže tačno šta vraća. Ovo je alat kojim se
+// sa terena (gdje mreža stvarno postoji) utvrdi šta radi — iz razvojnog
+// okruženja se nijedan vanjski server ne može dozvati.
+async function _poziProvjeriIzvore() {
+  const red = [];
+  showToast('⏳ Provjeravam izvore…');
+  for (const izv of _POZ_IZVORI) {
+    const t0 = Date.now();
+    try {
+      const r = await _fetchT(izv.url, 15000, { mode:'cors' });
+      const txt = r.ok ? await r.text() : '';
+      const n = r.ok ? _poziParseCsv(txt).length : 0;
+      red.push(`${r.ok ? '✅' : '❌'} ${izv.naziv}\n   HTTP ${r.status} · ${n} detekcija (Evropa) · ${Date.now()-t0} ms`);
+    } catch(e) {
+      red.push(`❌ ${izv.naziv}\n   ${e?.name === 'TypeError' ? 'blokiran (CORS ili nema mreže)' : (e?.message || 'greška')} · ${Date.now()-t0} ms`);
+    }
+  }
+  // EFFIS rasteri (opasnost + opožarene površine) — probaj jednu pločicu
+  for (const [k, naziv] of [['fwi','EFFIS indeks opasnosti'], ['opozareno','EFFIS opožarene površine']]) {
+    const t0 = Date.now();
+    try {
+      const u = 'https://maps.effis.emergency.copernicus.eu/gwis?service=WMS&request=GetMap&version=1.1.1'
+        + '&layers=' + (k === 'fwi' ? 'ecmwf.fwi' : 'modis.ba')
+        + '&styles=&format=image%2Fpng&transparent=true&width=256&height=256&srs=EPSG%3A3857'
+        + '&bbox=1795352,5601305,1800244,5606197';
+      const r = await _fetchT(u, 15000, { mode:'cors' });
+      const ct = r.headers.get('content-type') || '';
+      red.push(`${r.ok && /image/.test(ct) ? '✅' : '❌'} ${naziv}\n   HTTP ${r.status} · ${ct || '?'} · ${Date.now()-t0} ms`);
+    } catch(e) {
+      red.push(`❌ ${naziv}\n   ${e?.name === 'TypeError' ? 'blokiran (CORS ili nema mreže)' : (e?.message || 'greška')} · ${Date.now()-t0} ms`);
+    }
+  }
+  await _dlgConfirm(red.join('\n\n') + '\n\nAko je sve ❌ a internet radi, izvor je promijenio adresu — pošalji ovaj ispis.',
+    { title:'🔥 Provjera izvora', okLabel:'U redu' });
+}
+
+// ── Prijava požara sa terena ───────────────────────────────────────────────
+// Satelit vidi tek požar koji je već narastao (VIIRS ~375m piksel, prelet par
+// puta dnevno). Šumar na terenu ga vidi PRVI. Ova prijava je obična tačka
+// (_createTacka) — namjerno, jer tačke već imaju sve što treba: rade offline,
+// sinhronizuju se kad se pojavi veza, vide se na karti, dijele se kolegama i
+// izvoze u KML. Nema smisla praviti paralelni sistem za isto.
+function _poziPrijavi() {
+  const p = (typeof lastP !== 'undefined' && lastP && isFinite(lastP.la)) ? lastP : null;
+  if (!p) {
+    showToast('⚠ Nema GPS pozicije — uključi GPS pa pokušaj ponovo');
+    return;
+  }
+  const t = new Date().toLocaleString('bs-BA', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  _createTacka(p.la, p.lo, '🔥 POŽAR ' + t);
+  showToast('🔥 Požar zabilježen na tvojoj poziciji — vidljiv kolegama nakon sinhronizacije');
+  switchTab('karta');
+}
+
+// ── Panel taba Požari ──────────────────────────────────────────────────────
+function _poziRenderPanel() {
+  const el = document.getElementById('poz-body');
+  if (!el) return;
+  const m = _poziMeta || {};
+  const ref = _poziRefTacka();
+  const kart = (naslov, opis, sadrzaj) => `
+    <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px;">${naslov}</div>
+      ${opis ? `<div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.5;">${opis}</div>` : ''}
+      ${sadrzaj}
+    </div>`;
+  const prekidac = (id, on, labela) => `
+    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0;">
+      <input type="checkbox" ${on ? 'checked' : ''} onchange="${id}"
+        style="width:18px;height:18px;accent-color:#f97316;cursor:pointer;flex-shrink:0;">
+      <span style="font-size:13px;color:#cbd5e1;">${labela}</span>
+    </label>`;
+
+  // 1. Detekcije sa satelita
+  let detekcije;
+  if (!_poziOn) {
+    detekcije = `<div style="font-size:12px;color:#64748b;padding:4px 0;">Uključi prikaz da dohvatiš detekcije.</div>`;
+  } else if (m.greska) {
+    detekcije = `<div style="font-size:12px;color:#f87171;line-height:1.5;padding:4px 0;">❌ ${_escHtml(m.greska)}</div>`;
+  } else if (!_poziPts.length) {
+    detekcije = `<div style="font-size:13px;color:#4ade80;padding:6px 0;">✓ Nema aktivnih detekcija u krugu ${_POZ_RADIUS_KM} km.</div>`;
+  } else {
+    detekcije = _poziListaHtml();
+  }
+
+  el.innerHTML =
+    kart('🛰 Detekcija sa satelita',
+      'NASA FIRMS — toplotne anomalije koje su sateliti uočili u zadnja 24 sata, u krugu '
+      + _POZ_RADIUS_KM + ' km od tebe. Detekcija nije potvrda požara na terenu.',
+      prekidac('_poziToggle(this.checked)', _poziOn, 'Prikaži detekcije na karti')
+      + `<div id="poz-status" style="font-size:11px;color:#94a3b8;margin:6px 0 8px;">${_escHtml(_poziOn ? _poziSazetak().kratko : '—')}</div>`
+      + detekcije
+      + `<div style="display:flex;gap:7px;margin-top:10px;">
+           <button onclick="_poziLoad(false)" style="flex:1;padding:9px;background:#14233c;border:1px solid #1e3a5f;border-radius:9px;color:#7dd3fc;font-size:12px;font-weight:600;cursor:pointer;"><svg class="ic"><use href="#ic-osvjezi"/></svg> Osvježi</button>
+           <button onclick="_poziProvjeriIzvore()" style="flex:1;padding:9px;background:#14233c;border:1px solid #1e3a5f;border-radius:9px;color:#94a3b8;font-size:12px;font-weight:600;cursor:pointer;"><svg class="ic"><use href="#ic-server"/></svg> Provjeri izvore</button>
+         </div>`)
+
+    + kart('🔥 Prijavi požar sa terena',
+      'Satelit vidi tek požar koji je narastao — ti ga vidiš prvi. Prijava se upisuje kao tačka na tvojoj GPS poziciji, radi i bez signala i ode kolegama čim se veza pojavi.',
+      `<button onclick="_poziPrijavi()" style="width:100%;padding:12px;background:linear-gradient(135deg,#b91c1c,#ef4444);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">
+         <svg class="ic"><use href="#ic-pozicija"/></svg> Zabilježi požar na mojoj poziciji
+       </button>`)
+
+    + kart('🗺 Opožarene površine',
+      'Copernicus EFFIS — granice područja koja su STVARNO izgorjela (satelitski kartirano). Korisno za sanaciju, planiranje pošumljavanja i procjenu štete.',
+      prekidac("_instToggle('opozareno',this.checked);_poziRenderPanel()", !!_ovlState.opozareno, 'Prikaži opožarene površine na karti'))
+
+    + kart('⚠ Indeks opasnosti od požara (FWI)',
+      'Copernicus EFFIS — prognoza opasnosti na osnovu vremena (suša, vjetar, vlaga). Pokazuje gdje je danas rizično raditi sa mehanizacijom ili paliti.',
+      prekidac("_instToggle('fwi',this.checked);_poziRenderPanel()", !!_ovlState.fwi, 'Prikaži indeks opasnosti na karti')
+      + `<div style="display:flex;gap:4px;margin-top:8px;">`
+      + [['#22c55e','vrlo nizak'],['#a3e635','nizak'],['#facc15','srednji'],['#f97316','visok'],['#dc2626','vrlo visok'],['#7f1d1d','ekstreman']]
+          .map(([c,l]) => `<div style="flex:1;text-align:center;">
+             <div style="height:7px;background:${c};border-radius:2px;"></div>
+             <div style="font-size:8.5px;color:#64748b;margin-top:3px;line-height:1.2;">${l}</div></div>`).join('')
+      + `</div>`)
+
+    + kart('📞 Hitni brojevi',
+      'Poziv ide direktno — radi i bez interneta, treba samo signal mobilne mreže.',
+      [['123','Vatrogasci','#ef4444'],['122','Policija','#3b82f6'],['124','Hitna pomoć','#22c55e']]
+        .map(([br, nm, boja]) => `
+          <a href="tel:${br}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;margin-bottom:6px;
+             background:#0f172a;border:1px solid #1e293b;border-radius:10px;text-decoration:none;">
+            <span style="font-size:19px;font-weight:800;color:${boja};font-family:monospace;min-width:42px;">${br}</span>
+            <span style="flex:1;font-size:13px;color:#e2e8f0;font-weight:600;">${nm}</span>
+            <span style="font-size:16px;">📞</span>
+          </a>`).join(''))
+
+    + `<div style="font-size:10px;color:#334155;line-height:1.6;text-align:center;padding:4px 8px 16px;">
+         Izvori: NASA FIRMS (detekcije) · Copernicus EFFIS (opožarene površine, indeks opasnosti).<br>
+         Besplatni javni servisi — traže internet. Zadnji dohvat se čuva za offline pregled.
+       </div>`;
+}
 // Vrati zadnju kartu ili defaultuj na Topo
 (function _restoreLastMap() {
   let restoredKey = '⛰ Topo';
@@ -12045,7 +12565,7 @@ function _openLayerSheet() {
   document.getElementById('layer-sheet-bg').style.display = 'block';
   document.getElementById('layer-sheet').style.display   = 'block';
   _lsTab('karte');
-  ['elev','slope','nv','ekspo','kont','pozari'].forEach(id => {
+  ['elev','slope','nv','ekspo','kont'].forEach(id => {
     const cb = document.getElementById('inst-' + id + '-cb');
     if (cb) cb.checked = !!_ovlState[id];
   });
@@ -12131,7 +12651,7 @@ const _CMGR_ROWS = [
   { id: 'slope', ico: '📐',  name: 'Nagib terena',    sub: 'Shaded relief',    cache: 'tvlake-slope-v1' },
   { id: 'terr',  ico: '🗻',  name: 'Teren (DEM)',     sub: 'Visinski podaci',  cache: 'tvlake-terr-v1' },
   { id: 'nv',    ico: '🏷',  name: 'Nadmorske visine', sub: 'Open-Meteo keš',  cache: 'tvlake-nv-v1' },
-  { id: 'firms', ico: '🔥',  name: 'Aktivni požari',  sub: 'NASA FIRMS',       cache: _FIRMS_CACHE }
+  { id: 'effis', ico: '🔥',  name: 'Požari (EFFIS)',  sub: 'Opasnost + opožareno', cache: _EFFIS_CACHE }
 ];
 let _cmgrData = null;   // zadnji scan: {id: {count, bytes}}
 
@@ -12253,7 +12773,7 @@ async function _cacheMgrDeleteAll() {
   if (!ok) return;
   try {
     const names = await caches.keys();
-    for (const n of names) { if (/^tvlake-(tiles|elev|slope|terr|nv|firms|wcover)/.test(n)) await caches.delete(n); }
+    for (const n of names) { if (/^tvlake-(tiles|elev|slope|terr|nv|effis|wcover)/.test(n)) await caches.delete(n); }
     showToast('🗑 Sve offline pločice obrisane');
   } catch(err) {
     showToast('⚠ Brisanje nije uspjelo: ' + (err.message || 'nepoznato'));
@@ -20032,7 +20552,8 @@ async function _instClear(id) {
     nv:    _TERR_CACHE,
     ekspo: _TERR_CACHE,
     kont:  _TERR_CACHE,
-    pozari: _FIRMS_CACHE
+    fwi:       _EFFIS_CACHE,
+    opozareno: _EFFIS_CACHE
   };
   const cn = cacheMap[id];
   if (!cn) return;
@@ -20056,8 +20577,7 @@ async function _instUpdateStats() {
     ['slope', _TERR_CACHE],
     ['nv',    _TERR_CACHE],
     ['ekspo', _TERR_CACHE],
-    ['kont',  _TERR_CACHE],
-    ['pozari', _FIRMS_CACHE]
+    ['kont',  _TERR_CACHE]
   ];
   const counts = {};
   for (const [, cn] of pairs) {
@@ -23160,6 +23680,7 @@ function switchTab(tab) {
   const ppostavke= document.getElementById('postavke-panel');
   const pteren   = document.getElementById('teren-panel');
   const ptragovi = document.getElementById('tragovi-panel');
+  const ppozari  = document.getElementById('pozari-panel');
   document.querySelectorAll('.tab-btn').forEach(b => {
     const oc = b.getAttribute('onclick') || '';
     b.classList.toggle('active', oc.includes(`switchTab('${tab}')`));
@@ -23181,10 +23702,12 @@ function switchTab(tab) {
   if (ppostavke)ppostavke.style.display= tab==='postavke'? 'flex' : 'none';
   if (pteren)   pteren.style.display   = tab==='teren'   ? 'flex' : 'none';
   if (ptragovi) ptragovi.style.display = tab==='tragovi' ? 'flex' : 'none';
+  _show(ppozari, tab==='pozari');
   if (tab === 'admin')    adminLoadUsers();
   if (tab === 'postavke') postavkeLoadEmails();
   if (tab === 'teren')   { terenRender(); terenRenderTragovi(); }
   if (tab === 'tragovi') { _tragoviRender(); _tragoviUpdBtn(); }
+  if (tab === 'pozari')  _poziRenderPanel();
   _updFabVisibility();
   if (tab==='karta') {
     _mapFullScreen = true;
@@ -23225,6 +23748,10 @@ function switchTab(tab) {
     _setMapUIVisible(false, false);
     msrStop(true);
   } else if (tab==='teren') {
+    _mapFullScreen = false;
+    _setMapUIVisible(false, false);
+    msrStop(true);
+  } else if (tab==='pozari') {
     _mapFullScreen = false;
     _setMapUIVisible(false, false);
     msrStop(true);
@@ -28961,7 +29488,7 @@ async function clearTileCache(e) {
   if (!await _dlgConfirm('Obrisati sve keširane karte (satelit, topo, teren)? Offline prikaz tih područja više neće raditi dok ih ponovo ne pogledaš online.', { title: 'Obriši memoriju karata', okLabel: 'Obriši' })) return;
   // Obriši SVE mapne kešove (pločice + teren overlay), ali NE app shell / biblioteke
   const keys = await caches.keys();
-  const mapCaches = keys.filter(k => /^tvlake-(tiles|elev|slope|terr|nv|firms|wcover)/.test(k));
+  const mapCaches = keys.filter(k => /^tvlake-(tiles|elev|slope|terr|nv|effis|wcover)/.test(k));
   await Promise.all(mapCaches.map(k => caches.delete(k)));
   localStorage.removeItem(_OFFLINE_DL_INCOMPLETE_KEY);
   showToast('🗑 Memorija karata obrisana');
@@ -36180,25 +36707,7 @@ if (typeof AndroidDownload !== 'undefined') {
     <div style="margin-top:8px;font-size:10px;color:#334155;line-height:1.5;">
       Nagibi, N.V., Strane i Konture dijele isti keš (terrarium DEM pločice, max zum 14→uvećanje).
     </div>
-    <!-- NASA FIRMS aktivni požari — v3.103.0. Zaseban mrežni izvor/keš, WMS bez
-         ključa. Endpoint nije bilo moguće provjeriti iz sandboxa (vidi napomenu
-         kod _OVL.pozari u index.html) — provjeriti na terenskom uređaju. -->
-    <div class="inst-layer-row" id="inst-pozari-row" style="margin-top:10px;">
-      <label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;">
-        <input type="checkbox" id="inst-pozari-cb" onchange="_instToggle('pozari',this.checked)"
-          style="width:18px;height:18px;accent-color:#ef4444;cursor:pointer;flex-shrink:0;">
-        <div>
-          <div style="font-size:13px;color:#e2e8f0;font-weight:600;">Aktivni požari</div>
-          <div style="font-size:11px;color:#64748b;">NASA FIRMS — satelitska detekcija, 24h</div>
-          <div id="inst-pozari-stat" style="font-size:11px;color:#475569;margin-top:1px;">—</div>
-        </div>
-      </label>
-      <button onclick="_instClear('pozari')" title="Obriši keš"
-        style="background:#2d0a0a;border:1px solid #7f1d1d;color:#f87171;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;flex-shrink:0;">
-        <svg class="ic"><use href="#ic-obrisi"/></svg>
-      </button>
-    </div>
-  </div>
+
 
   <!-- Tab: Granice -->
   <div id="ls-pane-granice" style="display:none;">

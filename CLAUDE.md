@@ -74,12 +74,26 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   `rndList()` ni GPS hot-path (`_vlakaProcessGpsPoint`), usporilo bi snimanje.
   Dijeli `v._steepPolys` sa admin analizom (`_pmNagibAnaliza`/`_nagibAnalysisStop`
   u modalu nadzora) — zadnji poziv pobjeđuje, bezopasno u rijetkom preklopu.
-- **Slojevi karte (v3.103.0)**: Konture (izohipse), Aktivni požari (NASA FIRMS)
-  i Pokrivenost zemljišta (ESA WorldCover — zamijenio EOX Sentinel-2 na istom
-  mjestu u layer-sheetu, vidi `TL['🌍 Sentinel']`). Konture su BESPLATNE mrežno
+- **Tab Požari (v3.103.1)**: detekcija sa satelita (NASA FIRMS), prijava požara
+  sa terena, opožarene površine i indeks opasnosti (Copernicus EFFIS), hitni
+  brojevi. Detekcije se povlače kao **PODACI (CSV), ne kao rasterski sloj** —
+  prva verzija je bila WMS slika i ostala je PRAZNA kod korisnika, a iz prazne
+  karte se ne vidi da li nema požara (najčešći i ISPRAVAN ishod), je li pao
+  endpoint ili nema CORS-a. Podaci daju jednoznačan odgovor ("0 detekcija u
+  krugu 150 km"), udaljenost/azimut od korisnika, popup sa vremenom i FRP-om,
+  rade na svakom zumu i keširaju se za offline. `_poziLoad`/`_poziParseCsv`;
+  izvori (4 satelita) se probavaju redom, uspješan se pamti. **"Provjeri
+  izvore" (`_poziProvjeriIzvore`) je alat za teren** — testira svaki izvor i
+  ispiše HTTP status/CORS grešku, jer se iz razvojnog okruženja nijedan
+  vanjski server ne može dozvati. Prijava požara je obična tačka
+  (`_createTacka`) — namjerno, jer tačke već imaju offline rad, sync i
+  dijeljenje. Test: `tests/js/pozari.test.js`.
+- **Slojevi karte (v3.103.0)**: Konture (izohipse) i Pokrivenost zemljišta
+  (ESA WorldCover — zamijenio EOX Sentinel-2 na istom mjestu u layer-sheetu,
+  vidi `TL['🌍 Sentinel']`). Konture su BESPLATNE mrežno
   — crtaju se iz VEĆ preuzetog Terrarium DEM-a (`_getTerrariumTile`/`_TERR_CACHE`,
   isti keš kao Nagib/N.V./Ekspozicija), marching-squares u `_drawContours`/
-  `_msCellSegments`. FIRMS i WorldCover su WMS servisi (bbox `GetMap`, ne XYZ
+  `_msCellSegments`. WorldCover i EFFIS slojevi su WMS servisi (bbox `GetMap`, ne XYZ
   predložak) — `makeCachedTileLayer(cacheName, L.TileLayer.WMS)` (drugi
   parametar, opcion) daje im ISTU keš/timeout/retry logiku kao Topo/Satelit/
   Karta. Test: `tests/js/dem-contours.test.js`.
