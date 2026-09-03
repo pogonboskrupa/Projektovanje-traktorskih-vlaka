@@ -2665,9 +2665,10 @@ select:focus { outline:none; border-color:#3b82f6; }
   background: rgba(255,255,255,0.95);
   border-top: 0.5px solid rgba(0,0,0,0.12);
   box-shadow: 0 -1px 0 rgba(0,0,0,0.04), 0 -4px 16px rgba(0,0,0,0.06);
-  /* Padding smanjen za tačno onoliko koliko su dugmad ispod porasla (v3.101.1) —
-     ukupna visina trake ostaje ista, samo su krugovi/ikonice veći. */
-  padding: 2px 6px calc(env(safe-area-inset-bottom, 0px) + 4px);
+  /* Padding stisnut još jednom (v3.101.2) — traka -10% visine, na traženje
+     korisnika. Dugmad (v3.101.1, +15%) i tekst ostaju iste veličine, samo je
+     razmak oko njih tanji. */
+  padding: 1px 6px calc(env(safe-area-inset-bottom, 0px) + 1.5px);
   gap: 2px;
   justify-content: space-around;
 }
@@ -2677,9 +2678,9 @@ select:focus { outline:none; border-color:#3b82f6; }
   border: none;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  gap: 2px;
+  gap: 1.5px;
   cursor: pointer;
-  padding: 2px 0;
+  padding: 1px 0;
   transition: all 0.15s ease;
   color: #6b7280;
   font-size: 9px;
@@ -4715,7 +4716,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.101.1';
+const APP_VER = 'v3.101.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
