@@ -122,6 +122,22 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   **Novi interaktivni canvas pane = novi sloj koji krade klikove svemu ispod** —
   ili mu daj vlastiti fallback, ili ga ne pravi. Test:
   `tests/js/kml-click.test.js` (izvlači STVARNI `_kmlHitTest` iz index.html).
+- **Pozicija u DOM-u NIJE indeks u nizu** (v3.102.0): lista vlaka se crta
+  sortirano i hijerarhijski (`rootVlake` sort + `renderWithChildren` gura
+  krakove ispod roditelja), a `vlake[]` je redoslijed nastanka/dolaska sa
+  servera — poklope se samo slučajno. `selI()` je ranije tražio red po poziciji
+  (`idx === i`) pa je označavao SUSJEDNU vlaku: korisnik vidi istaknuto "T1.1",
+  a `actI` (Uredi/Briši/Dodaj tačku) radi nad "T1". Sada svaki red nosi
+  `data-vi` i traži se `#vl .vrow[data-vi="N"]`. **Svaka nova lista koja se
+  sortira ili grupiše mora nositi indeks na elementu** — nikad ne vezivati
+  podatak za redni broj u DOM-u. Test: `tests/js/vlake-list.test.js`.
+- **DOM polje nije baza podataka** (v3.102.0): `_projPovrsinaHa()` je površinu
+  čitao ISKLJUČIVO iz skrivenog `#p-povrsina`, koje puni samo
+  `_applyProjektFields` (aktiviranje projekta). Kad se do aktivnog projekta
+  dođe drugim putem (obnova iz keša pri pokretanju, realtime izmjena s drugog
+  uređaja, aktivacija iz modala nadzora), polje ostane prazno pa su "Površina",
+  "Gustoća mreže" i m/ha bedž pokazivali "—" iznad kartice na kojoj piše
+  42.50 ha. Izvor istine je zapis u `_projekti`, DOM polje je samo prikaz.
 - **UI keševi nisu izvor istine**: `_dozVlakeIdxs` i slični nizovi indeksa su
   samo za prikaz liste — svaka analiza/izračun mora raditi svjež filter nad
   `vlake[]` (bug "Osvježi analizu ne vidi nove vlake").

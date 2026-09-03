@@ -460,6 +460,17 @@ html, body { height:100%; font-family: Arial, sans-serif; background:#1a1a2e; co
   font-size:11px; font-weight:bold; color:#64748b;
   text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;
 }
+/* Zaglavlje sekcije sa dugmetom desno (Projekti/Rekap/Terenske statistike/
+   Odjeli za doznaku). Bez ovoga se .btn (koji ima width:100%) u flex redu širi
+   preko cijelog reda i STISNE naslov u dva reda ("REKAP / PROJEKTA"), pa se
+   uppercase+letter-spacing naslov jedva čita. Dugme ovdje ide na svoju
+   prirodnu širinu, naslov dobija ostatak. */
+.sec-hdr {
+  display:flex; justify-content:space-between; align-items:center;
+  gap:10px; margin-bottom:10px;
+}
+.sec-hdr .sec-t { margin:0; min-width:0; }
+.sec-hdr .btn   { width:auto; flex:0 0 auto; margin:0; white-space:nowrap; }
 
 /* Buttons */
 .btn {
@@ -521,7 +532,7 @@ input:focus { outline:none; border-color:#3b82f6; }
    glatko skrolanje bez obzira na broj vlaka. 'auto 150px' pamti stvarnu visinu
    reda nakon prvog prikaza pa nema skakanja scrollbara. Isto za trag/doznaka
    redove. scrollIntoView (aktivni red, selI) i dalje radi — forsira render. */
-.vrow { content-visibility:auto; contain-intrinsic-size:auto 150px; }
+.vrow { content-visibility:auto; contain-intrinsic-size:auto 64px; }
 .treg-row { content-visibility:auto; contain-intrinsic-size:auto 90px; }
 .doz-odjel-card { content-visibility:auto; contain-intrinsic-size:auto 74px; }
 .vcard-stripe { width:4px; flex-shrink:0; }
@@ -531,14 +542,28 @@ input:focus { outline:none; border-color:#3b82f6; }
 .vcard-km { font-size:12px; font-weight:700; color:#4ade80; white-space:nowrap; flex-shrink:0; }
 .vcard-sub { font-size:10px; color:#475569; margin-top:1px; }
 .vcard-btns { display:none; }
-/* Vlake card — action buttons (bottom-bar stil) */
+/* Vlake card — action buttons (bottom-bar stil).
+   Prikazuju se SAMO na odabranoj vlaci (.vrow.act). Ranije je svaki red nosio
+   svih 5 dugmadi sa krugovima (Snimi/Karta/Profil/Uredi/Briši) — kartica je
+   bila ~150px, na projektu sa 20 vlaka i krakova to je ~3000px skrola i 100
+   dugmadi na ekranu, pa je promašaj prstom bio čest. Dugmad NAMJERNO ostaju
+   velika (terenska upotreba, rukavice) — mijenja se samo KOLIKO ih je vidljivo
+   odjednom. Odabir je već postojao (actI/selI) i sad ima vidljivu svrhu. */
 .vcard-actions {
-  display: flex;
+  display: none;
   gap: 4px;
   margin-top: 5px;
   padding-top: 4px;
   border-top: 1px solid rgba(255,255,255,0.05);
 }
+.vrow.act .vcard-actions { display: flex; }
+/* Strelica koja pokazuje da red ima još akcija ispod (rotira kad je otvoren) */
+.vcard-caret {
+  flex-shrink:0; width:0; height:0; margin-left:2px;
+  border-left:4px solid transparent; border-right:4px solid transparent;
+  border-top:5px solid #475569; transition:transform 0.15s;
+}
+.vrow.act .vcard-caret { transform:rotate(180deg); border-top-color:#fbbf24; }
 .action-btn {
   flex: 1;
   display: flex;
@@ -2341,6 +2366,18 @@ select:focus { outline:none; border-color:#3b82f6; }
   -webkit-overflow-scrolling:touch;
   overscroll-behavior:contain; touch-action:pan-y;
 }
+/* Na telefonu puna širina — isto kao Vlake (#panel) i Projekat (#proj-panel).
+   Doznaka je ranije ostajala fiksnih 320px: pored panela je virio beskoristan
+   komad karte, a sadržaj se gurao u ~78% širine ekrana (naslovi u dva reda,
+   lista odjela uska). Pravilo NE može stajati u zajedničkom @media bloku gore
+   (linija ~1432) — ovaj #doznaka-panel selektor je niže u fajlu, iste je
+   specifičnosti i pregazio bi ga. Zato zaseban media blok odmah ispod. */
+@media (max-width:580px) {
+  #doznaka-panel {
+    width:100%; position:absolute; top:0; bottom:0;
+    z-index:700; border-right:none;
+  }
+}
 #doz-panel-list, #doz-panel-detail { display:flex; flex-direction:column; flex:1; }
 .doz-odjel-card {
   background:linear-gradient(160deg,#111d33,#0d1526); border:1px solid #1e3a5f;
@@ -3777,8 +3814,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
       <!-- LISTA PROJEKATA -->
       <div class="sec" id="proj-list-sec">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <div class="sec-t" style="margin:0;">📁 Projekti</div>
+        <div class="sec-hdr">
+          <div class="sec-t">📁 Projekti</div>
           <button class="btn b" style="margin:0;padding:5px 12px;font-size:12px;" onclick="showNovProjektForm()">+ Novi</button>
         </div>
         <input id="proj-search" type="search" placeholder="🔍 Traži odjel, GJ ili šumariju..."
@@ -3857,8 +3894,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
       <!-- REKAP -->
       <div class="sec">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <div class="sec-t" style="margin:0;">📊 Rekap Projekta</div>
+        <div class="sec-hdr" style="margin-bottom:6px;">
+          <div class="sec-t">📊 Rekap Projekta</div>
           <button class="btn g" style="margin:0;font-size:11px;padding:5px 10px;" onclick="exportProjektPDF()"><svg class="ic"><use href="#ic-dokument"/></svg> Izvezi PDF</button>
         </div>
         <div class="stat-card" id="rekap-card">
@@ -3868,8 +3905,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
       <!-- TERENSKE I TEHNIČKE STATISTIKE -->
       <div class="sec">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <div class="sec-t" style="margin:0;">🏔 Terenske statistike</div>
+        <div class="sec-hdr" style="margin-bottom:6px;">
+          <div class="sec-t">🏔 Terenske statistike</div>
           <button class="btn gr" style="margin:0;font-size:11px;padding:5px 10px;" onclick="exportTerenStats()"><svg class="ic"><use href="#ic-uvezi"/></svg> Izvezi</button>
         </div>
         <div id="teren-stats-card">
@@ -3934,8 +3971,9 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
         <div id="dnevni-log"></div>
       </div>
 
-      <!-- IZVJEŠTAJI PO ODJELIMA -->
-      <div class="sec">
+      <!-- IZVJEŠTAJI PO ODJELIMA (sekcija se skriva dok nema sadržaja — inače
+           je u panelu stajalo golo zaglavlje bez ijednog reda ispod) -->
+      <div class="sec" id="odjeli-rekap-sec" style="display:none;">
         <div class="sec-t">📋 Izvještaji po Odjelima</div>
         <div id="odjeli-rekap"></div>
       </div>
@@ -4185,8 +4223,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
       <!-- LIST VIEW -->
       <div id="doz-panel-list">
         <div class="sec">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <div class="sec-t" style="margin:0;">🌲 Odjeli za doznaku</div>
+          <div class="sec-hdr">
+            <div class="sec-t">🌲 Odjeli za doznaku</div>
             <button class="btn b" style="margin:0;padding:5px 12px;font-size:12px;" onclick="dozShowCreateOdjel()">+ Novi</button>
           </div>
           <button class="btn" style="background:#0f172a;border:1px solid #1e3a5f;color:#94a3b8;font-size:12px;margin-bottom:10px;" onclick="dozLoadOdjeli()"><svg class="ic"><use href="#ic-osvjezi"/></svg> Osvježi</button>
@@ -4716,7 +4754,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.101.2';
+const APP_VER = 'v3.102.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -13632,18 +13670,23 @@ function flipVlakaDir() {
 
 function selI(i) {
   actI = i;
-  // Try fast highlight first; fall back to full rebuild if rows don't match
-  const rows = document.querySelectorAll('#vl .vrow');
-  if (rows.length === vlake.length) {
-    rows.forEach((row, idx) => {
-      row.classList.toggle('act', idx === i);
-      if (idx === i) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    });
+  // Brzo označavanje bez ponovnog crtanja liste. VAŽNO: red se traži po
+  // data-vi (indeks u vlake[]), NE po poziciji u DOM-u — lista se crta
+  // SORTIRANO i hijerarhijski (rootVlake sort + renderWithChildren), a vlake[]
+  // je redoslijed nastanka/dolaska sa servera. Ta dva se poklapaju samo
+  // slučajno; ranije poređenje `idx === i` je zato znalo označiti SUSJEDNU
+  // vlaku (npr. istaknuto "T1.1" dok alati stvarno rade nad "T1") — opasno kod
+  // Uredi/Briši. Sada je veza podatak↔red eksplicitna.
+  const rows = document.querySelectorAll('#vl .vrow[data-vi]');
+  const target = document.querySelector(`#vl .vrow[data-vi="${i}"]`);
+  if (target) {
+    rows.forEach(row => row.classList.toggle('act', row === target));
+    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   } else {
-    rndList(); // rows not built yet (e.g. called from addV before rndList)
-    // scroll after render
+    rndList(); // red još nije nacrtan (npr. poziv iz addV prije rndList)
+    // Skrol tek poslije crtanja — opet po data-vi, ne po poziciji u DOM-u.
     setTimeout(() => {
-      const r = document.querySelectorAll('#vl .vrow')[i];
+      const r = document.querySelector(`#vl .vrow[data-vi="${i}"]`);
       if (r) r.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }, 50);
   }
@@ -16528,6 +16571,9 @@ function _renderVlakaRow(el, v, i, depth) {
   const row = document.createElement('div');
   const isKrak = depth > 0;
   row.className = 'vrow' + (i === actI ? ' act' : '') + (isKrak ? ' vrow-krak' : '');
+  // Veza red ↔ vlake[i]. Lista se crta sortirano/hijerarhijski pa pozicija u
+  // DOM-u NIJE indeks u nizu — vidi napomenu u selI().
+  row.dataset.vi = i;
   if (depth > 1) row.style.marginLeft = (depth * 14) + 'px';
   const lagerInfo    = v.lager ? ` · 🏷${_escHtml(v.lager)}` : '';
   const isRecThis    = recOn && i === actI;
@@ -16563,6 +16609,7 @@ function _renderVlakaRow(el, v, i, depth) {
         ${badge}
         <span class="vcard-km">${fmtL(d)}</span>
         ${sbUser ? `<span class="vsync-icon" data-vi="${i}" title="${v.sbId ? 'Sačuvano na server' : 'Čeka sync...'}" style="font-size:11px;opacity:0.7;margin-left:2px;color:${v.sbId ? '#4ade80' : '#94a3b8'};">☁</span>` : ''}
+        <span class="vcard-caret"></span>
       </div>
       <div class="vcard-sub">${v.pts.length} tačaka${lagerInfo}</div>
       ${elevRow}
@@ -16571,7 +16618,7 @@ function _renderVlakaRow(el, v, i, depth) {
         🛣 Završava na putu <span style="color:#64748b;">(samo dužina kraka)</span>
       </label>` : ''}
       ${nasaviBtn}
-      <div style="display:flex;gap:4px;margin-top:6px;padding-top:5px;border-top:1px solid rgba(255,255,255,0.06);">
+      <div class="vcard-actions">
         ${isReadOnly() ? '' : `<button onclick="event.stopPropagation();selI(${i});switchTab('karta');${recOn?'':'setTimeout(togRec,30);'}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;padding:8px 2px 6px;border-radius:12px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);cursor:pointer;">
           <span style="width:38px;height:38px;border-radius:50%;background:rgba(232,69,60,0.2);display:flex;align-items:center;justify-content:center;font-size:16px;color:#e8453c;">${isRecThis&&!recPaused?'<svg class="ic"><use href="#ic-snimaj"/></svg>':isRecThis&&recPaused?'<svg class="ic"><use href="#ic-pauza"/></svg>':'<svg class="ic"><use href="#ic-pocni"/></svg>'}</span>
           <span style="font-size:9px;color:rgba(255,255,255,0.5);">${isRecThis&&!recPaused?'Snima':isRecThis&&recPaused?'Pauza':'Snimi'}</span>
@@ -16594,7 +16641,10 @@ function _renderVlakaRow(el, v, i, depth) {
         </button>`}
       </div>
     </div>`;
-  row.onclick = () => recOn ? selI(i) : showVlakaOnMap(i);
+  // Prvi tap odabire vlaku (otvara njena dugmad), drugi tap na VEĆ odabranu je
+  // vodi na kartu. Ranije je svaki tap odmah skakao na kartu, pa odabir nije
+  // imao vidljivu ulogu — a dugmad su zato morala stajati na SVAKOM redu.
+  row.onclick = () => (recOn || actI !== i) ? selI(i) : showVlakaOnMap(i);
   el.appendChild(row);
 }
 
@@ -22011,7 +22061,9 @@ function _calcTerenStats() {
     ? Math.round(mainVlake.reduce((s, v) => s + calcL(v.pts), 0) / mainVlake.length)
     : null;
 
-  const pov = parseFloat(document.getElementById('p-povrsina').value) || 0;
+  // Isti izvor kao m/ha bedž u Vlakama (ručno polje → aktivni projekat → KML),
+  // da Rekap i lista vlaka ne pokazuju različitu površinu za isti projekat.
+  const pov = _projPovrsinaHa().ha || 0;
   const gustoca = pov > 0 ? Math.round(totalLen / pov) : null;
 
   // Stats po projektantu (kombinirano iz dnevnog loga + aktivni projektant)
@@ -22560,7 +22612,10 @@ ${vlakeRows ? `<table>
 function rndOdjeliRekap() {
   const el = document.getElementById('odjeli-rekap');
   if (!el) return;
-  if (!_aktivniProjektId) { el.innerHTML = ''; return; }
+  // Sekcija se prikazuje tek kad stvarno ima šta pokazati.
+  const _sec = document.getElementById('odjeli-rekap-sec');
+  const _show = v => { if (_sec) _sec.style.display = v ? '' : 'none'; };
+  if (!_aktivniProjektId) { el.innerHTML = ''; _show(false); return; }
 
   // Grupiši sve log unose po odjelu
   const byOdjel = {};
@@ -22584,10 +22639,8 @@ function rndOdjeliRekap() {
   });
 
   const odjeli = Object.keys(byOdjel);
-  if (odjeli.length === 0) {
-    el.innerHTML = `<div style="font-size:12px;color:#475569;text-align:center;padding:12px;">Nema evidentiranih odjela.<br>Unesi odjel i klikni <b style="color:#60a5fa;">Zabilježi danas</b>.</div>`;
-    return;
-  }
+  if (odjeli.length === 0) { el.innerHTML = ''; _show(false); return; }
+  _show(true);
 
   el.innerHTML = odjeli.sort().map(od => {
     const o = byOdjel[od];
@@ -23925,6 +23978,18 @@ function _ringAreaHa(ring) {
 function _projPovrsinaHa() {
   const man = parseFloat(document.getElementById('p-povrsina')?.value) || 0;
   if (man > 0) return { ha: man, src: 'ručno' };
+  // Rezerva: sam AKTIVNI PROJEKAT. #p-povrsina je skriveno polje koje se puni
+  // samo kroz _applyProjektFields (aktiviranje projekta) — ako se do aktivnog
+  // projekta došlo drugim putem (obnova iz keša pri pokretanju, realtime
+  // izmjena sa drugog uređaja, aktivacija iz modala nadzora koja polje puni
+  // samo `if (p.povrsina)`), polje ostane prazno iako projekat UREDNO ima
+  // površinu — pa su "Površina", "Gustoća mreže" i m/ha bedž u Vlakama
+  // pokazivali "—" iznad kartice na kojoj lijepo piše npr. 42.50 ha.
+  // Izvor istine je zapis projekta, ne DOM polje.
+  const ap = (typeof _projekti !== 'undefined' && _aktivniProjektId)
+    ? _projekti.find(p => p.id === _aktivniProjektId) : null;
+  const apHa = parseFloat(ap?.povrsina) || 0;
+  if (apHa > 0) return { ha: apHa, src: 'projekat' };
   const odjel = typeof getOdjel === 'function' ? getOdjel() : '';
   const o = findGraniceOdjel(odjel);
   if (o?.ring?.length >= 3) {
