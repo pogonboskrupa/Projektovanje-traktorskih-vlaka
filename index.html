@@ -370,6 +370,17 @@ html, body { height:100%; font-family: Arial, sans-serif; background:#1a1a2e; co
   overscroll-behavior:contain;
   touch-action:pan-y;
 }
+/* Puna širina na telefonu (v3.102.1). Ova četiri panela nemaju zadanu širinu
+   nego se kao flex-djeca #main-a šire koliko im sadržaj traži — pa je ispadalo
+   nasumično: Teren i Postavke su slučajno dosezali punu širinu, a Korisnici
+   (305px) i Tragovi (341px) su ostajali uski i pored njih je virio beskoristan
+   komad karte. Isto pravilo kao Vlake/Projekat/Doznaka: na ≤580px panel uzima
+   cijeli ekran. Desktop (sidebar pored karte) ostaje nepromijenjen. */
+@media (max-width:580px) {
+  #teren-panel, #postavke-panel, #tragovi-panel, #admin-panel {
+    flex:1 1 100%; width:100%; min-width:0;
+  }
+}
 
 /* ── Teren tab — jedinstveni sistem dugmadi ────────────────────────────────
    Ranije je svako dugme imalo svoj inline style, bez ikakve reakcije na dodir
@@ -4754,7 +4765,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.102.0';
+const APP_VER = 'v3.102.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -6697,9 +6708,11 @@ function _applyProjektFields(p) {
   document.getElementById('p-ime').value      = sbProfile ? (sbProfile.ime + ' ' + sbProfile.prezime) : '';
 }
 
-// Compatibility stubs (old code calls these)
-function saveProj() { /* no-op: project data managed via sbLoadProjekti/saveNovProjekt */ }
-function onOdjelChange() { sbLoadKolegeVlake(); }
+// (v3.102.1) Ovdje su stajala dva "compatibility stub"-a, saveProj() kao no-op
+// i onOdjelChange(), ali su bili MRTAV KOD: prave istoimene funkcije su niže u
+// ISTOM <script> bloku (~20710), deklaracije se hoistuju i zadnja pobjeđuje —
+// pa se stub nikad nije izvršio. Ostavljen samo kao trag da se ne vrate;
+// duple definicije čuva test tests/js/boje-nagiba.test.js.
 
 function _sortByGjDatum(arr) {
   return [...arr].sort((a, b) => {
@@ -20541,7 +20554,7 @@ function _bufGetOpacity() { return (parseInt(document.getElementById('buf-opacit
 function _bufColChange(col) {
   const sw = document.getElementById('buf-col-swatch');
   const op = _bufGetOpacity();
-  if (sw) sw.style.background = `rgba(${_hexToRgb(col)},${op})`;
+  if (sw) sw.style.background = `rgba(${_hexToRgbCsv(col)},${op})`;
   if (sw) sw.style.borderColor = col;
   if (bufLayers.length > 0) drawBuffers();
 }
@@ -20550,14 +20563,19 @@ function _bufOpacityChange(val) {
   document.getElementById('buf-opacity-lbl').textContent = val + '%';
   const col = _bufGetColor();
   const sw = document.getElementById('buf-col-swatch');
-  if (sw) { sw.style.background = `rgba(${_hexToRgb(col)},${val/100})`; sw.style.borderColor = col; }
+  if (sw) { sw.style.background = `rgba(${_hexToRgbCsv(col)},${val/100})`; sw.style.borderColor = col; }
   if (bufLayers.length > 0) drawBuffers();
 }
 
-function _hexToRgb(hex) {
-  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-  return `${r},${g},${b}`;
-}
+// "#3b82f6" → "59,130,246" (za rgba(...) u CSS-u). NE zvati se _hexToRgb —
+// tako se zvala do v3.102.1 i tiho je gazila istoimenu funkciju sa ~11437 koja
+// vraća NIZ [r,g,b] (deklaracije se hoistuju, zadnja pobjeđuje). Pozivaoci koji
+// su radili `const [r,g,b] = _hexToRgb(c)` dobijali su string pa destrukturirali
+// PRVA TRI ZNAKA ("59,130,246" → '5','9',','), i _gradeColor je vraćao boje tipa
+// "#0aNaN34". Canvas neispravnu boju tiho ignoriše i zadrži prethodnu, pa su
+// segmenti u "Analizi nagiba" dobijali boju nasumične druge vlake umjesto skale
+// zelena→žuta→crvena. Ide preko _hexToRgb pa usput podržava i kratki #abc zapis.
+function _hexToRgbCsv(hex) { return _hexToRgb(hex).join(','); }
 
 // Build offset polygon (buffer) for a single vlaka using Turf
 function buildBufPoly(v) {
@@ -21020,7 +21038,7 @@ async function _enrichVlakeElevation(vlakeRows) {
     const lats = chunk.map(p => p.la.toFixed(5)).join(',');
     const lons = chunk.map(p => p.lo.toFixed(5)).join(',');
     try {
-      const resp = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`);
+      const resp = await _fetchT(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`, 12000);
       const d = await resp.json();
       if (Array.isArray(d.elevation)) {
         d.elevation.forEach((e, j) => { elevs[i + j] = e; });
@@ -23136,11 +23154,24 @@ function _msrSphericalArea(pts) {
   }
   return Math.abs(area * R * R / 2);
 }
+// fetch sa rokom (v3.102.1). Na terenu navigator.onLine laže 'true' na mrtvoj
+// vezi (OS-S4), pa poziv ne PADNE nego VISI — bez roka `await fetch(...)` nikad
+// ne završi: "Profil" se otvori i zauvijek ostane prazan, izmjera visine nikad
+// ne javi ni rezultat ni grešku. Sa rokom poziv uredno baci, pozivaoci koji
+// već imaju catch/fallback (DEM mreža, keš) rade svoj posao.
+// Isti obrazac je već postojao kod Terrarium pločica i batch visina — ovo ga
+// samo ujednačava na jednom mjestu.
+function _fetchT(url, ms = 12000, opts = {}) {
+  const sig = (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function')
+    ? AbortSignal.timeout(ms) : undefined;
+  return fetch(url, sig ? { ...opts, signal: sig } : opts);
+}
+
 async function _msrFetchElev(lat, lng) {
   const key = lat.toFixed(5)+','+lng.toFixed(5);
   if (_msrElevCache[key] != null) return _msrElevCache[key];
   try {
-    const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat.toFixed(5)}&longitude=${lng.toFixed(5)}`);
+    const r = await _fetchT(`https://api.open-meteo.com/v1/elevation?latitude=${lat.toFixed(5)}&longitude=${lng.toFixed(5)}`, 8000);
     const d = await r.json();
     const v = d.elevation?.[0];
     if (v != null) _msrElevCache[key] = v;
@@ -24455,7 +24486,7 @@ async function _fetchProfileElev(rawPts) {
   const lats = pts.map(p => p.la.toFixed(5)).join(',');
   const lons = pts.map(p => p.lo.toFixed(5)).join(',');
   try {
-    const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`);
+    const r = await _fetchT(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`, 12000);
     const d = await r.json();
     if (!Array.isArray(d.elevation) || d.elevation.length !== pts.length) return null;
     return { pts, alts: d.elevation };
@@ -30552,7 +30583,7 @@ async function _kmlcDownloadGroup(items) {
     const isBin = /\.(shp|dbf)$/i.test(filePath);
     const type  = isBin ? 'arraybuffer' : 'text';
     try {
-      const r = await fetch(_bucketFileUrl(bucketName, filePath), { headers: { apikey: SUPA_KEY } });
+      const r = await _fetchT(_bucketFileUrl(bucketName, filePath), 15000, { headers: { apikey: SUPA_KEY } });
       if (!r.ok) continue;
       const data = isBin ? await r.arrayBuffer() : await r.text();
       await _kmlcSave('file:' + k._key, data);
@@ -30564,7 +30595,7 @@ async function _kmlcDownloadGroup(items) {
           const cKey = 'file:' + bucketName + '/' + base + ext;
           if (_kmlcKeys.has(cKey)) continue;
           try {
-            const r2 = await fetch(_bucketFileUrl(bucketName, base + ext), { headers: { apikey: SUPA_KEY } });
+            const r2 = await _fetchT(_bucketFileUrl(bucketName, base + ext), 15000, { headers: { apikey: SUPA_KEY } });
             if (!r2.ok) continue;
             const d2 = ext === '.prj' ? await r2.text() : await r2.arrayBuffer();
             await _kmlcSave(cKey, d2);
@@ -30681,7 +30712,7 @@ async function _srvDelete(keysArg) {
 async function _fetchBucketFile(bucketName, filePath, type = 'text') {
   const cacheKey = 'file:' + bucketName + '/' + filePath;
   try {
-    const r = await fetch(_bucketFileUrl(bucketName, filePath), { headers: { 'apikey': SUPA_KEY } });
+    const r = await _fetchT(_bucketFileUrl(bucketName, filePath), 15000, { headers: { 'apikey': SUPA_KEY } });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = type === 'arraybuffer' ? await r.arrayBuffer() : await r.text();
     _kmlcSave(cacheKey, data); // fire-and-forget
@@ -31075,7 +31106,7 @@ function _dozRestoreBoundaryStyleUI() {
   if (opLbl) opLbl.textContent = Math.round(s.op * 100) + '%';
   if (wtLbl) wtLbl.textContent = s.wt;
   const sw = document.getElementById('doz-fill-swatch');
-  if (sw) { sw.style.background = `rgba(${_hexToRgb(s.col)},${Math.max(s.op, 0.15)})`; sw.style.borderColor = s.col; }
+  if (sw) { sw.style.background = `rgba(${_hexToRgbCsv(s.col)},${Math.max(s.op, 0.15)})`; sw.style.borderColor = s.col; }
 }
 
 function dozRenderOdjeli() {
@@ -31588,7 +31619,7 @@ function dozFillStyleChange() {
   document.getElementById('doz-fill-opacity-lbl').textContent = Math.round(op * 100) + '%';
   document.getElementById('doz-border-weight-lbl').textContent = wt;
   const sw = document.getElementById('doz-fill-swatch');
-  if (sw) { sw.style.background = `rgba(${_hexToRgb(col)},${Math.max(op, 0.15)})`; sw.style.borderColor = col; }
+  if (sw) { sw.style.background = `rgba(${_hexToRgbCsv(col)},${Math.max(op, 0.15)})`; sw.style.borderColor = col; }
   if (_dozBoundaryLayer) {
     _dozBoundaryLayer.setStyle({ color: col, weight: wt, fillColor: col, fillOpacity: op, dashArray: dash ? '6,4' : null });
   }
@@ -32037,8 +32068,8 @@ function _dozRestoreTreesStyleUI() {
   if (opLbl) opLbl.textContent = Math.round(s.opacity * 100) + '%';
   const inSw  = document.getElementById('doz-trees-in-swatch');
   const outSw = document.getElementById('doz-trees-out-swatch');
-  if (inSw)  { inSw.style.background  = `rgba(${_hexToRgb(s.inCol)},${s.opacity})`;  inSw.style.borderColor  = s.inCol; }
-  if (outSw) { outSw.style.background = `rgba(${_hexToRgb(s.outCol)},${s.opacity})`; outSw.style.borderColor = s.outCol; }
+  if (inSw)  { inSw.style.background  = `rgba(${_hexToRgbCsv(s.inCol)},${s.opacity})`;  inSw.style.borderColor  = s.inCol; }
+  if (outSw) { outSw.style.background = `rgba(${_hexToRgbCsv(s.outCol)},${s.opacity})`; outSw.style.borderColor = s.outCol; }
 }
 function dozTreesStyleChange() {
   const inCol   = document.getElementById('doz-trees-in-col')?.value || '#4ade80';
@@ -32048,8 +32079,8 @@ function dozTreesStyleChange() {
   if (opLbl) opLbl.textContent = Math.round(opacity * 100) + '%';
   const inSw  = document.getElementById('doz-trees-in-swatch');
   const outSw = document.getElementById('doz-trees-out-swatch');
-  if (inSw)  { inSw.style.background  = `rgba(${_hexToRgb(inCol)},${opacity})`;  inSw.style.borderColor  = inCol; }
-  if (outSw) { outSw.style.background = `rgba(${_hexToRgb(outCol)},${opacity})`; outSw.style.borderColor = outCol; }
+  if (inSw)  { inSw.style.background  = `rgba(${_hexToRgbCsv(inCol)},${opacity})`;  inSw.style.borderColor  = inCol; }
+  if (outSw) { outSw.style.background = `rgba(${_hexToRgbCsv(outCol)},${opacity})`; outSw.style.borderColor = outCol; }
   _setDozTreesStyle({ inCol, outCol, opacity });
   if (_dozTreesLayer) _dozRenderTreeMarkers();  // samo redraw — analiza (in/out) se ne mijenja
 }
@@ -35358,19 +35389,10 @@ if (typeof AndroidDownload !== 'undefined') {
   </div>
 </div>
 
-<!-- === Confirm delete SQLite karte === -->
-<div id="sql-del-confirm" onclick="if(event.target===this)_sqlCancelDelete()"
-  style="display:none;position:fixed;inset:0;z-index:9900;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;">
-  <div style="background:#0f172a;border:1px solid #dc2626;border-radius:14px;padding:22px 20px;width:min(300px,88vw);box-shadow:0 8px 32px rgba(0,0,0,0.8);">
-    <div style="font-size:15px;font-weight:700;color:#f87171;margin-bottom:6px;">🗑 Obriši kartu?</div>
-    <div style="font-size:13px;color:#94a3b8;margin-bottom:4px;word-break:break-all;" id="sql-del-name"></div>
-    <div style="font-size:12px;color:#475569;margin-bottom:16px;">Karta će biti uklonjena iz memorije pretraživača.</div>
-    <div style="display:flex;gap:10px;">
-      <button onclick="_sqlConfirmDelete()" style="flex:1;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:700;cursor:pointer;">Obriši</button>
-      <button onclick="_sqlCancelDelete()" style="flex:1;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:8px;padding:11px;font-size:13px;cursor:pointer;">Odustani</button>
-    </div>
-  </div>
-</div>
+<!-- (v3.102.1) Ovdje je stajao modal #sql-del-confirm za brisanje SQLite karte.
+     Bio je potpuno mrtav: ništa u aplikaciji ga nije otvaralo, a oba dugmeta su
+     zvala _sqlConfirmDelete()/_sqlCancelDelete() koje NE POSTOJE (jedina dva od
+     521 provjerena on*-rukovaoca bez funkcije). Uklonjen. -->
 
 <!-- === Quick meta prompt — po završetku snimanja traga === -->
 

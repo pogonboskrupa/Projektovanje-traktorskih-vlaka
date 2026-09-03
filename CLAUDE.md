@@ -122,6 +122,30 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   **Novi interaktivni canvas pane = novi sloj koji krade klikove svemu ispod** —
   ili mu daj vlastiti fallback, ili ga ne pravi. Test:
   `tests/js/kml-click.test.js` (izvlači STVARNI `_kmlHitTest` iz index.html).
+- **Dvije funkcije istog imena — zadnja tiho pobjeđuje** (v3.102.1): fajl ima
+  ~1430 `function` deklaracija u jednom `<script>` bloku; deklaracije se
+  hoistuju pa kasnija bez ikakve greške zamijeni raniju. Tako je string-verzija
+  `_hexToRgb` (vraća `"r,g,b"` za `rgba()`) gazila niz-verziju (`[r,g,b]`), pa
+  je `const [r,g,b] = _hexToRgb(c)` destrukturirao PRVA TRI ZNAKA stringa i
+  `_gradeColor` je vraćao boje tipa `#0aNaN34`. **Canvas neispravnu boju ne
+  prijavi nego je tiho ignoriše i zadrži prethodnu** — segmenti "Analize
+  nagiba" su dobijali boju nasumične druge vlake, bez ijedne poruke u konzoli.
+  Sad su to `_hexToRgb` (niz) i `_hexToRgbCsv` (string). Test
+  `tests/js/boje-nagiba.test.js` čuva i skalu boja i pravilo "nijedno ime
+  funkcije se ne smije pojaviti dva puta".
+- **Mrežni poziv bez roka na terenu VISI, ne pada** (v3.102.1): `navigator
+  .onLine` laže `true` na mrtvoj vezi (OS-S4), pa `await fetch(...)` bez
+  `signal` nikad ne završi — "Profil" se otvori i ostane prazan zauvijek
+  (izmjereno: stari kod visi i poslije 20 s, novi vrati `null` za 12 s i
+  pređe na DEM fallback). Za svaki poziv van uređaja koristiti `_fetchT(url,
+  ms, opts)`; catch/fallback grane koje već postoje onda rade svoj posao.
+- **Panel taba bez zadane širine se na telefonu ne raširi** (v3.102.1):
+  paneli su flex-djeca `#main`-a; bez pravila šire se koliko im sadržaj traži,
+  pa je ispadalo nasumično (Korisnici 305px, Tragovi 341px, a pored njih virio
+  komad karte). Svaki NOVI tab-panel mora ući u `@media (max-width:580px)`
+  pravilo za punu širinu. Pažnja: pravilo mora biti **iza** definicije samog
+  `#id`-a u fajlu — inače ga ta kasnija definicija (iste specifičnosti)
+  pregazi, što se i desilo `#doznaka-panel`-u.
 - **Pozicija u DOM-u NIJE indeks u nizu** (v3.102.0): lista vlaka se crta
   sortirano i hijerarhijski (`rootVlake` sort + `renderWithChildren` gura
   krakove ispod roditelja), a `vlake[]` je redoslijed nastanka/dolaska sa
