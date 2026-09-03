@@ -122,6 +122,38 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   **Novi interaktivni canvas pane = novi sloj koji krade klikove svemu ispod** —
   ili mu daj vlastiti fallback, ili ga ne pravi. Test:
   `tests/js/kml-click.test.js` (izvlači STVARNI `_kmlHitTest` iz index.html).
+- **Pokretanje dira DOM koji JOŠ NE POSTOJI** (v3.102.2) — najskuplja posljedica
+  offline-first ulaza. `showApp()` se iz keširanog profila zove ODMAH, dok se
+  tijelo dokumenta još parsira: skripta ide do ~33857. linije, a `#mjtrg-panel`
+  je u markupu tek na ~35138. `switchTab('karta')` je taj element čitao bez
+  provjere → `TypeError`, a `showApp()` nije imao `try/catch` — pa se SVE ispod
+  te linije preskakalo: `sqlmapRestoreAll` (offline SQLite karte),
+  `_localKmlRestore`, `_restoreTacke`, `_restoreFotos`, `_tragRegLoad`,
+  `_msrRegLoad`, `_refRepoLoad`, `_temRestore`, `_kmlcInit`, `loadProj`,
+  `sbInitData`, `_processOfflineQueue`. Korisnik je to prijavio kao "ponekad ne
+  mogu aktivirati učitane karte" — karte su bile uredno na uređaju, samo ih
+  niko nije pokupio. Izmjereno nad stvarnim pokretanjem: stari kod obnovi **0**
+  sačuvanih KML slojeva, novi **1**. Pravila koja iz toga slijede:
+  - Sav startup rad koji dira DOM ide kroz **`_startupRestore()`** — čeka
+    `DOMContentLoaded` ako `document.readyState === 'loading'`, idempotentan je,
+    i **svaki korak ima vlastiti `try/catch`** (pad jednog ne obara ostale).
+  - Novi korak obnove se dodaje SAMO tamo, kroz `korak('ime', () => …)`.
+  - Funkcije koje se zovu pri pokretanju ne smiju čitati `.style` elementa bez
+    provjere postojanja — pola panela u `switchTab` je tu provjeru već imalo,
+    pola nije.
+  - Test: `tests/js/startup-restore.test.js` (7 testova; nad starim kodom pada 6).
+- **Offline karta se NIKAD ne briše sama** (v3.102.2): `_sqlCrashCheck` je poslije
+  3 prekinuta učitavanja TRAJNO brisao SQLite kartu (IDB + OPFS). Ali marker
+  "učitavam" ostaje i kad app ubije OEM battery manager, kad korisnik zatvori
+  app usred učitavanja ili kad ponestane RAM-a — ništa od toga ne znači da je
+  karta neispravna, a brisao se fajl od više stotina MB koji offline nema odakle
+  vratiti. Sada se karta samo isključi iz AUTOMATSKOG učitavanja
+  (`tvlake_sqlmap_skip_autoload`), vidi se u listi offline karata i vraća
+  dugmetom "Pokušaj ponovo" (`sqlmapRetryOne`).
+- **Karta ne smije ostati bez podloge**: `_restoreLastMap` namjerno preskoči tile
+  sloj kad je zadnja aktivna bila SQLite (da nema bljeska Topo-a) i računa na
+  `sqlmapRestoreAll`. Ako taj restore ne uspije, bez `_sqlEnsureBaseLayer()`
+  ostaje siva praznina i prazna lista karata — nema se šta ni aktivirati.
 - **Dvije funkcije istog imena — zadnja tiho pobjeđuje** (v3.102.1): fajl ima
   ~1430 `function` deklaracija u jednom `<script>` bloku; deklaracije se
   hoistuju pa kasnija bez ikakve greške zamijeni raniju. Tako je string-verzija

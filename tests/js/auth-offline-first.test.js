@@ -247,6 +247,10 @@ await test('showApp: login ekran (logo) se sklanja PRIJE sporih provjera, ne pos
     authShowPending: () => {}, _OL: { save: () => {}, PROFILE: 'p' },
     sb: null, switchTab: () => {}, loadProj: () => {}, sbInitData: () => {},
     _processOfflineQueue: () => {}, sqlmapRestoreAll: () => {}, _setOfflineMode: () => {},
+    // v3.102.2: obnova podataka je izdvojena iz showApp() u _startupRestore()
+    // (čeka DOMContentLoaded i osigurava svaki korak zasebno) — vidi
+    // tests/js/startup-restore.test.js. Ovdje je dovoljan mock.
+    _startupRestore: () => {},
     navigator: { onLine: true, storage: null }, isVodeci: () => false,
     setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
     console: { error(){}, warn(){}, log(){} },

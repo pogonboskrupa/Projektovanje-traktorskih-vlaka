@@ -4765,7 +4765,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.102.1';
+const APP_VER = 'v3.102.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5613,37 +5613,64 @@ async function showApp() {
   if (sbUser) await _checkDeviceUserSwitch(sbUser.id);
   _revealApp();   // idempotentno — ako je gore već otkriveno, ovo ne mijenja ništa
   _setOfflineMode(!navigator.onLine);
-  switchTab('karta');
-  loadProj();      // lokalni podaci odmah (sinhrono, brzo)
-  sbInitData();    // Supabase podaci u pozadini
-  if (navigator.onLine) _processOfflineQueue();
+  _startupRestore();
+}
+
+// Sve što obnavlja podatke i dira DOM pri pokretanju. Izdvojeno iz showApp() iz
+// dva razloga:
+//
+// 1. ČEKA DA DOKUMENT BUDE ISPARSIRAN. Offline-first ulaz (v3.100.0) zove
+//    showApp() ODMAH, dok se tijelo dokumenta još parsira — dio elemenata tada
+//    ne postoji. Ranije je switchTab('karta') na tome bacao TypeError i sve
+//    ispod (offline karte, KML, tačke, fotografije, tragovi) se NIJE izvršilo.
+//    To je bio pravi uzrok prijave "ponekad ne mogu aktivirati učitane karte":
+//    karte su bile uredno na uređaju, samo ih sqlmapRestoreAll() nikad nije
+//    pokupio jer se do te linije nikad nije ni stiglo.
+//
+// 2. SVAKI KORAK JE ZASEBNO OSIGURAN. Jedan pad (nedostajući element, prazan
+//    keš, izuzetak u biblioteci) više ne smije oboriti sve ostale obnove.
+function _startupRestore() {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _startupRestore, { once: true });
+    return;
+  }
+  if (_startupRestore._done) return;   // idempotentno (showApp može doći dvaput)
+  _startupRestore._done = true;
+
+  const korak = (ime, fn) => { try { fn(); } catch(e) { console.warn('startup:' + ime, e); } };
+
+  korak('switchTab',   () => switchTab('karta'));
+  korak('loadProj',    () => loadProj());        // lokalni podaci odmah (sinhrono, brzo)
+  korak('sbInitData',  () => sbInitData());      // Supabase podaci u pozadini
+  if (navigator.onLine) korak('queue', () => _processOfflineQueue());
   // SQLite karta je primarna — restore odmah (async, ne blokira)
-  sqlmapRestoreAll();
+  korak('sqlmapRestore', () => sqlmapRestoreAll());
+
   // Ostali nekritični restores iza prvog painta
   setTimeout(() => {
-    geojsonOdjeliRestore();
-    _tragRegLoad();
+    korak('geojsonOdjeli', () => geojsonOdjeliRestore());
+    korak('tragReg',       () => _tragRegLoad());
     // Flush tragova koji nisu dospjeli na server (offline pri snimanju)
     if (navigator.onLine && sbUser && sbProfile) {
-      (_tragRegistry || []).filter(t => !t.sbId && t.pts?.length).forEach(t => sbFlushTrag(t));
+      korak('flushTrag', () => (_tragRegistry || []).filter(t => !t.sbId && t.pts?.length).forEach(t => sbFlushTrag(t)));
     }
-    _msrRegLoad();
-    _refRepoLoad();
-    _restoreTacke();
-    _restoreFotos();
-    _localKmlRestore();
-    _kmlcInit(); // load IDB key list for offline badge rendering
-    _temRestore(); // tematska .gpkg karta iz IDB (async, ne blokira)
+    korak('msrReg',    () => _msrRegLoad());
+    korak('refRepo',   () => _refRepoLoad());
+    korak('tacke',     () => _restoreTacke());
+    korak('fotos',     () => _restoreFotos());
+    korak('localKml',  () => _localKmlRestore());
+    korak('kmlcInit',  () => _kmlcInit());   // lista IDB ključeva za offline bedž
+    korak('temRestore',() => _temRestore()); // tematska .gpkg karta iz IDB (async)
     // Trajna pohrana: bez persist() browser pod pritiskom diska smije obrisati
     // CIJELI Cache Storage/IDB (sve offline pločice i karte odjednom). Uz persist()
     // pregledano/preuzeto ostaje dok korisnik sam ne obriše.
-    try {
+    korak('persist', () => {
       if (navigator.storage && navigator.storage.persist) {
         navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist(); });
       }
-    } catch(e) {}
+    });
     // Vodeći projektant: nalog služi isključivo nadzoru — odmah otvori pregled
-    if (isVodeci() && navigator.onLine) showProjectManagement();
+    if (isVodeci() && navigator.onLine) korak('vodeci', () => showProjectManagement());
   }, 80);
 }
 
@@ -11817,9 +11844,22 @@ function _activeLayerKey() {
 function _lsRenderSqlite() {
   const grid = document.getElementById('ls-sqlite-in-grid');
   if (!grid) return;
-  if (!_sqlLayers.length) { grid.innerHTML = ''; return; }
+  // Karte sačuvane na uređaju koje se nisu učitale pri pokretanju. Bez ovoga je
+  // mreža bila POTPUNO PRAZNA — korisnik ima kartu na telefonu, a nema je gdje
+  // ni vidjeti ni aktivirati, niti ijedan trag da postoji.
+  const pale = (typeof _sqlRestoreFailed !== 'undefined' ? _sqlRestoreFailed : [])
+    .filter(f => !_sqlLayers.some(sl => sl.name === f.name));
+  const paleHtml = pale.map(f => `<div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;
+      background:#2a1616;border:1px solid #7f1d1d;border-radius:8px;padding:8px 10px;">
+      <span style="flex:1;min-width:0;font-size:11px;color:#fca5a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        ⚠ ${_escHtml(f.name)} — nije učitana</span>
+      <button onclick="event.stopPropagation();sqlmapRetryOne('${_escAttr(f.name)}')"
+        style="flex-shrink:0;background:#1e3a5f;border:1px solid #2563eb;color:#93c5fd;border-radius:6px;
+        padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">Pokušaj ponovo</button>
+    </div>`).join('');
+  if (!_sqlLayers.length) { grid.innerHTML = paleHtml; return; }
   const active = _activeLayerKey();
-  grid.innerHTML = _sqlLayers.map((sl, i) => {
+  grid.innerHTML = paleHtml + _sqlLayers.map((sl, i) => {
     const short = sl.name.length > 13 ? sl.name.slice(0, 12) + '…' : sl.name;
     return `<div style="position:relative;">
       <button class="layer-opt" id="ls-sql-btn-${i}" style="width:100%;padding:10px 6px 12px;"
@@ -22954,10 +22994,19 @@ function switchTab(tab) {
     const oc = b.getAttribute('onclick') || '';
     b.classList.toggle('active', oc.includes(`switchTab('${tab}')`));
   });
-  panel.style.display   = tab==='vlake'    ? 'flex' : 'none';
-  pproj.style.display   = tab==='projekat' ? 'flex' : 'none';
-  pdoz.style.display    = tab==='doznaka'  ? 'flex' : 'none';
-  pmjtrg.style.display  = tab==='mjtrg'   ? 'flex' : 'none';
+  // SVIH osam panela sa provjerom postojanja. Prva četiri su je ranije nemala i
+  // to je rušilo cijelo pokretanje: #mjtrg-panel je u markupu tek na ~35138, a
+  // skripta se izvršava do ~33857 — kad initAuth uđe u app ODMAH iz keširanog
+  // profila (offline-first, v3.100.0), switchTab('karta') se pozove PRIJE nego
+  // je taj dio dokumenta uopšte isparsiran. pmjtrg je tada null, baci se
+  // TypeError, i sve u showApp() POSLIJE te linije se preskoči — offline SQLite
+  // karte, KML slojevi, tačke, fotografije, tragovi, red čekanja. Vidi i
+  // _startupRestore() ispod, koji sad čeka da dokument bude gotov.
+  const _show = (el, on) => { if (el) el.style.display = on ? 'flex' : 'none'; };
+  _show(panel,  tab==='vlake');
+  _show(pproj,  tab==='projekat');
+  _show(pdoz,   tab==='doznaka');
+  _show(pmjtrg, tab==='mjtrg');
   if (padmin)   padmin.style.display   = tab==='admin'   ? 'flex' : 'none';
   if (ppostavke)ppostavke.style.display= tab==='postavke'? 'flex' : 'none';
   if (pteren)   pteren.style.display   = tab==='teren'   ? 'flex' : 'none';
@@ -26865,6 +26914,18 @@ async function _sqlIdbClearAll() {
 // NE smije obrisati ništa.
 const _SQL_CRASH_MAX = 3;
 function _sqlFailKey(name) { return 'tvlake_sqlmap_fails_' + name; }
+// Karte isključene iz AUTOMATSKOG učitavanja pri pokretanju (fajl OSTAJE na uređaju)
+const _SQL_SKIP_KEY = 'tvlake_sqlmap_skip_autoload';
+function _sqlSkipList() {
+  try { return JSON.parse(localStorage.getItem(_SQL_SKIP_KEY) || '[]'); } catch(e) { return []; }
+}
+function _sqlSkipAdd(name) {
+  const l = _sqlSkipList();
+  if (!l.includes(name)) { l.push(name); try { localStorage.setItem(_SQL_SKIP_KEY, JSON.stringify(l)); } catch(e) {} }
+}
+function _sqlSkipRemove(name) {
+  try { localStorage.setItem(_SQL_SKIP_KEY, JSON.stringify(_sqlSkipList().filter(n => n !== name))); } catch(e) {}
+}
 async function _sqlCrashCheck() {
   const loading = localStorage.getItem(_SQL_CRASH_KEY);
   if (!loading) return false;                    // nije bilo prekinutog učitavanja
@@ -26872,11 +26933,19 @@ async function _sqlCrashCheck() {
   const fk = _sqlFailKey(loading);
   const n = (parseInt(localStorage.getItem(fk) || '0', 10) || 0) + 1;
   if (n < _SQL_CRASH_MAX) { localStorage.setItem(fk, String(n)); return false; }
-  // 3 pada zaredom na istoj karti → obriši samo nju
+  // 3 prekida zaredom na istoj karti. RANIJE se karta ovdje TRAJNO BRISALA
+  // (_sqlIdbDeleteDirect + _opfsDel) — ali marker "učitavam" ostaje i kad app
+  // ubije OEM battery manager (Xiaomi/Samsung/Huawei ubiju cijeli proces, vidi
+  // napomenu o Doze/App Standby), kad korisnik zatvori app usred učitavanja ili
+  // kad ponestane RAM-a. Nijedno od toga ne znači da je karta neispravna, a
+  // brisao se fajl od više stotina MB koji je korisnik skinuo na terenu i koji
+  // offline nema odakle vratiti. Sada se karta samo ISKLJUČUJE IZ AUTOMATSKOG
+  // učitavanja pri pokretanju (da ne pravi petlju rušenja) — fajl ostaje, karta
+  // se vidi u listi offline karata i vraća se dugmetom "Pokušaj ponovo".
   localStorage.removeItem(fk);
-  try { await _sqlIdbDeleteDirect(loading); } catch(e) {}
-  try { await _opfsDel(loading + '.sqlmap'); } catch(e) {}
-  _sqlmapStatus('⚠️ Karta "' + loading + '" je više puta uzrokovala rušenje. Obrisana je automatski.');
+  _sqlSkipAdd(loading);
+  _sqlmapStatus('⚠️ Karta "' + loading + '" se nije uspjela učitati više puta zaredom. '
+    + 'Nije obrisana — otvori 🗄 Offline karte i klikni "Pokušaj ponovo".');
   const el = document.getElementById('sqlmap-crash-banner');
   if (el) el.style.display = '';
   return false;                                  // nastavi restore ostalih karata
@@ -27466,23 +27535,45 @@ function _sqlmapCreateLayerMain(name, fmt, meta) {
 }
 
 // ── Obnavljanje sačuvanih karata ──────────────────────────────────────────────
+// Karte koje su sačuvane na uređaju ali se pri pokretanju nisu učitale.
+// Prikazuju se u listi offline karata sa dugmetom za ponovni pokušaj —
+// ranije su padale tiho (samo console.warn) pa je lista bila prazna i
+// korisnik nije imao ŠTA da aktivira ni ikakav trag da karta postoji.
+let _sqlRestoreFailed = [];
 async function sqlmapRestoreAll() {
   if (await _sqlCrashCheck()) return;
+  _sqlRestoreFailed = [];
   let lastSqlId = null;
   try { const lm=JSON.parse(localStorage.getItem('tvlake_last_map')); if(lm?.type==='sqlite'&&lm.sqlId) lastSqlId=lm.sqlId; } catch(e){}
 
   try {
-    const r = await _sqlWCall({type:'list'});
-    if (!r.ok || !r.rows?.length) { localStorage.removeItem(_SQL_CRASH_KEY); return; }
+    const r = await _sqlWCall({type:'list'}, [], 30000);
+    if (!r.ok || !r.rows?.length) {
+      localStorage.removeItem(_SQL_CRASH_KEY);
+      // Popis karata nije uspio (worker pao/istekao) ILI ih stvarno nema —
+      // u oba slučaja podloga mora postojati.
+      _sqlEnsureBaseLayer(r.ok ? 0 : 1);
+      return;
+    }
 
     // Sortiraj po vremenu čuvanja (najnovija prva) — fallback za auto-prikaz
     const rows = r.rows.slice().sort((a,b) => (b.savedAt||0) - (a.savedAt||0));
     // Koju kartu prikazati: zadnju aktivnu; ako je nema, najnoviju sačuvanu.
-    const showName = (lastSqlId && rows.some(e => e.name === lastSqlId)) ? lastSqlId : rows[0].name;
+    const _skipNow = _sqlSkipList();
+    const _kandidati = rows.filter(e => !_skipNow.includes(e.name));
+    const showName = (lastSqlId && _kandidati.some(e => e.name === lastSqlId))
+      ? lastSqlId : (_kandidati[0]?.name || null);
     let shownAny = false;
 
+    const preskoci = _sqlSkipList();
     for (const entry of rows) {
       if (_sqlLayers.find(l => l.name === entry.name)) continue;
+      // Isključena iz automatskog učitavanja (vidi _sqlCrashCheck) — fajl je tu,
+      // samo se ne dira sam od sebe. Pokaži je u listi sa "Pokušaj ponovo".
+      if (preskoci.includes(entry.name)) {
+        _sqlRestoreFailed.push({ name: entry.name, error: 'isključena iz auto-učitavanja' });
+        continue;
+      }
       try {
         // D1-5: marker = karta koja se trenutno učitava (ostane ako app crashne)
         localStorage.setItem(_SQL_CRASH_KEY, entry.name);
@@ -27496,7 +27587,13 @@ async function sqlmapRestoreAll() {
         // Učitavanje ove karte prošlo bez rušenja → ukloni marker i reset fail brojač
         localStorage.removeItem(_SQL_CRASH_KEY);
         localStorage.removeItem(_sqlFailKey(entry.name));
-        if (!lr.ok) { console.warn('SQLmap restore skip:', entry.name, lr.error); continue; }
+        if (!lr.ok) {
+          console.warn('SQLmap restore skip:', entry.name, lr.error);
+          // Zapamti da je OVA karta pala — inače korisnik u listi vidi samo
+          // prazninu i nema pojma da je karta uopšte sačuvana na uređaju.
+          _sqlRestoreFailed.push({ name: entry.name, error: lr.error || 'nepoznato' });
+          continue;
+        }
         const layer = _sqlmapCreateLayerW(entry.name, lr.fmt, lr.meta);
         const shouldShow = entry.name === showName;
         if (shouldShow) {
@@ -27510,12 +27607,73 @@ async function sqlmapRestoreAll() {
         }
         _sqlLayers.push({name:entry.name, fmt:lr.fmt, layer, visible:shouldShow, meta:lr.meta, saved:true, opfs:!!entry.opfs});
         if (shouldShow) _sqlPrewarm(entry.name);
-      } catch(e) { console.warn('SQLmap restore error', entry.name, e); }
+      } catch(e) {
+        console.warn('SQLmap restore error', entry.name, e);
+        _sqlRestoreFailed.push({ name: entry.name, error: e?.message || 'greška' });
+      }
     }
     if (_sqlLayers.length) { _sqlmapRenderLayers(); _lsRenderSqlite(); }
-    else if (_sqlLayers.length) showToast('🗺 Karte učitane — odaberi kartu iz sloja 🗄');
-  } catch(e) { console.warn('SQLmap restore failed:', e); }
+    // Nijedna karta se nije prikazala (sve pale na učitavanju, ili je zadnja
+    // aktivna nestala iz memorije). Bez ovoga karta ostaje POTPUNO PRAZNA —
+    // _restoreLastMap gore namjerno preskoči tile sloj kad je zadnja aktivna
+    // bila SQLite, računajući na ovaj restore. Vidi napomenu tamo.
+    if (!shownAny) _sqlEnsureBaseLayer(rows.length);
+  } catch(e) {
+    console.warn('SQLmap restore failed:', e);
+    _sqlEnsureBaseLayer(0);
+  }
   localStorage.removeItem(_SQL_CRASH_KEY);
+}
+
+// Ponovni pokušaj učitavanja JEDNE sačuvane karte (dugme u listi offline
+// karata). Dosad jedini način da se karta vrati bio je ponovo je učitati sa
+// telefona — a to su fajlovi od više stotina MB koje je korisnik skinuo na
+// terenu, pa je "pokušaj ponovo" jedina razumna prva reakcija.
+async function sqlmapRetryOne(name) {
+  showToast('⏳ Ponovo učitavam "' + name + '"…');
+  try {
+    const r = await _sqlWCall({ type:'list' }, [], 30000);
+    const entry = (r.rows || []).find(e => e.name === name);
+    if (!entry) { showToast('⚠ Karta "' + name + '" više nije na uređaju'); return; }
+    let lr;
+    if (entry.opfs) {
+      const opfsName = entry.opfsName || (entry.name + '.sqlmap');
+      lr = await _sqlWCall({ type:'load-opfs', name:entry.name, path:'/'+opfsName, fmt:entry.fmt, meta:entry.meta });
+    } else {
+      lr = await _sqlWCall({ type:'load-idb', name:entry.name });
+    }
+    if (!lr.ok) { showToast('❌ "' + name + '" se i dalje ne može učitati (' + (lr.error||'?') + ')'); return; }
+    const layer = _sqlmapCreateLayerW(entry.name, lr.fmt, lr.meta);
+    _sqlLayers.push({ name:entry.name, fmt:lr.fmt, layer, visible:false, meta:lr.meta, saved:true, opfs:!!entry.opfs });
+    _sqlRestoreFailed = _sqlRestoreFailed.filter(f => f.name !== name);
+    _sqlSkipRemove(name);                                  // vrati je u auto-učitavanje
+    try { localStorage.removeItem(_sqlFailKey(name)); } catch(e) {}
+    setLayerSqlite(_sqlLayers.length - 1);   // odmah je i prikaži
+    _sqlmapRenderLayers();
+    showToast('✅ Karta "' + name + '" učitana');
+  } catch(e) {
+    showToast('❌ Greška: ' + (e?.message || e));
+  }
+}
+
+// Sigurnosna mreža: ako na karti nema NIJEDNOG sloja (ni SQLite ni tile),
+// vrati običnu podlogu da korisnik ne gleda u sivu prazninu. Zove se samo kad
+// SQLite restore nije uspio prikazati svoju kartu.
+function _sqlEnsureBaseLayer(brojSacuvanih) {
+  const imaSql  = _sqlLayers.some(sl => sl.visible && map.hasLayer(sl.layer));
+  const imaTile = Object.values(TL).some(l => map.hasLayer(l));
+  if (imaSql || imaTile) return;
+  let key = '⛰ Topo';
+  try {
+    const lm = JSON.parse(localStorage.getItem('tvlake_last_map'));
+    if (lm?.type === 'tl' && TL[lm.key]) key = lm.key;
+  } catch(e) {}
+  TL[key].addTo(map);
+  const btn = document.getElementById('layer-switch-btn');
+  if (btn) btn.innerHTML = '<svg class="ic"><use href="#ic-karta"/></svg>';
+  if (brojSacuvanih > 0) {
+    showToast('⚠ Offline karta se nije mogla učitati — prikazana obična podloga. Pokušaj ponovo u 🗄 Offline karte.');
+  }
 }
 
 // ── Worker tile layer ─────────────────────────────────────────────────────────
