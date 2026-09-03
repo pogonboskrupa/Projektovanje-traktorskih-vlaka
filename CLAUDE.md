@@ -67,6 +67,13 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   Editoru (nema CI/migration runnera u ovom projektu). Nakon `ALTER TABLE`
   PostgREST keš šeme zna kasniti (`PGRST204 "could not find column"`) — riješi
   se sa `NOTIFY pgrst, 'reload schema';` ili Settings → API → Reload schema.
+- **Nagib vlaka (preklopnik na karti)**: checkbox u 🗄 Slojevi karte → Dodatni
+  slojevi, funkcija `_vlNagibToggle`. Boji SVE trenutno vidljive vlake bojom po
+  strmini (`_gradeColor`/`_updateSteepOverlay`, ista skala kao admin "Analiza
+  nagiba"). NAMJERNO je snapshot na klik, ne prati GPS uživo — ne kačiti ga u
+  `rndList()` ni GPS hot-path (`_vlakaProcessGpsPoint`), usporilo bi snimanje.
+  Dijeli `v._steepPolys` sa admin analizom (`_pmNagibAnaliza`/`_nagibAnalysisStop`
+  u modalu nadzora) — zadnji poziv pobjeđuje, bezopasno u rijetkom preklopu.
 
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
@@ -171,6 +178,15 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   (izmjereno: stari kod visi i poslije 20 s, novi vrati `null` za 12 s i
   pređe na DEM fallback). Za svaki poziv van uređaja koristiti `_fetchT(url,
   ms, opts)`; catch/fallback grane koje već postoje onda rade svoj posao.
+  Za Supabase pozive (nisu `fetch()`, nemaju `signal`) koristiti `_withTimeout
+  (promise, ms)` — isti razlog, npr. periodični sync na 60s (`sb.auth.getSession()`).
+- **Tab labela mora odgovarati sadržaju, sadržaj se ne premješta radi labele**
+  (v3.102.3): "Postavke" tab je nekad zvučao kao opšta prikazna podešavanja, a
+  sadržavao je samo admin email obavještenja o registraciji — preimenovan u
+  "Obavještenja". NIJE premješteno obratno (stil linija/boje vlaka iz Projekat
+  taba tamo) jer je taj tab vidljiv **samo adminu** (`isAdm` gate) — premještanje
+  bi svakodnevne alate sakrilo od svih projektanata koji nisu admin. Prije
+  premještanja bilo čega u tab, provjeriti ko ga uopšte vidi.
 - **Panel taba bez zadane širine se na telefonu ne raširi** (v3.102.1):
   paneli su flex-djeca `#main`-a; bez pravila šire se koliko im sadržaj traži,
   pa je ispadalo nasumično (Korisnici 305px, Tragovi 341px, a pored njih virio

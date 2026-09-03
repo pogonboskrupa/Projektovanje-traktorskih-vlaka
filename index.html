@@ -3587,7 +3587,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
     <button class="tab-btn" onclick="switchTab('vlake')"><svg class="tbi" viewBox="0 0 24 24"><polygon points="4,19 4,6 19,19"/><g stroke-width="1.3"><line x1="7.75" y1="9.25" x2="8.93" y2="7.89"/><line x1="10.75" y1="11.85" x2="11.93" y2="10.49"/><line x1="13.75" y1="14.45" x2="14.93" y2="13.09"/><line x1="16.75" y1="17.05" x2="17.93" y2="15.69"/></g></svg> Vlake<span class="tab-notif" id="notif-vlake"></span></button>
     <button class="tab-btn" onclick="switchTab('doznaka')"><svg class="tbi" viewBox="0 0 24 24"><polygon points="12,3 6,11 18,11"/><polygon points="12,8 5,17 19,17"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="18" cy="6" r="3.2" stroke-width="1.6"/></svg> Doznaka<span class="tab-notif" id="notif-doznaka"></span></button>
     <button class="tab-btn" id="admin-tab-btn" style="display:none;color:#fbbf24;" onclick="switchTab('admin')"><svg class="tbi" viewBox="0 0 24 24"><circle cx="16.5" cy="8.5" r="2.6"/><path d="M11 21c0-3.6 2.5-6.3 5.5-6.3S22 17.4 22 21"/><circle cx="9" cy="8" r="3.3"/><path d="M2.5 21c0-4.3 3-7.5 6.5-7.5s6.5 3.2 6.5 7.5"/></svg> Korisnici<span class="tab-notif" id="notif-admin"></span></button>
-    <button class="tab-btn" id="postavke-tab-btn" style="display:none;color:#a78bfa;" onclick="switchTab('postavke')"><svg class="tbi" viewBox="0 0 24 24" stroke-width="1.5"><polygon points="22.1,12 19.39,15.06 19.14,19.14 15.06,19.39 12,22.1 8.94,19.39 4.86,19.14 4.61,15.06 1.9,12 4.61,8.94 4.86,4.86 8.94,4.61 12,1.9 15.06,4.61 19.14,4.86 19.39,8.94"/><circle cx="12" cy="12" r="5.3" stroke-width="1.6"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg> Postavke</button>
+    <button class="tab-btn" id="postavke-tab-btn" style="display:none;color:#a78bfa;" onclick="switchTab('postavke')"><svg class="tbi" viewBox="0 0 24 24" stroke-width="1.5"><polygon points="22.1,12 19.39,15.06 19.14,19.14 15.06,19.39 12,22.1 8.94,19.39 4.86,19.14 4.61,15.06 1.9,12 4.61,8.94 4.86,4.86 8.94,4.61 12,1.9 15.06,4.61 19.14,4.86 19.39,8.94"/><circle cx="12" cy="12" r="5.3" stroke-width="1.6"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg> Obavještenja</button>
     <button class="tab-btn" id="teren-tab-btn" style="display:none;color:#34d399;" onclick="switchTab('teren')"><svg class="tbi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polygon points="12,5.5 15,12 12,18.5" stroke-width="1.2"/><polygon points="12,5.5 9,12 12,18.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg> Teren</button>
     <span id="vodeci-badge" onclick="closeMenuDropdown();showProjectManagement()" title="Nadzorni nalog — pregled rada svih projektanata šumarije" style="display:none;background:#0e7490;color:#fff;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:auto;flex-shrink:0;align-self:center;cursor:pointer;user-select:none;">👔 VODEĆI PROJEKTANT</span>
     <span id="offline-badge" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:bold;padding:3px 8px;border-radius:10px;white-space:nowrap;margin-left:auto;flex-shrink:0;align-self:center;">📴 OFFLINE</span>
@@ -4039,15 +4039,24 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
       </div>
     </div>
 
-    <!-- ═══ POSTAVKE PANEL (samo admin) ═══ -->
+    <!-- ═══ OBAVJEŠTENJA PANEL (samo admin) ═══
+         Preimenovano iz "Postavke" (v3.102.3) — labela je obećavala prikazna
+         podešavanja (debljina/vrsta linije, boje vlaka), a panel je oduvijek
+         sadržavao SAMO email obavještenja o registraciji. Prikazna podešavanja
+         NAMJERNO nisu premještena ovamo — ovaj tab je vidljiv isključivo
+         adminu (id=postavke-tab-btn, display:none dok !isAdm), a stil linija/
+         boje koristi SVAKI projektant svakodnevno (žive u Projekat tabu,
+         sekcija "Boje vlaka" ~3928). Premještanje bi ih sakrilo od svih koji
+         nisu admin — labela je popravljena da odgovara sadržaju, umjesto da
+         se sadržaj krivo premjesti da odgovori labeli. -->
     <div id="postavke-panel" style="display:none;flex-direction:column;height:100%;overflow-y:auto;background:#0f172a;">
       <div style="padding:14px 16px 10px;border-bottom:1px solid #1e3a5f;flex-shrink:0;">
-        <div style="font-weight:700;color:#a78bfa;font-size:15px;">⚙ Postavke</div>
+        <div style="font-weight:700;color:#a78bfa;font-size:15px;">🔔 Obavještenja</div>
       </div>
       <div style="padding:14px 16px;">
         <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;">
           <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px;">📧 Email obavještenja o registraciji</div>
-          <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Na ove adrese stiže email kad se neko novi registruje — sa dugmadima za direktno odobravanje ili odbijanje, bez otvaranja aplikacije. Telegram poruka se šalje zasebno (vidi docs/OBAVJESTENJA.md).</div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Na ove adrese stiže email kad se neko novi registruje — sa dugmadima za direktno odobravanje ili odbijanje, bez otvaranja aplikacije. Telegram poruka se šalje zasebno.</div>
           <div id="postavke-email-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
             <p style="color:#64748b;font-size:12px;text-align:center;padding:8px 0;">⏳ Učitavam...</p>
           </div>
@@ -4765,7 +4774,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.102.2';
+const APP_VER = 'v3.102.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -6463,7 +6472,7 @@ async function postavkeTestNotif() {
     return;
   }
   await _dlgConfirm(
-    (data || 'Poslano.') + '\n\nAko ništa ne stigne, provjeri tajne u tabeli app_secrets — upute su u docs/OBAVJESTENJA.md.',
+    (data || 'Poslano.') + '\n\nAko ništa ne stigne, provjeri postavke obavještenja na serveru.',
     { title: '📨 Probno obavještenje', okLabel: 'U redu' }
   );
 }
@@ -11553,6 +11562,54 @@ function _addGradePoly(v, seg) {
   v._steepPolys.push(poly);
 }
 
+// ── Preklopnik "Nagib vlaka" na karti (v3.102.3) ────────────────────────────
+// _updateSteepOverlay je do sada bio dostupan SAMO kroz "Analiza nagiba" u
+// admin modalu nadzora (_pmNagibAnaliza, vidi ~21199) — koristan prikaz za
+// svakodnevni rad na terenu (koja dionica je najstrmija) bio je zaključan iza
+// admin ekrana i tuđe elevation-enrichment/statistike koje regularni
+// projektant ne treba. Ovo je laka verzija: oboji SVE trenutno vidljive vlake
+// na karti bojom po nagibu (ista skala kao Analiza nagiba), checkbox u 🗄
+// Slojevi karte → Dodatni slojevi.
+//
+// NAMJERNO nije "živ" prikaz (ne prati GPS snimanje ni izmjene uživo) — isti
+// obrazac kao admin verzija, koja je i sama snapshot analiza na klik, ne
+// live-tracking. Prekomponovanje na svaku GPS tačku bi opteretilo bateriju i
+// FPS baš tokom snimanja, gdje pouzdanost snimanja ima prioritet nad ovim
+// prikazom (vidi CLAUDE.md — GPS snimanje se ne smije usporavati). Isključi/
+// uključi ponovo za osvježen prikaz poslije izmjena vlake.
+//
+// Dijeli v._steepPolys polje sa admin analizom (_updateSteepOverlay je
+// idempotentan po vlaci — zadnji poziv pobjeđuje) — u rijetkom slučaju da isti
+// (admin) nalog istovremeno koristi i ovaj preklopnik i "Analiza nagiba", stop
+// jedne strane će očistiti i prikaz druge. Bezopasno (nema greške, samo se
+// overlay ugasi), i toliko rijedak scenario da ne traži posebnu sinhronizaciju.
+let _vlNagibOn = false;
+let _vlNagibHidden = [];
+let _vlNagibSteep = [];
+
+function _vlNagibToggle(on) {
+  _vlNagibOn = on;
+  _vlNagibHidden.forEach(p => { try { p.setStyle({ opacity: 0.9 }); } catch(e) {} });
+  _vlNagibHidden = [];
+  _vlNagibSteep.forEach(p => { try { map.removeLayer(p); } catch(e) {} });
+  _vlNagibSteep = [];
+  vlake.forEach(v => {
+    if (v._steepPolys) {
+      v._steepPolys.forEach(p => { try { map.removeLayer(p); } catch(e) {} });
+      v._steepPolys = [];
+    }
+  });
+  if (!on) return;
+  vlake.forEach(v => {
+    if (!v.poly || !map.hasLayer(v.poly) || v.pts.length < 2) return;
+    if (!v.pts.some(pt => (pt.al || 0) !== 0)) return;   // nema visina — nema šta obojiti
+    try { v.poly.setStyle({ opacity: 0 }); _vlNagibHidden.push(v.poly); } catch(e) {}
+    _updateSteepOverlay(v);
+    if (v._steepPolys) _vlNagibSteep.push(...v._steepPolys);
+  });
+  if (!_vlNagibSteep.length) showToast('⚠ Nijedna vidljiva vlaka nema nadmorske visine za bojenje po nagibu');
+}
+
 map.createPane('refKarte');    map.getPane('refKarte').style.zIndex    = 620;
 map.createPane('putevi');      map.getPane('putevi').style.zIndex      = 390;
 map.createPane('demOverlay'); map.getPane('demOverlay').style.zIndex = 250;
@@ -13981,8 +14038,11 @@ window.addEventListener('pagehide', () => {
 // Periodični sync — fallback ako 'online' event izostane (čest slučaj na Androidu)
 setInterval(async () => {
   if (!navigator.onLine || !sbUser || !sbProfile) return;
-  // Osvježi Supabase token da ne istekne nakon dugog offlinea
-  try { await sb.auth.getSession(); } catch(e) {}
+  // Osvježi Supabase token da ne istekne nakon dugog offlinea. Rok — na slaboj
+  // vezi navigator.onLine laže 'true' pa poziv zna VISITI umjesto pasti; bez
+  // roka bi ovaj interval (60s) stao na ovoj liniji zauvijek i nikad ne bi
+  // stigao do reda čekanja/realtime samoizlječenja ispod.
+  try { await _withTimeout(sb.auth.getSession(), 10000); } catch(e) {}
   const q = _OL.loadQueue();
   if (q.length) _processOfflineQueue();
   // Flush tragova bez sbId koji su dodani dok smo bili offline
@@ -21994,16 +22054,16 @@ function updProjStats() {
   if (!allP[myIme]) allP[myIme] = {meters:0, days:new Set()};
   allP[myIme].meters = Math.round(myTotal);
 
-  const totalAllM = Object.values(allP).reduce((s,v)=>s+v.meters,0);
-  const gustoca   = pov>0 ? (totalAllM/pov).toFixed(0)+' m/ha' : '—';
-  const nDana     = dnevniLog.length;
+  const nDana = dnevniLog.length;
 
-  const projRows = Object.entries(allP).map(([ime,d])=>`
-    <div class="stat-row">
-      <span class="stat-name">${ime}${ime===myIme?' <span style=\"font-size:10px;color:#64748b;\">(ti)</span>':''}</span>
-      <span class="stat-val">${fmtL(d.meters)}</span>
-    </div>`).join('');
-
+  // Dužine po projektantu, Ukupno i Gustoća mreže su NAMJERNO uklonjene odavde
+  // (v3.102.3) — "Terenske statistike" odmah ispod (updTerenStats) prikazuje
+  // isti podatak, samo potpunije (dana/sati/m-dan po projektantu, plus
+  // Mreža → Gustoća mreže). Prije ove izmjene je npr. "17.90 km" pisalo na tri
+  // mjesta u istom skrolu (Rekap Ukupno, Terenske Ukupna dužina, Terenske
+  // Projektanti-tabela Ukupno) — zbunjujuće bez ijedne dodatne informacije.
+  // Rekap ostaje kratak pregled samog PROJEKTA (kad je počet, ko sve radi na
+  // njemu, površina) — razrada dužina ide u statistike ispod.
   document.getElementById('rekap-card').innerHTML = `
     ${odjel ? `<div style="font-size:14px;font-weight:bold;color:#fbbf24;margin-bottom:2px;">${odjel}</div>` : ''}
     ${sumarija ? `<div style="font-size:11px;color:#64748b;margin-bottom:8px;">${sumarija}</div>` : ''}
@@ -22012,16 +22072,7 @@ function updProjStats() {
     <div class="stat-row"><span class="stat-name">Projektanata</span><span class="stat-val">${Object.keys(allP).length}</span></div>
     <div class="stat-row"><span class="stat-name">Dana rada</span><span class="stat-val">${nDana}</span></div>
     <div class="stat-row"><span class="stat-name">Površina</span><span class="stat-val blue">${pov>0?fmtHa(pov)+(_pv.src==='KML'?' <span style="font-size:9px;color:#64748b;font-weight:normal;">(iz KML)</span>':''):'—'}</span></div>
-    <div class="stat-card-title" style="margin-top:10px;">Dužine po projektantu</div>
-    ${projRows||'<div style="color:#475569;font-size:12px;">—</div>'}
-    <div class="stat-row" style="border-top:1px solid #334155;margin-top:4px;padding-top:6px;">
-      <span class="stat-name" style="font-weight:bold;color:#e2e8f0;">Ukupno</span>
-      <span class="stat-val yellow">${fmtL(totalAllM)}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-name">Gustoća mreže</span>
-      <span class="stat-val blue">${gustoca}</span>
-    </div>`;
+    <div style="margin-top:10px;font-size:11px;color:#475569;text-align:center;">Dužine po projektantu i gustoća mreže → <b style="color:#64748b;">Terenske statistike</b> ispod</div>`;
 
   // === STD PRIVLAČENJA ===
   const stdEl = document.getElementById('std-card');
@@ -23214,6 +23265,14 @@ function _fetchT(url, ms = 12000, opts = {}) {
   const sig = (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function')
     ? AbortSignal.timeout(ms) : undefined;
   return fetch(url, sig ? { ...opts, signal: sig } : opts);
+}
+
+// Isti razlog kao _fetchT, ali za Supabase pozive (nisu fetch() pa nemaju
+// signal) — obrazac `Promise.race([p, timeout])` je već postojao ad-hoc na
+// više mjesta (initAuth i sl.), ovdje samo imenovan da se ne piše iznova.
+function _withTimeout(promise, ms = 12000) {
+  const t = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + ms + 'ms')), ms));
+  return Promise.race([promise, t]);
 }
 
 async function _msrFetchElev(lat, lng) {
@@ -33919,7 +33978,7 @@ if (typeof AndroidDownload !== 'undefined') {
   <div class="mdrop-item" onclick="closeMenuDropdown();showHelp()">📖 Upute za korištenje</div>
   <div class="mdrop-sep"></div>
   <div class="mdrop-item" id="menu-admin-item" style="display:none;color:#fbbf24;" onclick="closeMenuDropdown();switchTab('admin')">🔑 Admin — Korisnici</div>
-  <div class="mdrop-item" id="menu-postavke-item" style="display:none;color:#a78bfa;" onclick="closeMenuDropdown();switchTab('postavke')">⚙ Postavke</div>
+  <div class="mdrop-item" id="menu-postavke-item" style="display:none;color:#a78bfa;" onclick="closeMenuDropdown();switchTab('postavke')">🔔 Obavještenja</div>
   <div class="mdrop-item" id="menu-user-label" style="color:#64748b;font-size:11px;pointer-events:none;padding:6px 14px;">—</div>
   <div class="mdrop-item" onclick="closeMenuDropdown();promijeniPin()">🔑 Promijeni PIN</div>
   <div class="mdrop-item" style="color:#f87171;" onclick="closeMenuDropdown();doLogout()">⎋ Odjava</div>
@@ -35898,6 +35957,18 @@ if (typeof AndroidDownload !== 'undefined') {
             style="flex:1;accent-color:#38bdf8;cursor:pointer;"
             oninput="_geojsonSetOpacity(this.value)">
         </div>
+      </div>
+      <!-- Nagib vlaka — boji vidljive vlake po strmini (v3.102.3). Snapshot na
+           klik, ne prati GPS uživo — vidi napomenu kod _vlNagibToggle. -->
+      <div style="padding:6px 0 2px;">
+        <label style="display:flex;align-items:center;gap:12px;cursor:pointer;color:#cbd5e1;font-size:14px;">
+          <input type="checkbox" id="vl-nagib-toggle" onchange="_vlNagibToggle(this.checked)"
+            style="width:18px;height:18px;accent-color:#f59e0b;cursor:pointer;">
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span style="display:inline-block;width:28px;height:4px;border-radius:2px;background:linear-gradient(90deg,#22c55e,#facc15,#ef4444);"></span>
+            Nagib vlaka <span style="color:#64748b;font-size:11px;">(boja po strmini)</span>
+          </span>
+        </label>
       </div>
     </div>
   </div>
