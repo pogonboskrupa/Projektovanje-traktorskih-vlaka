@@ -74,7 +74,7 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   `rndList()` ni GPS hot-path (`_vlakaProcessGpsPoint`), usporilo bi snimanje.
   Dijeli `v._steepPolys` sa admin analizom (`_pmNagibAnaliza`/`_nagibAnalysisStop`
   u modalu nadzora) — zadnji poziv pobjeđuje, bezopasno u rijetkom preklopu.
-- **Tab Požari (v3.103.1)**: detekcija sa satelita (NASA FIRMS), prijava požara
+- **Panel Požari (v3.103.1, iz Menija od v3.103.2)**: detekcija sa satelita (NASA FIRMS), prijava požara
   sa terena, opožarene površine i indeks opasnosti (Copernicus EFFIS), hitni
   brojevi. Detekcije se povlače kao **PODACI (CSV), ne kao rasterski sloj** —
   prva verzija je bila WMS slika i ostala je PRAZNA kod korisnika, a iz prazne
@@ -88,6 +88,15 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   vanjski server ne može dozvati. Prijava požara je obična tačka
   (`_createTacka`) — namjerno, jer tačke već imaju offline rad, sync i
   dijeljenje. Test: `tests/js/pozari.test.js`.
+- **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
+  otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
+  — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/
+  Doznaka. Posljedica: `switchTab` označava aktivni tab tako što traži
+  `.tab-btn` čiji `onclick` sadrži `switchTab('<tab>')`, pa kad tog dugmeta nema
+  **nijedan tab nije istaknut** — korisnik ostane u panelu bez očitog povratka
+  (mora pogoditi da klikne Karta). Zato `#pozari-panel` ima u zaglavlju dugme
+  `switchTab('karta')` (`#ic-nazad`). Svaki NOVI panel koji se otvara iz Menija
+  umjesto iz trake treba isto dugme.
 - **Slojevi karte (v3.103.0)**: Konture (izohipse) i Pokrivenost zemljišta
   (ESA WorldCover — zamijenio EOX Sentinel-2 na istom mjestu u layer-sheetu,
   vidi `TL['🌍 Sentinel']`). Konture su BESPLATNE mrežno
