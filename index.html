@@ -4774,7 +4774,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.102.3';
+const APP_VER = 'v3.103.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -11266,9 +11266,14 @@ const TILE_CACHE_NAME = 'tvlake-tiles-v1';
 // _abortLoading: NE zovemo TileLayer default (img bez src ima .complete=true pa bi
 // default zadržavao/uklanjao pogrešno) — kao offline GridLayer slojevi, pločice ostaju
 // do prune-a, samo im prekidamo mrežne zahtjeve; oporavak radi _retryEmpty.
-function makeCachedTileLayer(cacheName) {
+// baseClass (v3.103.0): opciono — L.TileLayer.WMS umjesto običnog L.TileLayer,
+// za slojeve koji dolaze kao WMS (bbox GetMap zahtjev po pločici, ne prost
+// {z}/{x}/{y} XYZ predložak — npr. NASA FIRMS požari, ESA WorldCover). WMS
+// klasa samo drugačije gradi URL (getTileUrl), ostatak (keš/timeout/retry/
+// parent-fallback ispod) je identičan i radi nepromijenjeno za oba slučaja.
+function makeCachedTileLayer(cacheName, baseClass) {
   cacheName = cacheName || TILE_CACHE_NAME;
-  return L.TileLayer.extend({
+  return (baseClass || L.TileLayer).extend({
     createTile(coords, done) {
       const img = document.createElement('img');
       img.alt = '';
@@ -11614,16 +11619,40 @@ map.createPane('refKarte');    map.getPane('refKarte').style.zIndex    = 620;
 map.createPane('putevi');      map.getPane('putevi').style.zIndex      = 390;
 map.createPane('demOverlay'); map.getPane('demOverlay').style.zIndex = 250;
 const _puteviRenderer = L.canvas({ pane: 'putevi', padding: 0.3 });
+// _WC_CACHE/CachedWCover moraju biti definisani PRIJE TL (referenciran unutar
+// njega) — _FIRMS_CACHE/CachedFirms grupisan ovdje iz istog razloga (koristi
+// ga _OVL.pozari niže), iako TL njega ne treba.
+const _FIRMS_CACHE = 'tvlake-firms-v1';
+const _WC_CACHE    = 'tvlake-wcover-v1';
+// WMS varijanta iste keš/timeout/retry logike kao CachedTopo/CachedSat (vidi
+// napomenu kod makeCachedTileLayer) — bbox GetMap zahtjev umjesto XYZ predloška.
+const CachedFirms  = makeCachedTileLayer(_FIRMS_CACHE, L.TileLayer.WMS);
+const CachedWCover = makeCachedTileLayer(_WC_CACHE, L.TileLayer.WMS);
 const TL = {
   '⛰ Topo':    new CachedTopo('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxNativeZoom:17,maxZoom:22,subdomains:['a','b','c'],keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
   '🛰 Satelit': new CachedSat('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:22,keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
   '🗺 Karta':   new CachedOsm('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
   '📡 Google':  new CachedSat('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxNativeZoom:20,maxZoom:22,subdomains:['0','1','2','3'],keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150}),
-  // Sentinel-2 cloudless (EOX IT Services, besplatno, bez API ključa) — svježija/oštrija
-  // satelitska podloga za šumska područja od ArcGIS-a na mnogim lokacijama. Rezolucija
-  // izvornih Sentinel-2 pločica je niža od Google/ArcGIS (maxNativeZoom 14, Leaflet
-  // dalje uveličava softverski isto kao kod ostalih slojeva).
-  '🌍 Sentinel':new CachedSat('https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg',{maxNativeZoom:14,maxZoom:22,keepBuffer:6,updateWhenZooming:false,updateWhenIdle:true,updateInterval:150})
+  // v3.103.0: EOX Sentinel-2 true-color cloudless ZAMIJENJEN ESA WorldCover-om
+  // (pokrivenost zemljišta — šuma/nije šuma/voda/naselje, 10m). Korisnik već ima
+  // pravu Sentinel-2 satelitsku podlogu (ranije ovdje) i tražio je nešto DRUGAČIJE
+  // umjesto nje, ne još jednu true-color varijantu. Razmatran je i Sentinel-2 NDVI
+  // (vegetacijski indeks) kao zamjena, ali svaki besplatan/bez-ključa izvor kog
+  // sam mogao pronaći (NASA GIBS) je datumski parametrizovan (specifičan 8-dnevni
+  // kompozit, ne trajan proizvod) — ne staje u "keširaj jednom, uvijek važi" model
+  // kojim rade ostale bazne podloge (offline karta bi pokazivala sve stariju
+  // snimku dok se datum ručno ne osvježi u kodu). WorldCover je STATIČAN proizvod
+  // (fiksna epoha, npr. 2021) kao i ostale podloge, i sam po sebi izveden iz
+  // Sentinel-1/2 podataka — pravi odgovor na "nešto drugačije od trenutne
+  // satelitske slike", bez tog problema. WMS servis (Terrascope/VITO, besplatno,
+  // bez ključa) — endpoint NIJE bilo moguće provjeriti iz ovog sandboxa (egress
+  // dozvoljava samo uzak spisak domena, vidi napomenu kod _OVL.pozari) — provjeriti
+  // na terenskom uređaju prije oslanjanja.
+  '🌍 Sentinel': new CachedWCover('https://services.terrascope.be/wms/v2', {
+    layers: 'WORLDCOVER_2021_MAP', format: 'image/png', transparent: false,
+    version: '1.1.1', maxNativeZoom: 12, maxZoom: 22, keepBuffer: 6,
+    updateWhenZooming: false, updateWhenIdle: true, updateInterval: 150
+  })
 };
 const _ELEV_CACHE  = 'tvlake-elev-v1';
 const _SLOPE_CACHE = 'tvlake-slope-v1';
@@ -11765,6 +11794,77 @@ function _makeDemCanvasLayer(mode) {
 const DemNV    = _makeDemCanvasLayer('nv');
 const DemEkspo = _makeDemCanvasLayer('ekspo');
 
+// ── Konture (izohipse) iz ISTOG Terrarium DEM-a (v3.103.0) ─────────────────
+// Nema novog mrežnog izvora — koristi identičnu pločicu koju app već povlači
+// za Hipsometriju/Nagib/N.V./Ekspoziciju (_getTerrariumTile + _TERR_CACHE),
+// samo je crta kao linije umjesto obojenih piksela. Radi i offline čim je
+// pločica jednom viđena kroz bilo koji od ta četiri sloja.
+// Korak 20m (kao klasična topografska karta 1:25000); svaka peta linija
+// (100m) je "indeksna" — deblja, radi lakšeg čitanja na terenu.
+const _CONTOUR_STEP = 20;
+function _contourColor(level) {
+  return (level % 100 === 0) ? 'rgba(120,72,0,0.75)' : 'rgba(120,72,0,0.42)';
+}
+
+// Marching squares nad jednom ćelijom (4 ugla mreže), za JEDAN nivo. Umjesto
+// oslanjanja na napamet zapisanu 16-slučajnu tablicu (lako pogriješiti),
+// računa se GENERIČKI: za svaku od 4 ivice ćelije provjeri prelazi li nivo
+// preko nje (dva kraja na različitim stranama), i interpoliraj tačku
+// presjeka. 2 presjeka → jedna linija. 4 presjeka (dijagonalno "sedlo") →
+// spoji parove prema prosjeku 4 ugla (standardna konvencija, sprječava da se
+// linija sama sebe siječe).
+function _msCellSegments(tl, tr, br, bl, level, x, y) {
+  const e = {};
+  if ((tl >= level) !== (tr >= level)) e.T = [x + (level - tl) / (tr - tl), y];
+  if ((tr >= level) !== (br >= level)) e.R = [x + 1, y + (level - tr) / (br - tr)];
+  if ((bl >= level) !== (br >= level)) e.B = [x + (level - bl) / (br - bl), y + 1];
+  if ((tl >= level) !== (bl >= level)) e.L = [x, y + (level - tl) / (bl - tl)];
+  const n = Object.keys(e).length;
+  if (n === 2) return [[e[Object.keys(e)[0]], e[Object.keys(e)[1]]]];
+  if (n === 4) {
+    const hi = (tl + tr + br + bl) / 4 >= level;
+    return (hi === (tl >= level)) ? [[e.T, e.L], [e.R, e.B]] : [[e.T, e.R], [e.L, e.B]];
+  }
+  return null;
+}
+
+function _drawContours(ctx, elev, W, H, step) {
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < elev.length; i++) { const v = elev[i]; if (v < min) min = v; if (v > max) max = v; }
+  if (!isFinite(min) || max - min < step) return;   // premali raspon — nema šta crtati
+  const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step;
+  ctx.lineJoin = 'round';
+  for (let level = lo; level <= hi; level += step) {
+    ctx.strokeStyle = _contourColor(level);
+    ctx.lineWidth = (level % 100 === 0) ? 1.6 : 0.8;
+    ctx.beginPath();
+    for (let y = 0; y < H - 1; y++) {
+      for (let x = 0; x < W - 1; x++) {
+        const tl = elev[y*W+x], tr = elev[y*W+x+1], bl = elev[(y+1)*W+x], br = elev[(y+1)*W+x+1];
+        if (level < Math.min(tl,tr,bl,br) || level > Math.max(tl,tr,bl,br)) continue;
+        const segs = _msCellSegments(tl, tr, br, bl, level, x, y);
+        if (!segs) continue;
+        segs.forEach(([a, b]) => { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); });
+      }
+    }
+    ctx.stroke();
+  }
+}
+
+const DemContour = L.GridLayer.extend({
+  createTile(coords, done) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 256;
+    _getTerrariumTile(coords.z, coords.x, coords.y).then(src => {
+      if (!src) { done(null, canvas); return; }
+      const elev = _terrariumDecodeTile(src);
+      _drawContours(canvas.getContext('2d'), elev, 256, 256, _CONTOUR_STEP);
+      done(null, canvas);
+    }).catch(() => done(null, canvas));
+    return canvas;
+  }
+});
+
 // ── Slope canvas layer (terrarium-based, crvene nijanse od 30%) ───────────────
 function _tile2lat(y, z) {
   const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
@@ -11825,9 +11925,19 @@ const _OVL = {
   elev:  new CachedElev('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', { pane:'demOverlay', maxZoom:18, opacity:0.7, attribution:'', keepBuffer:6 }),
   slope: new DemSlopeClass({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:1.0, attribution:'', keepBuffer:6 }),
   nv:    new DemNV(   { pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.75, attribution:'', keepBuffer:6 }),
-  ekspo: new DemEkspo({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.80, attribution:'', keepBuffer:6 })
+  ekspo: new DemEkspo({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.80, attribution:'', keepBuffer:6 }),
+  kont:  new DemContour({ pane:'demOverlay', maxNativeZoom:14, maxZoom:22, opacity:0.9, attribution:'', keepBuffer:6 }),
+  // NASA FIRMS — aktivni požari zadnjih 24h (VIIRS/SNPP). Besplatan WMS bez
+  // ključa. Endpoint/naziv sloja NIJE moguće provjeriti iz ovog sandboxa
+  // (egress dozvoljava samo uzak spisak domena čak i za postojeće, uredno
+  // radeće slojeve — vidi napomenu kod _WC_CACHE ispod) — provjeriti na
+  // stvarnom terenskom uređaju prije oslanjanja na ovaj sloj.
+  pozari: new CachedFirms('https://firms.modaps.eosdis.nasa.gov/wms/', {
+    layers: 'fires_viirs_snpp_24hrs', format: 'image/png', transparent: true,
+    version: '1.1.1', pane: 'demOverlay', maxZoom: 22, opacity: 0.9, attribution: 'NASA FIRMS'
+  })
 };
-let _ovlState = { elev: false, slope: false, nv: false, ekspo: false };
+let _ovlState = { elev: false, slope: false, nv: false, ekspo: false, kont: false, pozari: false };
 try { Object.assign(_ovlState, JSON.parse(localStorage.getItem('tvlake_ovl_state') || '{}')); } catch {}
 // Restore overlay visibility
 Object.entries(_ovlState).forEach(([k,v]) => { if (v && _OVL[k]) _OVL[k].addTo(map); });
@@ -11935,7 +12045,7 @@ function _openLayerSheet() {
   document.getElementById('layer-sheet-bg').style.display = 'block';
   document.getElementById('layer-sheet').style.display   = 'block';
   _lsTab('karte');
-  ['elev','slope','nv','ekspo'].forEach(id => {
+  ['elev','slope','nv','ekspo','kont','pozari'].forEach(id => {
     const cb = document.getElementById('inst-' + id + '-cb');
     if (cb) cb.checked = !!_ovlState[id];
   });
@@ -12013,11 +12123,15 @@ const _CMGR_ROWS = [
   { id: 'sat',   ico: '🛰',  name: 'Satelit',         sub: 'ArcGIS Imagery',   cache: TILE_CACHE_NAME, host: 'World_Imagery' },
   { id: 'osm',   ico: '🗺',  name: 'Karta',           sub: 'OpenStreetMap',    cache: TILE_CACHE_NAME, host: 'tile.openstreetmap.org' },
   { id: 'goog',  ico: '📡',  name: 'Google satelit',  sub: 'Google',           cache: TILE_CACHE_NAME, host: '.google.com/vt' },
-  { id: 'eox',   ico: '🌍',  name: 'Sentinel-2',      sub: 'EOX cloudless',    cache: TILE_CACHE_NAME, host: 'tiles.maps.eox.at' },
+  // v3.103.0: EOX Sentinel-2 (true color) zamijenjen ESA WorldCover-om (pokrivenost
+  // zemljišta) — vidi TL['🌍 Sentinel'] niže. Isti dugme/slot, drugačiji izvor pa
+  // i drugačiji (zaseban, ne dijeljeni) keš.
+  { id: 'wcover', ico: '🌍',  name: 'Pokrivenost zemljišta', sub: 'ESA WorldCover', cache: _WC_CACHE },
   { id: 'elev',  ico: '🏔',  name: 'Sjenčenje terena', sub: 'Hillshade',       cache: 'tvlake-elev-v1' },
   { id: 'slope', ico: '📐',  name: 'Nagib terena',    sub: 'Shaded relief',    cache: 'tvlake-slope-v1' },
   { id: 'terr',  ico: '🗻',  name: 'Teren (DEM)',     sub: 'Visinski podaci',  cache: 'tvlake-terr-v1' },
-  { id: 'nv',    ico: '🏷',  name: 'Nadmorske visine', sub: 'Open-Meteo keš',  cache: 'tvlake-nv-v1' }
+  { id: 'nv',    ico: '🏷',  name: 'Nadmorske visine', sub: 'Open-Meteo keš',  cache: 'tvlake-nv-v1' },
+  { id: 'firms', ico: '🔥',  name: 'Aktivni požari',  sub: 'NASA FIRMS',       cache: _FIRMS_CACHE }
 ];
 let _cmgrData = null;   // zadnji scan: {id: {count, bytes}}
 
@@ -12139,7 +12253,7 @@ async function _cacheMgrDeleteAll() {
   if (!ok) return;
   try {
     const names = await caches.keys();
-    for (const n of names) { if (/^tvlake-(tiles|elev|slope|terr|nv)/.test(n)) await caches.delete(n); }
+    for (const n of names) { if (/^tvlake-(tiles|elev|slope|terr|nv|firms|wcover)/.test(n)) await caches.delete(n); }
     showToast('🗑 Sve offline pločice obrisane');
   } catch(err) {
     showToast('⚠ Brisanje nije uspjelo: ' + (err.message || 'nepoznato'));
@@ -12152,7 +12266,7 @@ async function _cacheMgrDeleteAll() {
 // pločica bez uzorkovanja veličine ako scan još ne postoji).
 async function _lsFillCardBadges() {
   if (!('caches' in window)) return;
-  const map2row = { 'lo-topo': 'topo', 'lo-sat': 'sat', 'lo-osm': 'osm', 'lo-google': 'goog', 'lo-eox': 'eox' };
+  const map2row = { 'lo-topo': 'topo', 'lo-sat': 'sat', 'lo-osm': 'osm', 'lo-google': 'goog', 'lo-eox': 'wcover' };
   let d = _cmgrData;
   if (!d) { try { d = await _cacheMgrScan(); } catch(e) { return; } }
   for (const [btnId, rowId] of Object.entries(map2row)) {
@@ -19916,7 +20030,9 @@ async function _instClear(id) {
     elev:  _ELEV_CACHE,
     slope: _TERR_CACHE,
     nv:    _TERR_CACHE,
-    ekspo: _TERR_CACHE
+    ekspo: _TERR_CACHE,
+    kont:  _TERR_CACHE,
+    pozari: _FIRMS_CACHE
   };
   const cn = cacheMap[id];
   if (!cn) return;
@@ -19925,6 +20041,7 @@ async function _instClear(id) {
     if (_ovlState.slope) _OVL.slope.redraw();
     if (_ovlState.nv)    _OVL.nv.redraw();
     if (_ovlState.ekspo) _OVL.ekspo.redraw();
+    if (_ovlState.kont)  _OVL.kont.redraw();
   } else if (_OVL[id] && _ovlState[id]) {
     _OVL[id].redraw();
   }
@@ -19938,7 +20055,9 @@ async function _instUpdateStats() {
     ['elev',  _ELEV_CACHE],
     ['slope', _TERR_CACHE],
     ['nv',    _TERR_CACHE],
-    ['ekspo', _TERR_CACHE]
+    ['ekspo', _TERR_CACHE],
+    ['kont',  _TERR_CACHE],
+    ['pozari', _FIRMS_CACHE]
   ];
   const counts = {};
   for (const [, cn] of pairs) {
@@ -28842,7 +28961,7 @@ async function clearTileCache(e) {
   if (!await _dlgConfirm('Obrisati sve keširane karte (satelit, topo, teren)? Offline prikaz tih područja više neće raditi dok ih ponovo ne pogledaš online.', { title: 'Obriši memoriju karata', okLabel: 'Obriši' })) return;
   // Obriši SVE mapne kešove (pločice + teren overlay), ali NE app shell / biblioteke
   const keys = await caches.keys();
-  const mapCaches = keys.filter(k => /^tvlake-(tiles|elev|slope|terr|nv)/.test(k));
+  const mapCaches = keys.filter(k => /^tvlake-(tiles|elev|slope|terr|nv|firms|wcover)/.test(k));
   await Promise.all(mapCaches.map(k => caches.delete(k)));
   localStorage.removeItem(_OFFLINE_DL_INCOMPLETE_KEY);
   showToast('🗑 Memorija karata obrisana');
@@ -35897,7 +36016,7 @@ if (typeof AndroidDownload !== 'undefined') {
         <span class="layer-ico"><svg class="ic"><use href="#ic-globus"/></svg></span>Google<span class="lopt-sub">Satelit HD</span>
       </button>
       <button class="layer-opt" id="lo-eox" onclick="setLayer('🌍 Sentinel')">
-        <span class="layer-ico"><svg class="ic"><use href="#ic-satelit"/></svg></span>Sentinel-2<span class="lopt-sub">EOX, bez ključa</span>
+        <span class="layer-ico"><svg class="ic"><use href="#ic-satelit"/></svg></span>Pokrivenost<span class="lopt-sub">WorldCover, bez ključa</span>
       </button>
       <button class="layer-opt" id="lo-nagib" onclick="setLayer('_nagib')">
         <span class="layer-ico"><svg class="ic"><use href="#ic-uglomjer"/></svg></span>Nagib<span class="lopt-sub">Topo + nagibi</span>
@@ -36041,8 +36160,43 @@ if (typeof AndroidDownload !== 'undefined') {
         <svg class="ic"><use href="#ic-obrisi"/></svg>
       </button>
     </div>
+    <!-- Konture (izohipse) — v3.103.0. Isti DEM keš kao gornja tri, nema novog
+         mrežnog izvora. -->
+    <div class="inst-layer-row" id="inst-kont-row">
+      <label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;">
+        <input type="checkbox" id="inst-kont-cb" onchange="_instToggle('kont',this.checked)"
+          style="width:18px;height:18px;accent-color:#b45309;cursor:pointer;flex-shrink:0;">
+        <div>
+          <div style="font-size:13px;color:#e2e8f0;font-weight:600;">Konture (izohipse)</div>
+          <div style="font-size:11px;color:#64748b;">Linije nadmorske visine, korak 20m</div>
+          <div id="inst-kont-stat" style="font-size:11px;color:#475569;margin-top:1px;">—</div>
+        </div>
+      </label>
+      <button onclick="_instClear('kont')" title="Obriši keš"
+        style="background:#2d0a0a;border:1px solid #7f1d1d;color:#f87171;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;flex-shrink:0;">
+        <svg class="ic"><use href="#ic-obrisi"/></svg>
+      </button>
+    </div>
     <div style="margin-top:8px;font-size:10px;color:#334155;line-height:1.5;">
-      Nagibi, N.V. i Strane dijele isti keš (terrarium DEM pločice, max zum 14→uvećanje).
+      Nagibi, N.V., Strane i Konture dijele isti keš (terrarium DEM pločice, max zum 14→uvećanje).
+    </div>
+    <!-- NASA FIRMS aktivni požari — v3.103.0. Zaseban mrežni izvor/keš, WMS bez
+         ključa. Endpoint nije bilo moguće provjeriti iz sandboxa (vidi napomenu
+         kod _OVL.pozari u index.html) — provjeriti na terenskom uređaju. -->
+    <div class="inst-layer-row" id="inst-pozari-row" style="margin-top:10px;">
+      <label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;">
+        <input type="checkbox" id="inst-pozari-cb" onchange="_instToggle('pozari',this.checked)"
+          style="width:18px;height:18px;accent-color:#ef4444;cursor:pointer;flex-shrink:0;">
+        <div>
+          <div style="font-size:13px;color:#e2e8f0;font-weight:600;">Aktivni požari</div>
+          <div style="font-size:11px;color:#64748b;">NASA FIRMS — satelitska detekcija, 24h</div>
+          <div id="inst-pozari-stat" style="font-size:11px;color:#475569;margin-top:1px;">—</div>
+        </div>
+      </label>
+      <button onclick="_instClear('pozari')" title="Obriši keš"
+        style="background:#2d0a0a;border:1px solid #7f1d1d;color:#f87171;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;flex-shrink:0;">
+        <svg class="ic"><use href="#ic-obrisi"/></svg>
+      </button>
     </div>
   </div>
 

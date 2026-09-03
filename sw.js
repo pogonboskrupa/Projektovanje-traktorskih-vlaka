@@ -2,7 +2,7 @@
 // Service Worker — ŠPD Unsko-sanske šume
 // Promijeni APP_VERSION pri svakom deploymentu → okida update
 // =====================================================================
-const APP_VERSION = '3.102.3';
+const APP_VERSION = '3.103.0';
 const APP_CACHE   = 'tvlake-app-v' + APP_VERSION;
 const TILE_CACHE  = 'tvlake-tiles-v1';
 const LIB_CACHE   = 'tvlake-lib-v1';
@@ -10,6 +10,8 @@ const ELEV_CACHE  = 'tvlake-elev-v1';
 const SLOPE_CACHE = 'tvlake-slope-v1';
 const TERR_CACHE  = 'tvlake-terr-v1';
 const NV_CACHE    = 'tvlake-nv-v1';     // Open-Meteo elevation (statički, može se keširati)
+const FIRMS_CACHE = 'tvlake-firms-v1';  // NASA FIRMS aktivni požari (v3.103.0)
+const WC_CACHE    = 'tvlake-wcover-v1'; // ESA WorldCover pokrivenost zemljišta (v3.103.0)
 
 // App shell koji se uvijek precachira
 const APP_SHELL = [
@@ -102,13 +104,25 @@ self.addEventListener('fetch', event => {
     _tileRespond(event, SLOPE_CACHE);
     return;
   }
+  // NASA FIRMS (aktivni požari) i ESA WorldCover (pokrivenost zemljišta) —
+  // isti "specific BEFORE generic" princip, svaki sa svojim keš bucketom
+  // (v3.103.0). WorldCover je zamijenio EOX Sentinel-2 cloudless na istom
+  // mjestu u layer-sheetu, pa je 'tiles.maps.eox.at' ovdje uklonjen — više se
+  // ne fetch-uje.
+  if (url.includes('firms.modaps.eosdis.nasa.gov')) {
+    _tileRespond(event, FIRMS_CACHE);
+    return;
+  }
+  if (url.includes('services.terrascope.be')) {
+    _tileRespond(event, WC_CACHE);
+    return;
+  }
 
   if (
     url.includes('tile.opentopomap.org') ||
     url.includes('tile.openstreetmap.org') ||
     url.includes('arcgisonline.com') ||
-    url.includes('.google.com/vt/') ||
-    url.includes('tiles.maps.eox.at')
+    url.includes('.google.com/vt/')
   ) {
     _tileRespond(event, TILE_CACHE);
     return;

@@ -74,6 +74,40 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   `rndList()` ni GPS hot-path (`_vlakaProcessGpsPoint`), usporilo bi snimanje.
   Dijeli `v._steepPolys` sa admin analizom (`_pmNagibAnaliza`/`_nagibAnalysisStop`
   u modalu nadzora) — zadnji poziv pobjeđuje, bezopasno u rijetkom preklopu.
+- **Slojevi karte (v3.103.0)**: Konture (izohipse), Aktivni požari (NASA FIRMS)
+  i Pokrivenost zemljišta (ESA WorldCover — zamijenio EOX Sentinel-2 na istom
+  mjestu u layer-sheetu, vidi `TL['🌍 Sentinel']`). Konture su BESPLATNE mrežno
+  — crtaju se iz VEĆ preuzetog Terrarium DEM-a (`_getTerrariumTile`/`_TERR_CACHE`,
+  isti keš kao Nagib/N.V./Ekspozicija), marching-squares u `_drawContours`/
+  `_msCellSegments`. FIRMS i WorldCover su WMS servisi (bbox `GetMap`, ne XYZ
+  predložak) — `makeCachedTileLayer(cacheName, L.TileLayer.WMS)` (drugi
+  parametar, opcion) daje im ISTU keš/timeout/retry logiku kao Topo/Satelit/
+  Karta. Test: `tests/js/dem-contours.test.js`.
+
+## Zamke specifične za dodavanje NOVOG mrežnog sloja karte
+
+- **Sandbox ne može provjeriti NIJEDAN vanjski tile server** — čak ni
+  `tile.opentopomap.org`/`tiles.maps.eox.at` (postojeći, uredno rade na
+  telefonu) vraćaju `HTTP 000` odavde; `curl -sS "$HTTPS_PROXY/__agentproxy/
+  status"` pokaže `connect_rejected` za SVAKI novi domen (allowlist je uzak i
+  ne znači da servis ne radi). Jedini domen koji je do sada odgovarao je
+  `elevation-tiles-prod.s3.amazonaws.com`. Zaključak: nemoguće je uživo
+  potvrditi da je WMS layer-name/endpoint tačan prije nego korisnik proba na
+  telefonu — zato svaki takav sloj mora imati graceful failure (postojeći
+  `makeCachedTileLayer` već tretira pali fetch kao "prazna providna pločica",
+  ne rušenje) i jasan komentar u kodu da endpoint treba terensku potvrdu.
+  Umjesto uživo provjere, testirati END-TO-END kroz Playwright `page.route()`
+  presretanje (mock 200 odgovor) — potvrđuje da app GRADI ispravan URL (bbox,
+  layer-name, format), ne da server stvarno postoji.
+- **Novi `TL[key]` ili `_OVL[key]` mora ući na SVA mjesta koja CLAUDE.md već
+  navodi za postojeće slojeve** (`iconSvg` ×2, `map2id`/`map2row`, `_CMGR_ROWS`,
+  `layer-opt` dugme) — ALI ako se KLJUČ ne mijenja (samo sadržaj ispod njega,
+  kao kod WorldCover zamjene za Sentinel), sva ta mjesta koja čitaju ključ kao
+  string ostaju netaknuta; mijenjaju se samo VIDLJIVI tekstovi (dugme, sub-
+  labela) i `_CMGR_ROWS` red (id/name/cache/host). Provjeriti prije nego se
+  ključ mijenja: da li je ijedan JS `const TL = {...}` blok definisan PRIJE
+  keš-konstante koju referenciše (JS `const` nije hoistovan — vidi kako su
+  `_WC_CACHE`/`CachedWCover` morali biti pomjereni ISPRED `const TL = {`).
 
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
