@@ -2,7 +2,7 @@
 // Service Worker — ŠPD Unsko-sanske šume
 // Promijeni APP_VERSION pri svakom deploymentu → okida update
 // =====================================================================
-const APP_VERSION = '3.106.1';
+const APP_VERSION = '3.107.0';
 const APP_CACHE   = 'tvlake-app-v' + APP_VERSION;
 const TILE_CACHE  = 'tvlake-tiles-v1';
 const LIB_CACHE   = 'tvlake-lib-v1';
@@ -240,6 +240,22 @@ self.addEventListener('message', event => {
     self.registration.getNotifications({ tag: 'gps-recording' })
       .then(ns => ns.forEach(n => n.close()));
     _stopRecLock();
+    return;
+  }
+  // Upozorenje na nov požar u blizini (v3.107.0). requireInteraction: korisnik
+  // je na terenu i telefon mu je u džepu — obavještenje o požaru ne smije samo
+  // proći i nestati kao obična poruka.
+  if (event.data?.type === 'show-pozar-notification') {
+    const { naslov, tijelo, la, lo } = event.data;
+    self.registration.showNotification(naslov || '🔥 Nov požar u blizini', {
+      body: tijelo,
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      tag: 'pozar-blizu',
+      data: { la, lo },
+      requireInteraction: true,
+      vibrate: [300, 120, 300]
+    });
     return;
   }
   // Notifikacija dijeljene lokacije

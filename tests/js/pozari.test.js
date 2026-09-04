@@ -563,6 +563,96 @@ t('starost podatka: "upravo" za svjež, sati/dani za stariji', () => {
   assert.ok(/dana$/.test(api._poziStarost(now - 4 * 86400000)));
 });
 
+console.log('Sječa/vjetroizvale (GFW integrisani alarmi) i grupisanje po pragu:');
+
+// GLAD/RADD ne pokrivaju Bosnu (tropi), pa se koristi integrisani sloj koji
+// uključuje DIST-ALERT — jedini sa globalnom pokrivenošću. Piksel je 30 m
+// (ne 375 m kao VIIRS), pa i prag grupisanja i ključ "viđenog" moraju biti finiji.
+const SRC5 = [
+  SRC_DST,
+  extractConst('_POZ_GRUPA_M'),
+  extractConst('_SJE_RADIUS_KM'),
+  extractConst('_SJE_OKVIRI'),
+  extractFn('_poziPouzdanost'),
+  extractFn('_poziSatelit'),
+  extractFn('_poziGrupisi'),
+  extractFn('_poziEvtKljuc'),
+  extractFn('_sjeUrl'),
+  extractFn('_sjeParse'),
+  extractFn('_sjePouzdanost'),
+  extractFn('_sjeFilterBlizu'),
+  extractFn('_sjeBrojRijec'),
+].join('\n');
+const api5 = new Function('localStorage', '_SJE_OKVIR_KEY',
+  SRC5 + '\nreturn { _sjeUrl, _sjeParse, _sjePouzdanost, _sjeFilterBlizu, _sjeBrojRijec, _poziGrupisi, _poziEvtKljuc };'
+)(makeStore(), 'tvlake_sjeca_okvir');
+
+t('_sjeUrl gađa gfw_integrated_alerts (ne GLAD/RADD — oni ne pokrivaju BiH)', () => {
+  const u = api5._sjeUrl('30d', { la:44.88, lo:16.15 });
+  assert.match(u, /dataset\/gfw_integrated_alerts\/latest\/query\/json/);
+  const sql = decodeURIComponent(u.split('sql=')[1]);
+  assert.match(sql, /gfw_integrated_alerts__date >= '\d{4}-\d{2}-\d{2}'/);
+  assert.match(sql, /latitude >= 44\./);
+  assert.match(sql, /LIMIT/);
+});
+
+t('_sjeUrl: 90d ide dalje u prošlost nego 7d', () => {
+  const d = u => decodeURIComponent(u.split('sql=')[1]).match(/date >= '([\d-]+)'/)[1];
+  assert.ok(d(api5._sjeUrl('90d', { la:44.88, lo:16.15 })) < d(api5._sjeUrl('7d', { la:44.88, lo:16.15 })));
+});
+
+t('_sjeParse: GFW JSON → ista struktura tačke kao požari, rezolucija 30 m', () => {
+  const p = api5._sjeParse(JSON.stringify({ data: [
+    { longitude:16.20, latitude:44.91, gfw_integrated_alerts__date:'2026-08-20', gfw_integrated_alerts__confidence:'highest' }
+  ]}));
+  assert.strictEqual(p.length, 1);
+  assert.strictEqual(p[0].la, 44.91);
+  assert.strictEqual(p[0].rez, 30, 'DIST-ALERT je 30 m, ne 375 m kao VIIRS');
+  assert.ok(p[0].dt.startsWith('2026-08-20'));
+});
+
+t('_sjeParse: smeće ne ruši parser', () => {
+  assert.deepStrictEqual(api5._sjeParse(''), []);
+  assert.deepStrictEqual(api5._sjeParse('<html>403</html>'), []);
+  assert.deepStrictEqual(api5._sjeParse('{"greska":"nema kljuca"}'), []);
+});
+
+t('_sjePouzdanost: GFW "highest"/"nominal" → ista skala kao požari', () => {
+  assert.strictEqual(api5._sjePouzdanost('highest').rang, 3);
+  assert.strictEqual(api5._sjePouzdanost('nominal').rang, 2);
+  assert.strictEqual(api5._sjePouzdanost('low').rang, 1);
+  assert.match(api5._sjePouzdanost('nesto').boja, /^#[0-9a-f]{6}$/i);
+});
+
+t('_sjeFilterBlizu koristi UŽI radijus od požara (50 km, ne 150)', () => {
+  const pts = [{ la:45.40, lo:16.15 }];   // ~58 km sjeverno
+  assert.strictEqual(api5._sjeFilterBlizu(pts, { la:44.88, lo:16.15 }).length, 0);
+  assert.strictEqual(api5._sjeFilterBlizu([{ la:45.10, lo:16.15 }], { la:44.88, lo:16.15 }).length, 1);
+});
+
+t('_poziGrupisi sa UŽIM pragom razdvaja ono što bi na 1500 m bilo spojeno', () => {
+  const pts = [
+    { la:44.9100, lo:16.2000, dt:'2026-08-20T00:00:00Z', conf:'highest', sat:'x', frp:NaN },
+    { la:44.9150, lo:16.2000, dt:'2026-08-20T00:00:00Z', conf:'highest', sat:'x', frp:NaN }   // ~555 m
+  ];
+  assert.strictEqual(api5._poziGrupisi(pts).length, 1, 'na 1500 m (požari) je to jedan');
+  assert.strictEqual(api5._poziGrupisi(pts, 300).length, 2, 'na 300 m (sječa) su dvije zasebne');
+});
+
+t('_poziEvtKljuc: finija preciznost razlikuje ono što gruba spaja', () => {
+  // ~333 m razmaka: dvije ZASEBNE sječine. Na grubom ključu (~1 km) dijele
+  // isti ključ pa bi druga bila propuštena kao "već viđena"; na finom ne.
+  const a = { la:44.9100, lo:16.2000 }, b = { la:44.9130, lo:16.2000 };
+  assert.strictEqual(api5._poziEvtKljuc(a), api5._poziEvtKljuc(b), 'na ~1 km isti ključ');
+  assert.notStrictEqual(api5._poziEvtKljuc(a, 1000), api5._poziEvtKljuc(b, 1000), 'na ~110 m različit');
+});
+
+t('_sjeBrojRijec: 1 alarm / 2+ alarma', () => {
+  assert.strictEqual(api5._sjeBrojRijec(1), '1 alarm');
+  assert.strictEqual(api5._sjeBrojRijec(3), '3 alarma');
+  assert.strictEqual(api5._sjeBrojRijec(7), '7 alarma');
+});
+
 console.log('_poziSazetak — upozorenje kad udaljenost NIJE od stvarne GPS pozicije:');
 
 // Zašto ovo postoji: prije ove izmjene je udaljenost do požara tiho padala na

@@ -246,6 +246,56 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
     fix poslije 1.5s pokazuje upozorenje prije toga i ispravnu udaljenost
     (5.16 km, ne udaljenost od stare pozicije karte) poslije. 3 nova testa u
     `tests/js/pozari.test.js` (52 ukupno) za `_poziSazetak` upozorenje.
+- **Podtab Sječa/vjetroizvale, markeri grupisanja, upozorenja (v3.107.0)**:
+  - **Podtabovi u panelu** (`_poziPodtab`/`_poziPostaviPodtab`, `localStorage
+    tvlake_pozari_podtab`): "🔥 Požari" i "🪵 Sječa / vjetroizvale". Sječa je
+    ZASEBAN satelitski proizvod (smetnja vegetacije), ne požar — ali dijeli
+    kontekst "šta se dešava u mojoj šumi", pa dijeli panel umjesto da traži
+    svoj tab u traci (koja je puna). `_poziRenderPanel` sad samo crta traku
+    podtabova i delegira na `_poziSadrzajHtml`/`_sjeSadrzajHtml`.
+  - **Sječa koristi `gfw_integrated_alerts`, NE `umd_glad_dist_alerts`
+    zasebno** — integrisani sloj objedinjuje GLAD-L, GLAD-S2, RADD i
+    **DIST-ALERT**, a DIST-ALERT je JEDINI od njih sa globalnom pokrivenošću
+    (ostali su tropi; BiH je na ~44.9°N). Imena polja su mu dosljedna
+    (`gfw_integrated_alerts__date`/`__confidence`), dok dokumentacija za
+    zaseban DIST-ALERT dataset miješa `umd_glad_landsat_alerts__*` polja.
+    Traži isti GFW ključ kao požari. `_sjeUrl`/`_sjeParse`/`_sjeLoad`.
+  - **Parametri grupisanja se RAZLIKUJU po proizvodu**: VIIRS piksel je 375 m
+    (prag 1500 m), DIST-ALERT je 30 m (prag `_SJE_GRUPA_M`=300 m). Zato su
+    `_poziGrupisi(pts, pragM)` i `_poziOznaciNove(grupe, kljuc, preciznost)`
+    parametrizovani. **`_poziEvtKljuc` preciznost je bitna**: podrazumijevanih
+    100 (~1.1 km) bi za sječu spojilo dvije sječine na 400 m u isti ključ i
+    druga nikad ne bi bila "nova" — zato sječa koristi 1000 (~110 m).
+  - **Površina se procjenjuje SAMO za sječu, ne za požare**: DIST-ALERT piksel
+    od 30 m označava stvarno izmijenjenu vegetaciju pa `broj × 900 m²` ima
+    smisla kao "≈ X ha"; VIIRS piksel je "vreo piksel", ne izgorjela površina,
+    i tamo takva računica ostaje NAMJERNO izostavljena (v3.104.0).
+  - **Markeri grupisanja na karti**: lista je odavno pokazivala "1 požar, 6
+    detekcija", ali karta je i dalje crtala 6 pinova jedan preko drugog. Sad
+    grupa ima JEDAN marker sa brojem (`.poz-mk-grupa`), a pojedinačni pikseli
+    ostaju kao sitne tačke (`.poz-mk-mala`) — broj kaže koliko puta je viđen,
+    tačke pokazuju stvarni doseg (piksel je podatak, ne smije se sakriti).
+    Sječa ima kvadratne markere (`.sje-mk*`) da se razlikuje od požara i kad
+    su boje slične. `_poziZoom`/`_sjeZoom` sad koriste `g._mk` (referenca
+    zakačena pri crtanju) umjesto traženja po indeksu u nizu.
+  - **Upozorenje na nov požar** (`_poziNotifToggle`, prag 10/25/50 km,
+    provjera na 15 min, `show-pozar-notification` u `sw.js`). **Dometu se ne
+    laže**: radi dok je aplikacija pokrenuta (i u pozadini dok je Android ne
+    ugasi), NE kad je potpuno zatvorena — CLAUDE.md već dokumentuje da OEM
+    battery manager ubija cijeli proces, pa bi obećanje "javićemo ti i ugašeno"
+    bilo lažno. UI to kaže otvoreno. `_POZ_NOTIF_SEEN` pamti za šta je već
+    javljeno da isti požar ne zvoni pri svakom osvježavanju.
+  - Provjereno u browseru: 16 detekcija → 2 požara, marker sa "12", 16 sitnih
+    tačaka; sječa 3 alarma → 2 grupe; notifikacija poslana ka SW-u sa tačnim
+    naslovom/tijelom; klik na alarm prebacuje na Kartu i centrira. 61 test.
+  - **Zamka pri Playwright testiranju**: `p.evaluate(() => map.setView(...))`
+    BEZ vitičastih zagrada vraća Leafletov map objekat, koji Playwright
+    pokušava serijalizovati (cikličan, sa DOM čvorovima) i pukne uz poruku
+    "Execution context was destroyed, most likely because of a navigation" —
+    koja navodi na pogrešan trag (nema nikakve navigacije). Uvijek pisati
+    `() => { map.setView(...); }`. Usput: app NAMJERNO reloada stranicu jednom
+    kad SW prvi put preuzme kontrolu, pa test treba sačekati
+    `sessionStorage['sw-reloaded'] === '1'` prije mjerenja.
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/

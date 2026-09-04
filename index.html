@@ -1801,6 +1801,33 @@ select:focus { outline:none; border-color:#3b82f6; }
 }
 /* Svježa detekcija (< 6h) pulsira — na karti punoj slojeva se inače izgubi */
 .poz-mk.svjez { animation:pozPuls 1.6s ease-in-out infinite; }
+/* Marker GRUPE (v3.107.0): jedan požar viđen više puta = jedan marker sa
+   brojem detekcija, umjesto hrpe istovjetnih pinova jedan preko drugog. */
+.poz-mk-grupa {
+  width:24px; height:24px; margin:3px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:800; color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,0.8);
+  border-width:2.5px;
+}
+/* Pojedinačni piksel unutar grupe — vidi se doseg, ne otima pažnju */
+.poz-mk-mala { width:6px; height:6px; margin:2px; border-width:1px; opacity:0.75; box-shadow:none; }
+/* Alarm smetnje vegetacije (sječa/vjetroizvala) — kvadrat, ne krug: na prvi
+   pogled se razlikuje od požara i kad su boje slične. */
+.sje-mk {
+  width:14px; height:14px; margin:3px; border-radius:3px;
+  border:2px solid rgba(255,255,255,0.9);
+  box-shadow:0 0 6px rgba(0,0,0,0.6);
+}
+.sje-mk-grupa {
+  width:24px; height:24px; margin:3px; border-radius:4px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:800; color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,0.8);
+  border:2.5px solid rgba(255,255,255,0.9);
+  box-shadow:0 0 6px rgba(0,0,0,0.6);
+}
+.sje-mk-mala { width:6px; height:6px; margin:2px; border-radius:2px; border:1px solid rgba(255,255,255,0.85); opacity:0.75; }
 @keyframes pozPuls {
   0%,100% { transform:scale(1);    box-shadow:0 0 6px rgba(0,0,0,0.6), 0 0 0 0 rgba(239,68,68,0.55); }
   50%     { transform:scale(1.12); box-shadow:0 0 6px rgba(0,0,0,0.6), 0 0 0 9px rgba(239,68,68,0); }
@@ -4804,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.106.1';
+const APP_VER = 'v3.107.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5718,6 +5745,12 @@ function _startupRestore() {
       // duplog if-a jer je logika identična.
       if (!(typeof lastP !== 'undefined' && lastP && isFinite(lastP.la))) _poziCekajGps();
       if (navigator.onLine) _poziLoad(true);
+      if (_poziNotifOn()) _poziNotifTimerStart();
+    });
+    korak('sjeca', () => {
+      if (localStorage.getItem(_SJE_ON_KEY) !== '1') return;
+      _sjeOn = true;
+      if (navigator.onLine) _sjeLoad(true);
     });
     // Trajna pohrana: bez persist() browser pod pritiskom diska smije obrisati
     // CIJELI Cache Storage/IDB (sve offline pločice i karte odjednom). Uz persist()
@@ -12037,6 +12070,9 @@ const _POZ_OKVIR_KEY = 'tvlake_pozari_okvir';   // '24h' | '48h' | '7d'
 const _POZ_SEEN_KEY  = 'tvlake_pozari_vidjeno'; // ključevi detekcija sa zadnjeg pregleda
 const _POZ_MAPKEY_KEY= 'tvlake_pozari_mapkey';  // opcioni FIRMS MAP_KEY (korisnik unosi sam)
 const _POZ_GFW_KEY   = 'tvlake_pozari_gfwkey';  // opcioni Global Forest Watch API ključ
+const _POZ_NOTIF_KEY = 'tvlake_pozari_notif';   // upozorenje kad se pojavi nov požar blizu
+const _POZ_NOTIF_KM  = 'tvlake_pozari_notif_km';// prag udaljenosti za upozorenje
+const _POZ_NOTIF_SEEN= 'tvlake_pozari_notif_seen'; // za koje požare je već javljeno
 // Vjetar/vlažnost se NAMJERNO ne keširaju za offline (za razliku od detekcija) —
 // prikazivanje JUČERAŠNJEG smjera vjetra kao da je trenutan bi bilo opasno
 // pogrešno u pravoj situaciji požara. Bez mreže _poziOsvjeziMeteo() tiho ne
@@ -12163,10 +12199,11 @@ function _poziFilterBlizu(pts, ref) {
 // pohlepni algoritam (namjerno ne DBSCAN — nema potrebe za tom preciznošću):
 // tačka ulazi u prvu postojeću grupu bližu od _POZ_GRUPA_M, inače otvara novu.
 // Radi na VEĆ filtriranim (bliskim) tačkama iz _poziFilterBlizu.
-function _poziGrupisi(pts) {
+function _poziGrupisi(pts, pragM) {
+  const prag = pragM || _POZ_GRUPA_M;   // sječa koristi uži prag (30 m piksel, ne 375 m)
   const grupe = [];
   pts.forEach(p => {
-    let g = grupe.find(g => dst(g.la, g.lo, p.la, p.lo) <= _POZ_GRUPA_M);
+    let g = grupe.find(g => dst(g.la, g.lo, p.la, p.lo) <= prag);
     if (!g) { g = { la:p.la, lo:p.lo, pts:[] }; grupe.push(g); }
     g.pts.push(p);
     // centroid se pomjera prosjekom — sljedeća tačka se poredi sa ažuriranim centrom
@@ -12211,18 +12248,23 @@ function _poziGrupeBlizu(grupe, ref) {
 // Ključ grupe stabilan preko dva učitavanja (za "novo od zadnje provjere") —
 // zaokruženo na ~1km da malo pomjeranje centroida (nova detekcija na rubu
 // grupe) ne izgleda kao "nov požar".
-function _poziEvtKljuc(g) {
-  return Math.round(g.la * 100) + '_' + Math.round(g.lo * 100);
+function _poziEvtKljuc(g, preciznost) {
+  // 100 = ~1.1 km (požari, grupisani na 1.5 km). Sječa ima 30 m piksele i
+  // grupiše se na 300 m, pa joj treba finiji ključ (1000 = ~110 m) — inače bi
+  // dvije zasebne sječine na 400 m dijelile ključ i druga ne bi bila "nova".
+  const P = preciznost || 100;
+  return Math.round(g.la * P) + '_' + Math.round(g.lo * P);
 }
 
 // Vrati grupe označene sa 'nov' (ključ nije bio u prošlom pregledu) i upiši
 // trenutne ključeve kao novi "pregledano" skup.
-function _poziOznaciNove(grupe) {
+function _poziOznaciNove(grupe, kljucStorage, preciznost) {
+  const K = kljucStorage || _POZ_SEEN_KEY;   // sječa ima svoj skup viđenih
   let prosli = [];
-  try { prosli = JSON.parse(localStorage.getItem(_POZ_SEEN_KEY)) || []; } catch(e) {}
+  try { prosli = JSON.parse(localStorage.getItem(K)) || []; } catch(e) {}
   const prosliSet = new Set(prosli);
-  const rez = grupe.map(g => ({ ...g, nov: !prosliSet.has(_poziEvtKljuc(g)) }));
-  try { localStorage.setItem(_POZ_SEEN_KEY, JSON.stringify(grupe.map(_poziEvtKljuc))); } catch(e) {}
+  const rez = grupe.map(g => ({ ...g, nov: !prosliSet.has(_poziEvtKljuc(g, preciznost)) }));
+  try { localStorage.setItem(K, JSON.stringify(grupe.map(g => _poziEvtKljuc(g, preciznost)))); } catch(e) {}
   return rez;
 }
 
@@ -12613,6 +12655,7 @@ async function _poziLoad(tiho) {
     const s = _poziSazetak();
     _poziStatusSet(s.kratko);
     if (!tiho) showToast(s.toast);
+    _poziNotifProvjeri();                      // javi ako je nov požar ušao u prag udaljenosti
     if (_poziEvts.length) _poziOsvjeziMeteo(); // ne blokira prikaz, dopunjuje panel kad stigne
   } finally {
     _poziBusy = false;
@@ -12714,16 +12757,82 @@ function _poziIcon(p) {
   });
 }
 
+// Marker GRUPE (požara viđenog više puta). U listi je odavno "1 požar, 6
+// detekcija", ali na karti se i dalje vidjelo 6 pinova jedan do drugog — pa
+// isti požar na karti izgleda kao šest zasebnih. Sad grupa dobija JEDAN
+// istaknuti marker sa brojem detekcija, a pojedinačni pikseli ostaju kao sitne
+// tačke ispod njega: broj kaže KOLIKO puta je viđen, tačke pokazuju STVARNI
+// prostorni doseg (satelitski piksel je podatak, ne smije se sakriti).
+function _poziIconGrupa(g) {
+  const pz = _poziPouzdanost(g.conf);
+  const svjez = (Date.now() - Date.parse(g.dt || 0)) < 6 * 3600 * 1000;
+  return L.divIcon({
+    className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+    html: `<div class="poz-mk poz-mk-grupa${svjez ? ' svjez' : ''}" style="background:${pz.boja};">${g.broj}</div>`
+  });
+}
+
+// Sitna tačka za pojedinačnu detekciju unutar grupe — vidi se doseg, ali ne
+// otima pažnju ni klik od glavnog markera grupe.
+function _poziIconTacka(p) {
+  const pz = _poziPouzdanost(p.conf);
+  return L.divIcon({
+    className: '', iconSize: [10, 10], iconAnchor: [5, 5],
+    html: `<div class="poz-mk poz-mk-mala" style="background:${pz.boja};"></div>`
+  });
+}
+
 function _poziRender() {
   if (_poziLayer) { try { map.removeLayer(_poziLayer); } catch(e) {} }
   _poziLayer = L.layerGroup([], { pane:'pozariPane' });
   const ref = _poziRefTacka();
-  _poziPts.forEach((p, i) => {
-    const mk = L.marker([p.la, p.lo], { icon:_poziIcon(p), pane:'pozariPane', zIndexOffset:900 });
-    mk.bindPopup(_poziPopupHtml(p, ref), { maxWidth:280, className:'kml-info-popup' });
-    mk.addTo(_poziLayer);
+  (_poziEvts || []).forEach(g => {
+    if (g.broj > 1) {
+      // Prvo sitne tačke (ispod), pa marker grupe (iznad) — redoslijed dodavanja
+      // u layerGroup određuje ko je na vrhu kad se preklapaju.
+      g.pts.forEach(p => {
+        L.marker([p.la, p.lo], { icon:_poziIconTacka(p), pane:'pozariPane', zIndexOffset:800 })
+          .bindPopup(_poziPopupHtml(p, ref), { maxWidth:280, className:'kml-info-popup' })
+          .addTo(_poziLayer);
+      });
+      const mk = L.marker([g.la, g.lo], { icon:_poziIconGrupa(g), pane:'pozariPane', zIndexOffset:950 });
+      mk.bindPopup(_poziGrupaPopupHtml(g, ref), { maxWidth:290, className:'kml-info-popup' });
+      mk.addTo(_poziLayer);
+      g._mk = mk;   // _poziZoom otvara BAŠ ovaj marker — bez oslanjanja na redoslijed u nizu
+    } else {
+      const p = g.pts[0];
+      const mk = L.marker([p.la, p.lo], { icon:_poziIcon(p), pane:'pozariPane', zIndexOffset:900 });
+      mk.bindPopup(_poziPopupHtml(p, ref), { maxWidth:280, className:'kml-info-popup' });
+      mk.addTo(_poziLayer);
+      g._mk = mk;
+    }
   });
   if (_poziOn) _poziLayer.addTo(map);
+}
+
+// Popup markera GRUPE — sažetak cijelog požara, ne jedne detekcije.
+function _poziGrupaPopupHtml(g, ref) {
+  const pz = _poziPouzdanost(g.conf);
+  const d = dst(ref.la, ref.lo, g.la, g.lo);
+  const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, g.la, g.lo));
+  const vr = t => isFinite(t) ? new Date(t).toLocaleString('bs-BA', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+  const red = (l, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0;font-size:11px;">
+    <span style="color:#94a3b8;">${l}</span><span style="color:#e2e8f0;text-align:right;">${v}</span></div>`;
+  const gk = wgsToMGI(g.la, g.lo);
+  return `<div style="background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:10px;min-width:215px;">
+    <div style="font-size:14px;font-weight:700;color:#f87171;margin-bottom:6px;">🔥 Požar — ${g.broj} detekcija${g.nov ? ' <span style="color:#fbbf24;font-size:10px;">🆕 NOVO</span>' : ''}</div>
+    ${red('Udaljenost', `<b style="color:#fbbf24;">${fmtL(d)}</b> ${smjer}${ref.gps ? '' : ' <span style="color:#64748b;">(od centra karte)</span>'}`)}
+    ${red('Prvi put viđen', vr(g.prvi))}
+    ${red('Zadnji put', vr(g.zadnji) + ' · ' + _poziStarost(g.zadnji))}
+    ${g.sateliti.length ? red('Sateliti', g.sateliti.join(', ')) : ''}
+    ${red('Pouzdanost', `<span style="color:${pz.boja};">${pz.txt}</span>`)}
+    ${g.frpMax ? red('Najjača detekcija', g.frpMax.toFixed(1) + ' MW') : ''}
+    ${g.spanM > 0 ? red('Raspon detekcija', fmtL(g.spanM)) : ''}
+    ${gk ? `<div style="font-size:11px;color:#fbbf24;font-family:monospace;margin-top:6px;">Y: ${gk.y} · X: ${gk.x}</div>` : ''}
+    <div style="font-size:10px;color:#475569;margin-top:8px;line-height:1.4;">
+      Sitne tačke oko markera su pojedinačni satelitski pikseli — pokazuju doseg, nisu zasebni požari.
+    </div>
+  </div>`;
 }
 
 function _poziPopupHtml(p, ref) {
@@ -12798,11 +12907,9 @@ function _poziZoom(i) {
   // pogleda ide TEK poslije toga, inače zna ispasti pogrešno centrirano.
   setTimeout(() => {
     map.setView([g.la, g.lo], Math.max(map.getZoom(), zoom));
-    // isti objekat-referenca kao u _poziPts (postavljeno u _poziGrupisi) — pouzdano
-    // nalazi odgovarajući marker bez oslanjanja na redoslijed u DOM-u/nizu.
-    const idx = g.zadnjaTacka ? _poziPts.indexOf(g.zadnjaTacka) : -1;
-    const mk = idx >= 0 && _poziLayer ? _poziLayer.getLayers()[idx] : null;
-    if (mk) setTimeout(() => mk.openPopup(), 250);
+    // Marker je zakačen na grupu pri crtanju (_poziRender) — nema traženja po
+    // indeksu, pa ne može promašiti kad se redoslijed markera promijeni.
+    if (g._mk) setTimeout(() => g._mk.openPopup(), 250);
   }, 80);
 }
 
@@ -12925,6 +13032,356 @@ async function _poziProvjeriIzvore() {
     { title:'🔥 Provjera izvora', okLabel:'U redu' });
 }
 
+// ── Upozorenje na nov požar u blizini ──────────────────────────────────────
+// ISKRENO O DOMETU: ovo radi dok je aplikacija POKRENUTA (u prvom planu ili u
+// pozadini dok je Android ne ugasi). NE radi kad je app potpuno zatvorena —
+// za to bi trebao pravi pozadinski servis, a CLAUDE.md već dokumentuje da OEM
+// "battery manager" (Xiaomi/Samsung/Huawei) ubija cijeli proces kad procijeni,
+// pa bi obećanje "javićemo ti i kad je ugašena" bilo lažno. Zato se provjera
+// veže za život aplikacije i to UI otvoreno kaže.
+function _poziNotifOn()  { return localStorage.getItem(_POZ_NOTIF_KEY) === '1'; }
+function _poziNotifKm()  { const v = parseFloat(localStorage.getItem(_POZ_NOTIF_KM)); return isFinite(v) && v > 0 ? v : 25; }
+
+function _poziNotifToggle(on) {
+  if (!on) {
+    try { localStorage.setItem(_POZ_NOTIF_KEY, '0'); } catch(e) {}
+    _poziNotifTimerStop();
+    _poziRenderPanel();
+    return;
+  }
+  if (!('Notification' in window)) {
+    showToast('⚠ Ovaj uređaj ne podržava obavještenja');
+    _poziRenderPanel();
+    return;
+  }
+  const upali = () => {
+    try { localStorage.setItem(_POZ_NOTIF_KEY, '1'); } catch(e) {}
+    _poziNotifTimerStart();
+    showToast('🔔 Javiću ti kad se pojavi nov požar bliže od ' + _poziNotifKm() + ' km');
+    _poziRenderPanel();
+  };
+  if (Notification.permission === 'granted') upali();
+  else if (Notification.permission === 'denied') {
+    showToast('⚠ Obavještenja su blokirana u postavkama uređaja');
+    _poziRenderPanel();
+  } else {
+    Notification.requestPermission().then(perm => {
+      if (perm === 'granted') upali();
+      else { showToast('Bez dozvole za obavještenja ne mogu javiti'); _poziRenderPanel(); }
+    });
+  }
+}
+
+function _poziNotifPostaviKm(km) {
+  const v = parseFloat(km);
+  if (!isFinite(v) || v <= 0) return;
+  try { localStorage.setItem(_POZ_NOTIF_KM, String(v)); } catch(e) {}
+  _poziRenderPanel();
+}
+
+// Periodična provjera dok je app živa. 15 min: detekcije stižu preletom
+// satelita (par puta dnevno), pa češće nema šta novo donijeti — samo bi trošilo
+// bateriju i podatke.
+let _poziNotifTimer = null;
+function _poziNotifTimerStart() {
+  _poziNotifTimerStop();
+  _poziNotifTimer = setInterval(() => {
+    if (!_poziNotifOn() || !navigator.onLine || _poziBusy) return;
+    _poziLoad(true);            // tiho: bez toasta, samo osvježi i provjeri
+  }, 15 * 60 * 1000);
+}
+function _poziNotifTimerStop() {
+  if (_poziNotifTimer) { clearInterval(_poziNotifTimer); _poziNotifTimer = null; }
+}
+
+// Pozива se poslije svakog uspješnog učitavanja. Javlja SAMO za požare koji su
+// (a) bliži od praga i (b) za koje još nije javljeno — inače bi svako
+// osvježavanje ponovo zvonilo za isti požar.
+function _poziNotifProvjeri() {
+  if (!_poziNotifOn() || !('Notification' in window) || Notification.permission !== 'granted') return;
+  const prag = _poziNotifKm() * 1000;
+  let javljeni = [];
+  try { javljeni = JSON.parse(localStorage.getItem(_POZ_NOTIF_SEEN)) || []; } catch(e) {}
+  const javljeniSet = new Set(javljeni);
+  const novi = _poziEvts.filter(g => g.d <= prag && !javljeniSet.has(_poziEvtKljuc(g)));
+  if (!novi.length) return;
+  const naj = novi[0];
+  const ref = _poziRefTacka();
+  const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, naj.la, naj.lo));
+  const naslov = novi.length === 1 ? '🔥 Nov požar u blizini' : '🔥 ' + _poziBrojRijecPozar(novi.length) + ' u blizini';
+  const tijelo = 'Najbliži ' + fmtL(naj.d) + ' ' + smjer
+    + (ref.gps ? '' : ' (od centra karte — GPS nema fix)')
+    + ' · ' + _poziPouzdanost(naj.conf).txt + ' pouzdanost';
+  const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+  if (sw) sw.postMessage({ type:'show-pozar-notification', naslov, tijelo, la:naj.la, lo:naj.lo });
+  // Zapamti SVE trenutne (ne samo ove nove) — tako se skup ne gomila unedogled
+  // i požar koji se ugasio pa ponovo planuo opet dobije upozorenje.
+  try { localStorage.setItem(_POZ_NOTIF_SEEN, JSON.stringify(_poziEvts.map(g => _poziEvtKljuc(g)))); } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SJEČA I VJETROIZVALE — alarmi smetnje vegetacije (GFW integrated alerts)
+// ═══════════════════════════════════════════════════════════════════════════
+// Ovo NISU požari nego zaseban proizvod: satelit uporedi trenutno stanje
+// vegetacije sa istorijskom normom za taj piksel i javi kad nešto NESTANE —
+// sječa (prijavljena ili ne), vjetroizvala, klizište, opožarena površina
+// poslije požara. Za šumariju je to praktično "šta se promijenilo u mojoj
+// šumi otkad sam zadnji put bio tamo".
+//
+// KLJUČNO za pokrivenost: GFW-ovi klasični alarmi za sječu NE RADE kod nas —
+// GLAD-L pokriva samo pojas 30°N-30°S, GLAD-S2 samo Amazon, RADD samo vlažne
+// trope, a Bosna je na ~44.9°N. Jedini sa GLOBALNOM pokrivenošću je DIST-ALERT
+// (UMD + NASA OPERA, HLS snimci, 30 m, osvježava se svakih 2-4 dana), koji je
+// sada UKLJUČEN u `gfw_integrated_alerts`. Zato se koristi baš taj dataset, a
+// ne `umd_glad_dist_alerts` zasebno: integrisani objedinjuje sva četiri i ima
+// dosljedna imena polja. Ako GFW verzija na `/latest` još nema DIST-ALERT
+// spojen, rezultat je 0 alarma — i to se MORA vidjeti kao "0", ne kao greška
+// (isto pravilo zbog kojeg je rasterski sloj iz v3.103.0 bačen).
+const _SJE_ON_KEY    = 'tvlake_sjeca_on';
+const _SJE_CACHE_KEY = 'tvlake_sjeca_cache';
+const _SJE_SEEN_KEY  = 'tvlake_sjeca_vidjeno';
+const _SJE_OKVIR_KEY = 'tvlake_sjeca_okvir';
+const _SJE_RADIUS_KM = 50;    // uže od požara: ovdje je pitanje "moja šuma", ne "šta se približava"
+const _SJE_GRUPA_M   = 300;   // 30 m piksel — susjedni pikseli su ISTA sječa
+
+// Alarmi se osvježavaju svakih 2-4 dana, pa okviri idu u danima, ne satima.
+const _SJE_OKVIRI = [
+  { id:'7d',  naziv:'7 dana',   dana:7  },
+  { id:'30d', naziv:'30 dana',  dana:30 },
+  { id:'90d', naziv:'90 dana',  dana:90 }
+];
+function _sjeOkvir() {
+  const v = localStorage.getItem(_SJE_OKVIR_KEY);
+  return _SJE_OKVIRI.some(o => o.id === v) ? v : '30d';
+}
+function _sjeOkvirNaziv(id) {
+  const o = _SJE_OKVIRI.find(x => x.id === (id || _sjeOkvir()));
+  return o ? o.naziv : '30 dana';
+}
+
+let _sjePts = [];
+let _sjeEvts = [];
+let _sjeLayer = null;
+let _sjeMeta = null;
+let _sjeOn = false;
+let _sjeBusy = false;
+
+function _sjeUrl(okvir, ref) {
+  const o = _SJE_OKVIRI.find(x => x.id === okvir) || _SJE_OKVIRI[1];
+  const od = new Date(Date.now() - o.dana * 86400000).toISOString().slice(0, 10);
+  const dLat = _SJE_RADIUS_KM / 111;
+  const dLon = _SJE_RADIUS_KM / (111 * Math.cos(ref.la * Math.PI / 180));
+  const sql = 'SELECT longitude, latitude, gfw_integrated_alerts__date, gfw_integrated_alerts__confidence FROM results'
+    + " WHERE gfw_integrated_alerts__date >= '" + od + "'"
+    + ' AND latitude >= '  + (ref.la - dLat).toFixed(3) + ' AND latitude <= '  + (ref.la + dLat).toFixed(3)
+    + ' AND longitude >= ' + (ref.lo - dLon).toFixed(3) + ' AND longitude <= ' + (ref.lo + dLon).toFixed(3)
+    + ' LIMIT 1000';
+  return 'https://data-api.globalforestwatch.org/dataset/gfw_integrated_alerts/latest/query/json?sql='
+    + encodeURIComponent(sql);
+}
+
+// Isti oblik tačke kao požari (la/lo/dt/conf) da se grupisanje i prikaz dijele.
+function _sjeParse(txt) {
+  let j;
+  try { j = JSON.parse(txt); } catch(e) { return []; }
+  const red = j && Array.isArray(j.data) ? j.data : [];
+  const out = [];
+  red.forEach(r => {
+    const la = parseFloat(r.latitude), lo = parseFloat(r.longitude);
+    if (!isFinite(la) || !isFinite(lo)) return;
+    out.push({
+      la, lo,
+      dt: String(r.gfw_integrated_alerts__date || '').slice(0, 10) + 'T00:00:00Z',
+      conf: String(r.gfw_integrated_alerts__confidence || '').trim(),
+      sat: 'DIST-ALERT / integrisani',
+      frp: NaN, noc:false, rez: 30
+    });
+  });
+  return out;
+}
+
+// GFW daje "highest"/"high"/"nominal" — svede na istu skalu kao požari da se
+// dijeli _poziPouzdanost boja/rang (visoka/srednja/niska).
+function _sjePouzdanost(conf) {
+  const s = String(conf || '').trim().toLowerCase();
+  if (s === 'highest' || s === 'high') return { txt:'visoka',  boja:'#b45309', rang:3 };
+  if (s === 'nominal')                 return { txt:'srednja', boja:'#d97706', rang:2 };
+  if (s === 'low')                     return { txt:'niska',   boja:'#fbbf24', rang:1 };
+  return { txt: s || 'nepoznata', boja:'#d97706', rang:2 };
+}
+
+function _sjeFilterBlizu(pts, ref) {
+  return pts
+    .map(p => ({ ...p, d: dst(ref.la, ref.lo, p.la, p.lo) }))
+    .filter(p => p.d <= _SJE_RADIUS_KM * 1000)
+    .sort((a, b) => a.d - b.d);
+}
+
+function _sjeBrojRijec(n) {
+  const d1 = n % 10, d2 = n % 100;
+  if (d1 === 1 && d2 !== 11) return n + ' alarm';
+  if (d1 >= 2 && d1 <= 4 && (d2 < 12 || d2 > 14)) return n + ' alarma';
+  return n + ' alarma';
+}
+
+async function _sjeLoad(tiho) {
+  if (_sjeBusy) return;
+  const kljuc = _poziGfwKljuc();
+  if (!kljuc) {
+    _sjeMeta = { greska:'nema-kljuca' };
+    _sjeRenderPanel();
+    return;
+  }
+  _sjeBusy = true;
+  _sjeStatusSet('⏳ Dohvatam alarme…');
+  try {
+    const okvir = _sjeOkvir();
+    const ref = _poziRefTacka();
+    const r = await _poziDohvatiJedan('GFW integrisani alarmi', _sjeUrl(okvir, ref), 25000,
+      { headers:{ 'x-api-key': kljuc }, parser:_sjeParse, provjera:/"data"\s*:/ });
+    if (r.ok) {
+      _sjePts = _sjeFilterBlizu(r.pts, ref);
+      _sjeMeta = { dohvacenoMs:Date.now(), ukupno:r.pts.length, kes:false, okvir, refGps:ref.gps };
+      try {
+        localStorage.setItem(_SJE_CACHE_KEY, JSON.stringify({ ts:Date.now(), okvir,
+          pts: _sjePts.slice(0, 500).map(p => ({ la:p.la, lo:p.lo, dt:p.dt, conf:p.conf, sat:p.sat, rez:p.rez })) }));
+      } catch(e) {}
+    } else {
+      let c = null;
+      try { c = JSON.parse(localStorage.getItem(_SJE_CACHE_KEY)); } catch(e) {}
+      if (!c) {
+        _sjeMeta = { greska: r.greska };
+        _sjePts = []; _sjeEvts = [];
+        _sjeRender();
+        _sjeStatusSet('❌ ' + r.greska);
+        if (!tiho) _dlgConfirm('Alarmi smetnje vegetacije nisu dostupni.\n\n' + r.greska + '\n\n' + _poziSavjet(r.greska),
+          { title:'🪵 Sječa i vjetroizvale', okLabel:'U redu' });
+        return;
+      }
+      _sjePts = _sjeFilterBlizu(c.pts || [], ref);
+      _sjeMeta = { dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir:c.okvir || okvir, refGps:ref.gps };
+    }
+    _sjeEvts = _poziOznaciNove(_poziGrupeBlizu(_poziGrupisi(_sjePts, _SJE_GRUPA_M), ref), _SJE_SEEN_KEY, 1000);
+    _sjeRender();
+    _sjeStatusSet(_sjeSazetak().kratko);
+    if (!tiho) showToast(_sjeSazetak().toast);
+  } finally {
+    _sjeBusy = false;
+  }
+}
+
+function _sjeSazetak() {
+  const m = _sjeMeta || {};
+  if (m.greska === 'nema-kljuca') return { kratko:'— treba GFW ključ', toast:'Za alarme sječe treba GFW ključ' };
+  if (m.greska) return { kratko:'❌ nedostupno', toast:'❌ Alarmi sječe: ' + m.greska };
+  const st = m.dohvacenoMs ? _poziStarost(m.dohvacenoMs) : '';
+  const kes = m.kes ? ' · iz keša' : '';
+  const nijeGps = m.refGps === false ? ' ⚠ od centra karte' : '';
+  if (!_sjeEvts.length) {
+    return {
+      kratko: '✓ nema alarma · ' + _sjeOkvirNaziv(m.okvir) + (st ? ' · ' + st : '') + kes + nijeGps,
+      toast:  '✓ Nema smetnji vegetacije u krugu ' + _SJE_RADIUS_KM + ' km, zadnjih ' + _sjeOkvirNaziv(m.okvir)
+    };
+  }
+  const naj = _sjeEvts[0];
+  const ref = _poziRefTacka();
+  const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, naj.la, naj.lo));
+  const novih = _sjeEvts.filter(g => g.nov).length;
+  return {
+    kratko: '🪵 ' + _sjeEvts.length + ' · najbliži ' + fmtL(naj.d) + ' ' + smjer
+            + (novih ? ' · 🆕 ' + novih : '') + kes + nijeGps,
+    toast:  '🪵 ' + _sjeBrojRijec(_sjeEvts.length) + ' smetnje vegetacije — najbliži '
+            + fmtL(naj.d) + ' ' + smjer + (novih ? ', ' + novih + ' novih' : '')
+  };
+}
+
+function _sjeStatusSet(txt) {
+  const el = document.getElementById('sje-status');
+  if (el) el.textContent = txt;
+  _sjeRenderPanel();
+}
+
+function _sjeRender() {
+  if (_sjeLayer) { try { map.removeLayer(_sjeLayer); } catch(e) {} }
+  _sjeLayer = L.layerGroup([], { pane:'pozariPane' });
+  const ref = _poziRefTacka();
+  (_sjeEvts || []).forEach(g => {
+    const pz = _sjePouzdanost(g.conf);
+    if (g.broj > 1) {
+      g.pts.forEach(p => {
+        L.marker([p.la, p.lo], { pane:'pozariPane', zIndexOffset:700, icon: L.divIcon({
+          className:'', iconSize:[10,10], iconAnchor:[5,5],
+          html:`<div class="sje-mk-mala" style="background:${_sjePouzdanost(p.conf).boja};"></div>` }) })
+          .addTo(_sjeLayer);
+      });
+    }
+    const mk = L.marker([g.la, g.lo], { pane:'pozariPane', zIndexOffset:860, icon: L.divIcon({
+      className:'', iconSize: g.broj > 1 ? [30,30] : [20,20], iconAnchor: g.broj > 1 ? [15,15] : [10,10],
+      html: g.broj > 1
+        ? `<div class="sje-mk-grupa" style="background:${pz.boja};">${g.broj}</div>`
+        : `<div class="sje-mk" style="background:${pz.boja};"></div>` }) });
+    mk.bindPopup(_sjePopupHtml(g, ref), { maxWidth:290, className:'kml-info-popup' });
+    mk.addTo(_sjeLayer);
+    g._mk = mk;
+  });
+  if (_sjeOn) _sjeLayer.addTo(map);
+}
+
+function _sjePopupHtml(g, ref) {
+  const pz = _sjePouzdanost(g.conf);
+  const d = dst(ref.la, ref.lo, g.la, g.lo);
+  const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, g.la, g.lo));
+  const dat = t => isFinite(t) ? new Date(t).toLocaleDateString('bs-BA', { day:'2-digit', month:'2-digit', year:'numeric' }) : '—';
+  const red = (l, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0;font-size:11px;">
+    <span style="color:#94a3b8;">${l}</span><span style="color:#e2e8f0;text-align:right;">${v}</span></div>`;
+  const gk = wgsToMGI(g.la, g.lo);
+  // 30 m piksel → površina se MOŽE grubo procijeniti iz broja piksela, za
+  // razliku od požara gdje je piksel "vreo", ne izgorio. Ipak "≈", jer alarm
+  // označava promjenu vegetacije, ne izmjerenu površinu sječine.
+  const ha = (g.broj * 30 * 30) / 10000;
+  return `<div style="background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:10px;min-width:215px;">
+    <div style="font-size:14px;font-weight:700;color:#f59e0b;margin-bottom:6px;">🪵 Smetnja vegetacije${g.nov ? ' <span style="color:#fbbf24;font-size:10px;">🆕 NOVO</span>' : ''}</div>
+    ${red('Udaljenost', `<b style="color:#fbbf24;">${fmtL(d)}</b> ${smjer}${ref.gps ? '' : ' <span style="color:#64748b;">(od centra karte)</span>'}`)}
+    ${red('Datum alarma', dat(g.zadnji))}
+    ${red('Pikseli (30 m)', g.broj + ' · ≈ ' + ha.toFixed(2) + ' ha')}
+    ${g.spanM > 0 ? red('Raspon', fmtL(g.spanM)) : ''}
+    ${red('Pouzdanost', `<span style="color:${pz.boja};">${pz.txt}</span>`)}
+    ${gk ? `<div style="font-size:11px;color:#fbbf24;font-family:monospace;margin-top:6px;">Y: ${gk.y} · X: ${gk.x}</div>` : ''}
+    <div style="font-size:10px;color:#475569;margin-top:8px;line-height:1.4;">
+      Satelit je uočio da je vegetacija nestala ili oslabila — može biti sječa, vjetroizvala,
+      klizište ili opožarena površina. NIJE potvrda bespravne sječe; traži izlazak na teren.
+    </div>
+  </div>`;
+}
+
+function _sjeZoom(i) {
+  const g = _sjeEvts[i];
+  if (!g) return;
+  switchTab('karta');
+  setTimeout(() => {
+    map.setView([g.la, g.lo], Math.max(map.getZoom(), g.spanM > 1000 ? 13 : 15));
+    if (g._mk) setTimeout(() => g._mk.openPopup(), 250);
+  }, 80);
+}
+
+function _sjeToggle(on) {
+  _sjeOn = on;
+  try { localStorage.setItem(_SJE_ON_KEY, on ? '1' : '0'); } catch(e) {}
+  if (!on) {
+    if (_sjeLayer) { try { map.removeLayer(_sjeLayer); } catch(e) {} }
+    _sjeStatusSet('—');
+    return;
+  }
+  if (_sjeLayer) _sjeLayer.addTo(map);
+  if (!(typeof lastP !== 'undefined' && lastP && isFinite(lastP.la))) _poziCekajGps();
+  _sjeLoad(false);
+}
+
+function _sjePostaviOkvir(id) {
+  try { localStorage.setItem(_SJE_OKVIR_KEY, id); } catch(e) {}
+  if (_sjeOn) _sjeLoad(false); else _sjeRenderPanel();
+}
+
 // ── Prijava požara sa terena ───────────────────────────────────────────────
 // Satelit vidi tek požar koji je već narastao (VIIRS ~375m piksel, prelet par
 // puta dnevno). Šumar na terenu ga vidi PRVI. Ova prijava je obična tačka
@@ -12944,9 +13401,130 @@ function _poziPrijavi() {
 }
 
 // ── Panel taba Požari ──────────────────────────────────────────────────────
+// ── Podtabovi panela (v3.107.0) ────────────────────────────────────────────
+// Sječa/vjetroizvale su ZASEBAN satelitski proizvod (smetnja vegetacije), ne
+// požar — ali dijele isti kontekst "šta se dešava u mojoj šumi", pa dijele
+// panel kroz podtabove umjesto da se guraju u istu listu ili da dobiju svoj
+// tab u traci (koja je već puna, vidi pravilo o panelu iz Menija).
+const _POZ_PODTAB_KEY = 'tvlake_pozari_podtab';
+function _poziPodtab() {
+  const v = localStorage.getItem(_POZ_PODTAB_KEY);
+  return v === 'sjeca' ? 'sjeca' : 'pozari';
+}
+function _poziPostaviPodtab(id) {
+  try { localStorage.setItem(_POZ_PODTAB_KEY, id); } catch(e) {}
+  _poziRenderPanel();
+}
+
 function _poziRenderPanel() {
   const el = document.getElementById('poz-body');
   if (!el) return;
+  const akt = _poziPodtab();
+  const dugme = (id, tekst, boja) => {
+    const on = akt === id;
+    return `<button onclick="_poziPostaviPodtab('${id}')" style="flex:1;padding:9px 6px;border-radius:10px;
+      font-size:12.5px;font-weight:700;cursor:pointer;
+      border:1px solid ${on ? boja : '#1e3a5f'};background:${on ? boja + '33' : '#14233c'};
+      color:${on ? boja : '#94a3b8'};">${tekst}</button>`;
+  };
+  el.innerHTML =
+    `<div style="display:flex;gap:7px;margin-bottom:12px;">
+       ${dugme('pozari', '🔥 Požari', '#f97316')}
+       ${dugme('sjeca',  '🪵 Sječa / vjetroizvale', '#d97706')}
+     </div>`
+    + (akt === 'sjeca' ? _sjeSadrzajHtml() : _poziSadrzajHtml());
+}
+
+// Alias — modul sječe zove ovo poslije svake promjene stanja.
+function _sjeRenderPanel() { _poziRenderPanel(); }
+
+function _sjeSadrzajHtml() {
+  const m = _sjeMeta || {};
+  const ref = _poziRefTacka();
+  const kart = (naslov, opis, sadrzaj) => `
+    <div style="background:#16213e;border:1px solid #1e3a5f;border-radius:14px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px;">${naslov}</div>
+      ${opis ? `<div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.5;">${opis}</div>` : ''}
+      ${sadrzaj}
+    </div>`;
+
+  const imaKljuc = !!_poziGfwKljuc();
+
+  const okvirChips = `<div style="display:flex;gap:6px;margin:8px 0;">` +
+    _SJE_OKVIRI.map(o => {
+      const on = _sjeOkvir() === o.id;
+      return `<button onclick="_sjePostaviOkvir('${o.id}')" style="flex:1;padding:6px 4px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;
+        border:1px solid ${on ? '#d97706' : '#1e3a5f'};background:${on ? '#d9770633' : '#14233c'};color:${on ? '#fbbf24' : '#94a3b8'};">${o.naziv}</button>`;
+    }).join('') + `</div>`;
+
+  // Lista alarma
+  let lista;
+  if (!imaKljuc) {
+    lista = `<div style="font-size:12px;color:#94a3b8;line-height:1.6;padding:4px 0;">
+      Za ovaj sloj treba <b style="color:#e2e8f0;">besplatan Global Forest Watch ključ</b> — isti onaj iz podtaba
+      Požari. Unesi ga tamo (polje "GFW API ključ") pa se vrati ovdje.</div>`;
+  } else if (!_sjeOn) {
+    lista = `<div style="font-size:12px;color:#64748b;padding:4px 0;">Uključi prikaz da dohvatiš alarme.</div>`;
+  } else if (m.greska) {
+    lista = `<div style="font-size:12px;color:#f87171;line-height:1.5;padding:4px 0;">❌ ${_escHtml(m.greska)}</div>`;
+  } else if (!_sjeEvts.length) {
+    lista = `<div style="font-size:13px;color:#4ade80;padding:6px 0;">✓ Nema smetnji vegetacije u krugu ${_SJE_RADIUS_KM} km, zadnjih ${_sjeOkvirNaziv(m.okvir)}.</div>`;
+  } else {
+    lista = _sjeEvts.slice(0, 10).map((g, i) => {
+      const pz = _sjePouzdanost(g.conf);
+      const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, g.la, g.lo));
+      const ha = (g.broj * 30 * 30) / 10000;
+      const dat = isFinite(g.zadnji) ? new Date(g.zadnji).toLocaleDateString('bs-BA', { day:'2-digit', month:'2-digit' }) : '—';
+      return `<div onclick="_sjeZoom(${i})" style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #1e293b;cursor:pointer;">
+        <span style="width:9px;height:9px;border-radius:2px;background:${pz.boja};flex-shrink:0;"></span>
+        <span style="flex:1;min-width:0;">
+          <span style="font-size:12px;color:#e2e8f0;">${fmtL(g.d)} <span style="color:#64748b;">${smjer}</span></span>
+          ${g.nov ? ' <span style="color:#fbbf24;font-size:10px;font-weight:700;">🆕 NOVO</span>' : ''}
+          <div style="font-size:10px;color:#64748b;">≈ ${ha.toFixed(2)} ha · ${dat}</div>
+        </span>
+        <span style="font-size:10px;color:#64748b;text-align:right;">${pz.txt}</span>
+      </div>`;
+    }).join('') + (_sjeEvts.length > 10
+      ? `<div style="font-size:10px;color:#475569;padding:4px;">…i još ${_sjeEvts.length - 10}</div>` : '');
+  }
+
+  return (
+    kart('🪵 Smetnje vegetacije (sječa, vjetroizvale)',
+      'Satelit poredi trenutno stanje vegetacije sa istorijskom normom i javi gdje je NESTALA — '
+      + 'sječa, vjetroizvala, klizište ili opožarena površina. Piksel je 30 m, osvježava se svakih 2-4 dana, '
+      + 'u krugu ' + _SJE_RADIUS_KM + ' km od tebe. NIJE dokaz bespravne sječe — traži izlazak na teren.',
+      (imaKljuc ? `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0;">
+          <input type="checkbox" ${_sjeOn ? 'checked' : ''} onchange="_sjeToggle(this.checked)"
+            style="width:18px;height:18px;accent-color:#d97706;cursor:pointer;flex-shrink:0;">
+          <span style="font-size:13px;color:#cbd5e1;">Prikaži alarme na karti</span>
+        </label>` + okvirChips
+        + `<div id="sje-status" style="font-size:11px;color:#94a3b8;margin:6px 0 8px;">${_escHtml(_sjeOn ? _sjeSazetak().kratko : '—')}</div>`
+        : '')
+      + lista
+      + (imaKljuc ? `<div style="display:flex;gap:7px;margin-top:10px;">
+           <button onclick="_sjeLoad(false)" style="flex:1;padding:9px;background:#14233c;border:1px solid #1e3a5f;border-radius:9px;color:#fbbf24;font-size:12px;font-weight:600;cursor:pointer;"><svg class="ic"><use href="#ic-osvjezi"/></svg> Osvježi</button>
+         </div>` : ''))
+
+    + kart('ℹ Šta ovaj sloj jeste, a šta nije',
+      '',
+      `<div style="font-size:11.5px;color:#94a3b8;line-height:1.7;">
+         <div style="margin-bottom:7px;"><b style="color:#e2e8f0;">Pokriva nas.</b> GFW-ovi stariji alarmi za sječu
+           (GLAD, RADD) rade samo u tropima — Bosna je izvan njih. Ovdje se koristi integrisani sloj koji uključuje
+           <b style="color:#e2e8f0;">DIST-ALERT</b> (UMD + NASA), jedini sa globalnom pokrivenošću.</div>
+         <div style="margin-bottom:7px;"><b style="color:#e2e8f0;">Kasni nekoliko dana.</b> Ovo nije uživo kao požari —
+           satelit prođe i obradi snimak svakih 2-4 dana, a oblaci to znaju odgoditi.</div>
+         <div><b style="color:#e2e8f0;">Ne razlikuje uzrok.</b> Alarm kaže da je vegetacija nestala, ne i zašto:
+           redovna doznaka, bespravna sječa, vjetroizvala i požarište izgledaju isto sa satelita.</div>
+       </div>`)
+
+    + `<div style="font-size:10px;color:#334155;line-height:1.6;text-align:center;padding:4px 8px 16px;">
+         Izvor: Global Forest Watch — integrisani alarmi (GLAD-L, GLAD-S2, RADD, DIST-ALERT).<br>
+         Traži besplatan GFW ključ. Zadnji dohvat se čuva za offline pregled.
+       </div>`
+  );
+}
+
+function _poziSadrzajHtml() {
   const m = _poziMeta || {};
   const ref = _poziRefTacka();
   const kart = (naslov, opis, sadrzaj) => `
@@ -13024,7 +13602,7 @@ function _poziRenderPanel() {
          </div>` : ''));
   }
 
-  el.innerHTML =
+  return (
     kart('🛰 Detekcija sa satelita',
       'NASA FIRMS — toplotne anomalije koje su sateliti uočili u krugu '
       + _POZ_RADIUS_KM + ' km od tebe. Detekcija nije potvrda požara na terenu.',
@@ -13039,6 +13617,19 @@ function _poziRenderPanel() {
       + mapKeyPolje)
 
     + meteoKart
+
+    + kart('🔔 Javi mi kad se pojavi nov požar',
+      'Provjerava u pozadini na svakih 15 minuta i javi obavještenjem kad NOV požar uđe u zadani krug. '
+      + 'Radi dok je aplikacija pokrenuta (i kad je u pozadini) — ne radi kad je potpuno zatvoriš.',
+      prekidac('_poziNotifToggle(this.checked)', _poziNotifOn(), 'Upozori me na nov požar u blizini')
+      + `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+           <span style="font-size:12px;color:#94a3b8;">Prag:</span>
+           ${[10, 25, 50].map(km => `<button onclick="_poziNotifPostaviKm(${km})"
+             style="flex:1;padding:6px 4px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;
+             border:1px solid ${_poziNotifKm() === km ? '#f97316' : '#1e3a5f'};
+             background:${_poziNotifKm() === km ? '#f9731633' : '#14233c'};
+             color:${_poziNotifKm() === km ? '#fdba74' : '#94a3b8'};">${km} km</button>`).join('')}
+         </div>`)
 
     + kart('🔥 Prijavi požar sa terena',
       'Satelit vidi tek požar koji je narastao — ti ga vidiš prvi. Prijava se upisuje kao tačka na tvojoj GPS poziciji, radi i bez signala i ode kolegama čim se veza pojavi.',
@@ -13074,7 +13665,8 @@ function _poziRenderPanel() {
     + `<div style="font-size:10px;color:#334155;line-height:1.6;text-align:center;padding:4px 8px 16px;">
          Izvori: NASA FIRMS (detekcije) · Copernicus EFFIS (opožarene površine, indeks opasnosti).<br>
          Besplatni javni servisi — traže internet. Zadnji dohvat se čuva za offline pregled.
-       </div>`;
+       </div>`
+  );
 }
 // Vrati zadnju kartu ili defaultuj na Topo
 (function _restoreLastMap() {
