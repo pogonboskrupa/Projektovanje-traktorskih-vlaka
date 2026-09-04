@@ -296,6 +296,17 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
     `() => { map.setView(...); }`. Usput: app NAMJERNO reloada stranicu jednom
     kad SW prvi put preuzme kontrolu, pa test treba sačekati
     `sessionStorage['sw-reloaded'] === '1'` prije mjerenja.
+- **Trake udaljenosti u listi požara (v3.108.0)**: lista se RAŠČLANJUJE na tri
+  trake (`_POZ_TRAKE` — do 20 km / 20–40 km / preko 40 km), ne filtrira —
+  požar na 90 km je i dalje u krugu od 150 km i ostaje vidljiv, samo pod
+  zaglavljem "Preko 40 km" da ne konkuriše vizuelno onome na 5 km. `_poziEvts`
+  je već sortiran po udaljenosti pa se svaka traka izdvaja jednim filter-om;
+  `onclick="_poziZoom(i)"` MORA nositi ORIGINALNI indeks iz `_poziEvts` (ne
+  poziciju unutar trake) — ista klasa greške kao dokumentovano "Pozicija u
+  DOM-u NIJE indeks u nizu" gore, ovdje pokrivena testom koji namjerno miješa
+  redoslijed traka da uhvati baš tu zamku. Svaka traka prikazuje do
+  `_POZ_PO_TRACI`=6 požara pa "…i još N", a brojka u zaglavlju ("Preko 40 km
+  (12)") uvijek broji SVE u toj traci, ne samo prikazane.
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/

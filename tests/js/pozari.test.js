@@ -737,6 +737,90 @@ t('isključen prekidač → ništa se ne javlja čak i kad ima blizak požar', (
   assert.strictEqual(r, null);
 });
 
+console.log('Trake udaljenosti (do 20 km / 20-40 km / preko 40 km) — RAŠČLANI, ne filtriraj:');
+
+const SRC8 = [
+  extractConst('_POZ_TRAKE'),
+  extractFn('_poziTraka'),
+].join('\n');
+const api8 = new Function(SRC8 + '\nreturn { _poziTraka, _POZ_TRAKE };')();
+
+t('granice traka: 19999m blizu, tačno 20000m srednje, tačno 40000m dalje', () => {
+  assert.strictEqual(api8._poziTraka(19999).id, 'blizu');
+  assert.strictEqual(api8._poziTraka(20000).id, 'sred');
+  assert.strictEqual(api8._poziTraka(39999).id, 'sred');
+  assert.strictEqual(api8._poziTraka(40000).id, 'dalje');
+  assert.strictEqual(api8._poziTraka(149000).id, 'dalje', 'i požar na rubu 150 km kruga mora pasti u neku traku');
+});
+
+t('0 m (požar tačno na tvojoj poziciji) je "blizu"', () => {
+  assert.strictEqual(api8._poziTraka(0).id, 'blizu');
+});
+
+// _poziListaHtml grupiše _poziEvts u tri trake, ali onclick="_poziZoom(i)" MORA
+// nositi ORIGINALNI indeks u _poziEvts — ne poziciju unutar trake. Ako bi ta
+// veza pukla, klik na "20-40 km" traku bi zumirao na POGREŠAN požar (ista
+// klasa bug-a kao dokumentovano "Pozicija u DOM-u NIJE indeks u nizu").
+function extractFnBody(name) { return extractFn(name); }
+const SRC9 = [
+  SRC_DST,
+  extractConst('_POZ_TRAKE'),
+  extractFn('_poziTraka'),
+  extractFn('_bearing'),
+  extractFn('_azimutSmjer'),
+  extractFn('fmtL'),
+  extractFn('_poziPouzdanost'),
+  extractFn('_poziStarost'),
+  extractFn('_poziRedHtml'),
+  extractConst('_POZ_PO_TRACI'),
+  extractFn('_poziListaHtml'),
+].join('\n');
+
+function makeLista({ evts, on = true, meta = {} }) {
+  const sandbox = {
+    _poziOn: on, _poziMeta: meta, _poziEvts: evts,
+    _poziRefTacka: () => ({ la:44.88, lo:16.15, gps:true }),
+    _poziOkvirNaziv: () => '24 sata', _POZ_RADIUS_KM: 150,
+    _escHtml: (s) => s,
+  };
+  const keys = Object.keys(sandbox);
+  return new Function(...keys, SRC9 + '\nreturn _poziListaHtml();')(...keys.map(k => sandbox[k]));
+}
+
+t('zaglavlja traka se pojavljuju SAMO za trake koje stvarno imaju požar', () => {
+  const html = makeLista({ evts: [
+    { d:5000,  la:44.9,  lo:16.2,  conf:'h', broj:1, sateliti:['Suomi-NPP'], zadnji:Date.now(), nov:false },
+    { d:90000, la:45.5,  lo:17.0,  conf:'h', broj:1, sateliti:['Suomi-NPP'], zadnji:Date.now(), nov:false },
+  ]});
+  assert.match(html, /Do 20 km/);
+  assert.ok(!/20–40 km/.test(html), 'nema požara u srednjoj traci — zaglavlje ne smije postojati');
+  assert.match(html, /Preko 40 km/);
+});
+
+t('onclick indeksi ostaju ORIGINALNI iz _poziEvts, ne pozicija unutar trake', () => {
+  // Namjerno redoslijed koji miješa trake: [blizu, dalje, srednje] — _poziEvts
+  // je inače sortiran po udaljenosti, ali test provjerava da grupisanje NE
+  // pretpostavlja sortiranost pri računanju indeksa.
+  const evts = [
+    { d:5000,  la:44.9, lo:16.2, conf:'h', broj:1, sateliti:['A'], zadnji:Date.now(), nov:false },  // i=0, blizu
+    { d:90000, la:45.5, lo:17.0, conf:'h', broj:1, sateliti:['A'], zadnji:Date.now(), nov:false },  // i=1, dalje
+    { d:25000, la:45.1, lo:16.4, conf:'h', broj:1, sateliti:['A'], zadnji:Date.now(), nov:false },  // i=2, sred
+  ];
+  const html = makeLista({ evts });
+  assert.match(html, /_poziZoom\(0\)/, 'požar iz "blizu" trake mora nositi indeks 0');
+  assert.match(html, /_poziZoom\(1\)/, 'požar iz "dalje" trake mora nositi indeks 1 (ne 2 ili 0)');
+  assert.match(html, /_poziZoom\(2\)/, 'požar iz "sred" trake mora nositi indeks 2 (ne 1)');
+});
+
+t('traka sa više od _POZ_PO_TRACI požara ispiše "i još N", ostale i dalje broji u zaglavlju', () => {
+  const evts = Array.from({ length: 9 }, (_, k) => ({
+    d: 1000 + k * 100, la:44.9, lo:16.2, conf:'h', broj:1, sateliti:['A'], zadnji:Date.now(), nov:false
+  }));
+  const html = makeLista({ evts });
+  assert.match(html, /Do 20 km.*\(9\)/s, 'zaglavlje mora brojati SVIH 9, ne samo prikazanih');
+  assert.match(html, /i još 3 u ovoj traci/);
+});
+
 console.log('_poziSazetak — upozorenje kad udaljenost NIJE od stvarne GPS pozicije:');
 
 // Zašto ovo postoji: prije ove izmjene je udaljenost do požara tiho padala na

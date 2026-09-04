@@ -4831,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.107.1';
+const APP_VER = 'v3.108.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12080,6 +12080,19 @@ const _POZ_NOTIF_SEEN= 'tvlake_pozari_notif_seen'; // za koje požare je već ja
 const _POZ_RADIUS_KM = 150;    // šire od bilo koje šumarije — da se vidi i šta se približava
 const _POZ_GRUPA_M   = 1500;   // detekcije bliže od ovoga su ISTI požar (v. _poziGrupisi)
 
+// Trake udaljenosti (v3.108.0) — lista se RAŠČLANJUJE na "koliko je hitno",
+// ne filtrira: požar na 45 km i dalje treba biti vidljiv (u krugu 150 km je),
+// samo ne smije zauzeti isti vizuelni prioritet kao onaj na 5 km. Granice u
+// METRIMA jer je g.d (i sav ostatak modula) već u metrima.
+const _POZ_TRAKE = [
+  { id:'blizu', naziv:'Do 20 km',    min:0,     max:20000,    ikona:'🔴' },
+  { id:'sred',  naziv:'20–40 km',    min:20000, max:40000,    ikona:'🟡' },
+  { id:'dalje', naziv:'Preko 40 km', min:40000, max:Infinity, ikona:'⚪' }
+];
+function _poziTraka(d) {
+  return _POZ_TRAKE.find(t => d >= t.min && d < t.max) || _POZ_TRAKE[_POZ_TRAKE.length - 1];
+}
+
 // Svi izvori se dohvaćaju PARALELNO i SPAJAJU (v3.104.0), ne "prvi koji uspije".
 // Razlog: sateliti nemaju iste prelete — Suomi-NPP, NOAA-20 i NOAA-21 prelaze u
 // razmacima od po ~50 min, MODIS u svoje termine. Uzeti samo jedan znači svjesno
@@ -12862,6 +12875,32 @@ function _poziPopupHtml(p, ref) {
 
 // Lista prikazuje POŽARE (grupisane detekcije), ne sirove piksele — jedan
 // aktivno praćen požar viđen 12 puta ne smije zauzeti 12 redova.
+// Jedan red liste — izvučeno u pomoćnu funkciju jer se sad crta iz TRI
+// odvojene trake umjesto iz jedne ravne liste (v3.108.0).
+function _poziRedHtml(g, i, ref) {
+  const pz = _poziPouzdanost(g.conf);
+  const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, g.la, g.lo));
+  const detalji = g.broj > 1
+    ? g.broj + ' detekcija' + (g.sateliti.length > 1 ? ' · ' + g.sateliti.length + ' sat.' : '')
+    : (g.sateliti[0] || '1 detekcija');
+  return `<div onclick="_poziZoom(${i})" style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #1e293b;cursor:pointer;">
+    <span style="width:9px;height:9px;border-radius:50%;background:${pz.boja};flex-shrink:0;"></span>
+    <span style="flex:1;min-width:0;">
+      <span style="font-size:12px;color:#e2e8f0;">${fmtL(g.d)} <span style="color:#64748b;">${smjer}</span></span>
+      ${g.nov ? ' <span style="color:#fbbf24;font-size:10px;font-weight:700;">🆕 NOVO</span>' : ''}
+      <div style="font-size:10px;color:#64748b;">${detalji} · ${_poziStarost(g.zadnji)}</div>
+    </span>
+    <span style="font-size:10px;color:#64748b;text-align:right;">${pz.txt}</span>
+  </div>`;
+}
+
+// Lista se RAŠČLANJUJE na tri trake udaljenosti (_POZ_TRAKE) — ne filtrira.
+// Požar na 45 km je i dalje u krugu od 150 km i mora ostati vidljiv, samo
+// grupisan pod "Preko 40 km" da ne konkuriše vizuelno onome na 5 km. _poziEvts
+// je već sortiran po udaljenosti (_poziGrupeBlizu), pa se svaka traka samo
+// filtrira iz JEDNOG prolaza — indeks `i` ostaje ORIGINALNI indeks u
+// _poziEvts (ne pozicija unutar trake), jer _poziZoom(i) čita baš iz njega.
+const _POZ_PO_TRACI = 6;
 function _poziListaHtml() {
   if (!_poziOn) return '';
   const m = _poziMeta || {};
@@ -12872,23 +12911,17 @@ function _poziListaHtml() {
     return `<div style="font-size:11px;color:#4ade80;padding:6px 0;">✓ Nema požara u krugu ${_POZ_RADIUS_KM} km, zadnjih ${_poziOkvirNaziv(m.okvir)}.</div>`;
   }
   const ref = _poziRefTacka();
-  return _poziEvts.slice(0, 8).map((g, i) => {
-    const pz = _poziPouzdanost(g.conf);
-    const smjer = _azimutSmjer(_bearing(ref.la, ref.lo, g.la, g.lo));
-    const detalji = g.broj > 1
-      ? g.broj + ' detekcija' + (g.sateliti.length > 1 ? ' · ' + g.sateliti.length + ' sat.' : '')
-      : (g.sateliti[0] || '1 detekcija');
-    return `<div onclick="_poziZoom(${i})" style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #1e293b;cursor:pointer;">
-      <span style="width:9px;height:9px;border-radius:50%;background:${pz.boja};flex-shrink:0;"></span>
-      <span style="flex:1;min-width:0;">
-        <span style="font-size:12px;color:#e2e8f0;">${fmtL(g.d)} <span style="color:#64748b;">${smjer}</span></span>
-        ${g.nov ? ' <span style="color:#fbbf24;font-size:10px;font-weight:700;">🆕 NOVO</span>' : ''}
-        <div style="font-size:10px;color:#64748b;">${detalji} · ${_poziStarost(g.zadnji)}</div>
-      </span>
-      <span style="font-size:10px;color:#64748b;text-align:right;">${pz.txt}</span>
-    </div>`;
-  }).join('') + (_poziEvts.length > 8
-    ? `<div style="font-size:10px;color:#475569;padding:4px;">…i još ${_poziEvts.length - 8}</div>` : '');
+  const sIndeksom = _poziEvts.map((g, i) => ({ g, i }));
+  return _POZ_TRAKE.map(traka => {
+    const uTraci = sIndeksom.filter(({ g }) => g.d >= traka.min && g.d < traka.max);
+    if (!uTraci.length) return '';
+    const zaglavlje = `<div style="font-size:10.5px;font-weight:700;color:#94a3b8;padding:8px 4px 3px;">
+      ${traka.ikona} ${traka.naziv} <span style="color:#64748b;font-weight:400;">(${uTraci.length})</span></div>`;
+    const redovi = uTraci.slice(0, _POZ_PO_TRACI).map(({ g, i }) => _poziRedHtml(g, i, ref)).join('');
+    const ostatak = uTraci.length > _POZ_PO_TRACI
+      ? `<div style="font-size:10px;color:#475569;padding:4px;">…i još ${uTraci.length - _POZ_PO_TRACI} u ovoj traci</div>` : '';
+    return zaglavlje + redovi + ostatak;
+  }).join('');
 }
 
 // Klik na požar u listi MORA stvarno odvesti korisnika tamo — dok je panel
