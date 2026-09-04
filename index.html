@@ -4804,7 +4804,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.105.0';
+const APP_VER = 'v3.106.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12032,6 +12032,7 @@ const _POZ_ON_KEY    = 'tvlake_pozari_on';
 const _POZ_OKVIR_KEY = 'tvlake_pozari_okvir';   // '24h' | '48h' | '7d'
 const _POZ_SEEN_KEY  = 'tvlake_pozari_vidjeno'; // ključevi detekcija sa zadnjeg pregleda
 const _POZ_MAPKEY_KEY= 'tvlake_pozari_mapkey';  // opcioni FIRMS MAP_KEY (korisnik unosi sam)
+const _POZ_GFW_KEY   = 'tvlake_pozari_gfwkey';  // opcioni Global Forest Watch API ključ
 // Vjetar/vlažnost se NAMJERNO ne keširaju za offline (za razliku od detekcija) —
 // prikazivanje JUČERAŠNJEG smjera vjetra kao da je trenutan bi bilo opasno
 // pogrešno u pravoj situaciji požara. Bez mreže _poziOsvjeziMeteo() tiho ne
@@ -12239,6 +12240,67 @@ function _poziApiUrl(kljuc, okvir, ref) {
     + '/VIIRS_SNPP_NRT,VIIRS_NOAA20_NRT,VIIRS_NOAA21_NRT,MODIS_NRT/' + bbox + '/' + dani;
 }
 
+// ── Global Forest Watch kao DRUGI SERVER za iste VIIRS detekcije ────────────
+// Zašto GFW: detekcije su iste (GFW preuzima NASA VIIRS), ali server je tuđi —
+// data-api.globalforestwatch.org ima SVOJU CORS politiku. Pošto je GFW-ova
+// vlastita karta browser-aplikacija koja zove baš ovaj API, postoji realna
+// šansa da prolazi tamo gdje NASA-in ne prolazi. To je jedini razlog zašto je
+// dodan: nije "više podataka", nego DRUGI PUT do istih.
+//
+// Traži besplatni ključ (x-api-key), koji korisnik sam vadi na svom GFW nalogu.
+// NAPOMENA: vlastito zaglavlje u browseru okida CORS preflight (OPTIONS) —
+// ako ga GFW ne odobri, pada i prije samog upita. U APK-u to ne smeta jer
+// native most ne ide kroz CORS.
+//
+// NAMJERNO NISU dodati GFW alarmi za sječu (GLAD-L/GLAD-S2/RADD), koliko god
+// zvučali korisno za šumariju: GLAD-L pokriva samo pojas 30°N-30°S, GLAD-S2
+// samo Amazon, RADD samo vlažne tropе. Bosna je na ~44.9°N — DALEKO van svih.
+// Dodati ih značilo bi trajno prazan sloj iz kojeg se ne vidi je li mirno ili
+// je pao izvor: tačno ona greška zbog koje je v3.103.0 rasterski sloj bačen.
+function _poziGfwKljuc() {
+  return (localStorage.getItem(_POZ_GFW_KEY) || '').trim();
+}
+function _poziGfwUrl(okvir, ref) {
+  const dani = { '24h':1, '48h':2, '7d':7 }[okvir] || 1;
+  const od = new Date(Date.now() - dani * 86400000).toISOString().slice(0, 10);
+  const dLat = _POZ_RADIUS_KM / 111;
+  const dLon = _POZ_RADIUS_KM / (111 * Math.cos(ref.la * Math.PI / 180));
+  const sql = 'SELECT longitude, latitude, alert__date, alert__time_utc, confidence__cat FROM results'
+    + " WHERE alert__date >= '" + od + "'"
+    + ' AND latitude >= '  + (ref.la - dLat).toFixed(3) + ' AND latitude <= '  + (ref.la + dLat).toFixed(3)
+    + ' AND longitude >= ' + (ref.lo - dLon).toFixed(3) + ' AND longitude <= ' + (ref.lo + dLon).toFixed(3)
+    + ' LIMIT 1000';
+  return 'https://data-api.globalforestwatch.org/dataset/nasa_viirs_fire_alerts/latest/query/json?sql='
+    + encodeURIComponent(sql);
+}
+
+// GFW vraća {"data":[{longitude, latitude, alert__date, alert__time_utc,
+// confidence__cat}, ...]} — svede se na ISTI oblik tačke kao FIRMS CSV, da
+// grupisanje/prikaz/keš ne moraju znati odakle je podatak došao.
+function _poziParseGfwJson(txt) {
+  let j;
+  try { j = JSON.parse(txt); } catch(e) { return []; }
+  const red = j && Array.isArray(j.data) ? j.data : [];
+  const out = [];
+  red.forEach(r => {
+    const la = parseFloat(r.latitude), lo = parseFloat(r.longitude);
+    if (!isFinite(la) || !isFinite(lo)) return;
+    // alert__time_utc zna doći kao "HH:MM:SS" ili "HHMM" — pokrij oba.
+    let hhmm = String(r.alert__time_utc || '').replace(/[^0-9]/g, '').padStart(4, '0').slice(0, 4);
+    const dat = String(r.alert__date || '').slice(0, 10);
+    out.push({
+      la, lo,
+      dt: dat + 'T' + hhmm.slice(0, 2) + ':' + hhmm.slice(2, 4) + ':00Z',
+      sat: 'VIIRS (GFW)',
+      conf: String(r.confidence__cat || '').trim(),
+      frp: NaN,          // GFW u ovom pogledu ne vraća FRP — namjerno NaN, ne 0
+      noc: false,
+      rez: 375
+    });
+  });
+  return out;
+}
+
 // Jedan izvor: dohvati i parsiraj, nikad ne baca (za Promise.allSettled).
 // Razlika između "odbijeno ODMAH" i "visjelo pa isteklo" je JEDINI trag koji
 // browser uopšte daje o uzroku, pa mora biti čitljiv (v3.104.1 — s terena je
@@ -12319,7 +12381,7 @@ function _nativeNetOdgovor(id, status, b64, greska) {
   p.resolve({ status, text: txt });
 }
 
-function _nativeNetFetch(url, ms) {
+function _nativeNetFetch(url, ms, zaglavlja) {
   return new Promise((resolve, reject) => {
     const id = 'n' + (++_netSeq);
     // Sigurnosna mreža: ako native strana iz bilo kojeg razloga nikad ne
@@ -12329,31 +12391,43 @@ function _nativeNetFetch(url, ms) {
       const e = new Error('native timeout'); e.name = 'TimeoutError'; reject(e);
     }, (ms || 20000) + 5000);
     _NET_ceka[id] = { resolve, reject, t };
-    try { AndroidNet.fetchText(id, url, ms || 20000); }
+    try { AndroidNet.fetchText(id, url, ms || 20000, zaglavlja ? JSON.stringify(zaglavlja) : null); }
     catch(e) { clearTimeout(t); delete _NET_ceka[id]; reject(e); }
   });
 }
 
-async function _poziDohvatiJedan(naziv, url, ms) {
+// opts: { headers:{...}, parser:fn, provjera:regex }. Parser je pluggable jer
+// FIRMS vraća CSV, a GFW JSON — ali sve ostalo (native/fetch put, mjerenje,
+// prevod greške) je isto pa se ne duplira.
+async function _poziDohvatiJedan(naziv, url, ms, opts) {
+  opts = opts || {};
+  const parser = opts.parser || _poziParseCsv;
+  const provjera = opts.provjera || /latitude/i;
+  const zaglavlja = opts.headers || null;
+  const ocijeni = (txt, native) => {
+    const pts = parser(txt);
+    if (!pts.length && !provjera.test(txt)) return { ok:false, naziv, greska:'neočekivan odgovor' };
+    return { ok:true, naziv, pts, native: !!native };
+  };
   // U APK-u prvo native put (nema CORS); u browseru ga nema pa ide fetch().
   if (_nativeNetDostupan()) {
     try {
-      const r = await _nativeNetFetch(url, ms || 20000);
+      const r = await _nativeNetFetch(url, ms || 20000, zaglavlja);
       if (r.status && r.status >= 400) return { ok:false, naziv, greska:'HTTP ' + r.status };
-      const pts = _poziParseCsv(r.text);
-      if (!pts.length && !/latitude/i.test(r.text)) return { ok:false, naziv, greska:'neočekivan odgovor' };
-      return { ok:true, naziv, pts, native:true };
+      return ocijeni(r.text, true);
     } catch(e) {
       return { ok:false, naziv, greska: _poziGreskaTxt(e) };
     }
   }
   try {
-    const r = await _fetchT(url, ms || 15000, { mode:'cors' });
+    // Vlastito zaglavlje (npr. GFW x-api-key) okida CORS preflight — ako ga
+    // server ne odobri, pada i prije samog zahtjeva. U APK-u to nije problem
+    // jer native put uopšte ne ide kroz CORS.
+    const o = { mode:'cors' };
+    if (zaglavlja) o.headers = zaglavlja;
+    const r = await _fetchT(url, ms || 15000, o);
     if (!r.ok) return { ok:false, naziv, greska:'HTTP ' + r.status };
-    const txt = await r.text();
-    const pts = _poziParseCsv(txt);
-    if (!pts.length && !/latitude/i.test(txt)) return { ok:false, naziv, greska:'neočekivan odgovor' };
-    return { ok:true, naziv, pts };
+    return ocijeni(await r.text(), false);
   } catch(e) {
     return { ok:false, naziv, greska: _poziGreskaTxt(e) };
   }
@@ -12378,15 +12452,46 @@ async function _poziDohvati(okvir) {
   // na vrijeme"), dok Area API vraća samo krug oko korisnika — isti podaci,
   // djelić veličine. Paralelno je brže samo kad ima propusnosti; kad je nema,
   // dijeljenje mrvica bandwidth-a na 4 zahtjeva garantuje da nijedan ne stigne.
+  // GFW je DRUGI SERVER za iste detekcije — pita se paralelno sa FIRMS-om jer
+  // je bbox upit mali (nema opasnosti od gušenja veze kao kod evropskih arhiva)
+  // i jer je poenta baš u tome da jedan prođe kad drugi ne prolazi.
+  const gfw = _poziGfwKljuc()
+    ? _poziDohvatiJedan('Global Forest Watch', _poziGfwUrl(okvir, ref), 20000,
+        { headers:{ 'x-api-key': _poziGfwKljuc() }, parser:_poziParseGfwJson, provjera:/"data"\s*:/ })
+    : null;
+
+  const spoji = (a, b) => {
+    const ok = [a, b].filter(x => x && x.ok);
+    const pali = [a, b].filter(x => x && !x.ok);
+    if (!ok.length) return null;
+    const pts = [];
+    ok.forEach(x => pts.push(...(x.pts || [])));
+    return { ok:true, pts, izvori: ok.map(x => x.naziv),
+             djelomicno: pali.length > 0, greske: pali.map(x => x.naziv + ': ' + x.greska) };
+  };
+
   if (kljuc) {
-    const r = await _poziDohvatiJedan('FIRMS API (MAP_KEY)', _poziApiUrl(kljuc, okvir, ref), 20000);
-    if (r.ok) return { ok:true, pts:r.pts, izvori:[r.naziv], djelomicno:false, greske:[] };
-    // Ključ nije prošao — probaj arhive kao rezervu, ali reci i zašto je pao ključ.
+    const [r, g] = await Promise.all([
+      _poziDohvatiJedan('FIRMS API (MAP_KEY)', _poziApiUrl(kljuc, okvir, ref), 20000),
+      gfw || Promise.resolve(null)
+    ]);
+    const spojeno = spoji(r, g);
+    if (spojeno) return spojeno;
+    // Nijedan bbox izvor nije prošao — probaj arhive kao rezervu, ali reci i zašto su pali.
     const rez = await _poziDohvatiArhive(okvir);
     if (rez.ok) return rez;
-    return { ok:false, greska: [r.naziv + ': ' + r.greska, rez.greska].filter(Boolean).join(' · ') };
+    const zasto = [r && (r.naziv + ': ' + r.greska), g && (g.naziv + ': ' + g.greska), rez.greska];
+    return { ok:false, greska: zasto.filter(Boolean).join(' · ') };
   }
-  return _poziDohvatiArhive(okvir);
+
+  const [g, arh] = await Promise.all([gfw || Promise.resolve(null), _poziDohvatiArhive(okvir)]);
+  if (g && g.ok) {
+    const pts = [...(g.pts || []), ...(arh.ok ? arh.pts : [])];
+    return { ok:true, pts, izvori:[g.naziv, ...(arh.ok ? arh.izvori : [])],
+             djelomicno: !arh.ok, greske: arh.ok ? [] : [arh.greska] };
+  }
+  if (arh.ok) return arh;
+  return { ok:false, greska: [g && (g.naziv + ': ' + g.greska), arh.greska].filter(Boolean).join(' · ') };
 }
 
 // BEZ ključa nema izbora nego evropski izvozi. Timeout je namjerno duži nego
@@ -12436,6 +12541,13 @@ function _poziBrojRijecPozar(n) {
 
 // "N novih požara" — treće mjesto gdje se muški rod broja slaže, otud zaseban
 // pridjev (novi/nova/novih) umjesto da se "novih" pogrešno koristi za n=1.
+// 1 izvor / 2-4 izvora / 5+ izvora (muški rod, kao i požar)
+function _poziBrojRijecIzvora(n) {
+  const d1 = n % 10, d2 = n % 100;
+  if (d1 === 1 && d2 !== 11) return n + ' izvor';
+  return n + ' izvora';
+}
+
 function _poziBrojRijecNovih(n) {
   const d1 = n % 10, d2 = n % 100;
   if (d1 === 1 && d2 !== 11) return n + ' novi';
@@ -12510,7 +12622,11 @@ function _poziSazetak() {
   const m = _poziMeta || {};
   if (m.greska) return { kratko:'❌ nedostupno', toast:'❌ Požari: nijedan izvor nije dostupan' };
   const st = m.dohvacenoMs ? _poziStarost(m.dohvacenoMs) : '';
-  const izv = (m.izvori && m.izvori.length ? m.izvori.length + ' izvora' : (m.izvori||[])[0] || '') + (m.kes ? ' · iz keša' : '');
+  // Jedan izvor → imenuj ga (korisnije je znati DA LI je prošao GFW ili NASA
+  // nego pročitati "1 izvor"); više njih → broj sa ispravnom sklonidbom.
+  const izvL = m.izvori || [];
+  const izv = (izvL.length === 1 ? izvL[0] : (izvL.length ? _poziBrojRijecIzvora(izvL.length) : ''))
+            + (m.kes ? ' · iz keša' : '');
   const okvirTxt = _poziOkvirNaziv(m.okvir);
   if (!_poziEvts.length) {
     return {
@@ -12693,6 +12809,17 @@ function _poziPostaviOkvir(id) {
 // Korisnik unosi SVOJ besplatni FIRMS MAP_KEY (samostalna registracija na
 // firms.modaps.eosdis.nasa.gov/api/map_key/, samo email — aplikacija taj email
 // nikad ne vidi ni ne šalje, samo ključ koji korisnik zalijepi ovdje).
+function _poziPostaviGfwKljuc() {
+  const el = document.getElementById('poz-gfwkey-in');
+  if (!el) return;
+  const v = el.value.trim();
+  try {
+    if (v) localStorage.setItem(_POZ_GFW_KEY, v); else localStorage.removeItem(_POZ_GFW_KEY);
+  } catch(e) {}
+  showToast(v ? '✅ GFW ključ sačuvan — koristi se od sljedećeg osvježavanja' : 'GFW ključ uklonjen');
+  if (_poziOn) _poziLoad(false); else _poziRenderPanel();
+}
+
 function _poziPostaviMapKey() {
   const el = document.getElementById('poz-mapkey-in');
   if (!el) return;
@@ -12715,13 +12842,16 @@ async function _poziProvjeriIzvore() {
   const izvori = _POZ_IZVORI.map(izv => ({ naziv:izv.naziv, url:_poziUrl(izv, okvir) }));
   const kljuc = _poziMapKey();
   if (kljuc) izvori.push({ naziv:'FIRMS API (MAP_KEY)', url:_poziApiUrl(kljuc, okvir, ref) });
+  const gk = _poziGfwKljuc();
+  if (gk) izvori.push({ naziv:'Global Forest Watch', url:_poziGfwUrl(okvir, ref),
+    opts:{ headers:{ 'x-api-key': gk }, parser:_poziParseGfwJson, provjera:/"data"\s*:/ } });
   // Kojim putem zahtjev uopšte ide — to je prva stvar koju treba vidjeti sa
   // terena, jer objašnjava razliku između APK-a (native, bez CORS-a) i weba.
   const put = _nativeNetDostupan() ? 'aplikacija (native, bez CORS-a)' : 'browser (fetch, CORS pravila važe)';
   red.push('🔌 Način pristupa: ' + put);
   for (const izv of izvori) {
     const t0 = Date.now();
-    const r = await _poziDohvatiJedan(izv.naziv, izv.url, 30000);
+    const r = await _poziDohvatiJedan(izv.naziv, izv.url, 30000, izv.opts);
     red.push(`${r.ok ? '✅' : '❌'} ${izv.naziv}\n   ${r.ok ? (r.pts.length + ' detekcija (Evropa/bbox)') : r.greska} · ${Date.now()-t0} ms`);
   }
   // EFFIS rasteri (opasnost + opožarene površine) — probaj jednu pločicu
@@ -12820,6 +12950,16 @@ function _poziRenderPanel() {
         <input id="poz-mapkey-in" type="text" placeholder="MAP_KEY (opciono)" value="${_escHtml(_poziMapKey())}"
           style="flex:1;min-width:0;padding:8px 10px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;color:#e2e8f0;font-size:12px;">
         <button onclick="_poziPostaviMapKey()" style="padding:8px 12px;background:#14233c;border:1px solid #1e3a5f;border-radius:8px;color:#7dd3fc;font-size:12px;font-weight:600;cursor:pointer;">Sačuvaj</button>
+      </div>
+      <div style="font-size:10.5px;color:#64748b;line-height:1.5;margin:10px 0 6px;">
+        Opciono: Global Forest Watch ključ (<span style="color:#7dd3fc;">globalforestwatch.org</span> nalog →
+        API ključ) — ISTE NASA detekcije, ali sa TUĐEG servera. Vrijedi probati jer GFW ima svoju
+        CORS politiku, pa zna proći tamo gdje NASA-in server ne prolazi.
+      </div>
+      <div style="display:flex;gap:6px;">
+        <input id="poz-gfwkey-in" type="text" placeholder="GFW API ključ (opciono)" value="${_escHtml(_poziGfwKljuc())}"
+          style="flex:1;min-width:0;padding:8px 10px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;color:#e2e8f0;font-size:12px;">
+        <button onclick="_poziPostaviGfwKljuc()" style="padding:8px 12px;background:#14233c;border:1px solid #1e3a5f;border-radius:8px;color:#7dd3fc;font-size:12px;font-weight:600;cursor:pointer;">Sačuvaj</button>
       </div>
     </div>`;
 

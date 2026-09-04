@@ -187,6 +187,36 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   - Test: `tests/js/pozari.test.js` (JS polovina mosta — Base64/UTF-8,
     odbijanje, istek kad native strana zanijemi). Java se iz sandboxa ne može
     kompajlirati (nema Android SDK-a), pa je provjerena strukturno.
+- **Global Forest Watch kao DRUGI SERVER za iste detekcije (v3.106.0)**: GFW
+  preuzima NASA VIIRS podatke i servira ih sa `data-api.globalforestwatch.org`,
+  koji ima SVOJU CORS politiku. Pošto je GFW-ova vlastita karta browser-app
+  koja zove baš taj API, postoji realna šansa da prolazi tamo gdje NASA-in ne
+  prolazi — i to je JEDINI razlog dodavanja (nije "više podataka", nego DRUGI
+  PUT do istih). `_poziGfwUrl`/`_poziParseGfwJson`/`_poziGfwKljuc`.
+  - Traži besplatan ključ sa GFW naloga, šalje se kao **`x-api-key` zaglavlje**.
+    Vlastito zaglavlje u browseru okida **CORS preflight (OPTIONS)** — ako ga
+    GFW ne odobri, pada i prije upita. U APK-u ne smeta (native most nema CORS),
+    pa `_poziDohvatiJedan` sad prima `opts.headers` i prosljeđuje ih i native
+    mostu (`NetBridge.fetchText` četvrti parametar, JSON sa zaglavljima) i
+    `fetch()`-u. `data-api.globalforestwatch.org` je dodan u `dozvoljenHost`.
+  - Parser je **pluggable** (`opts.parser`/`opts.provjera`) jer FIRMS vraća CSV
+    a GFW JSON; sve ostalo (native/fetch put, mjerenje, prevod greške) je isto
+    pa se ne duplira. GFW tačka se svede na ISTI oblik kao FIRMS (`la/lo/dt/
+    sat/conf/frp/noc/rez`) da grupisanje/keš/prikaz ne moraju znati porijeklo.
+  - **FRP je `NaN`, ne 0** — GFW u ovom pogledu ne vraća snagu požara, a 0 bi
+    značilo "izmjereno nula", što nije isto kao "nije izmjereno".
+  - **NAMJERNO NISU dodati GFW alarmi za sječu (GLAD-L/GLAD-S2/RADD)**, koliko
+    god zvučali kao savršena stvar za šumariju: GLAD-L pokriva samo pojas
+    30°N–30°S, GLAD-S2 samo Amazon, RADD samo vlažne trope. **Bosna je na
+    ~44.9°N — daleko van svih.** Dodati ih značilo bi trajno prazan sloj iz
+    kojeg se ne vidi je li mirno ili je pao izvor — tačno ona greška zbog koje
+    je rasterski sloj iz v3.103.0 i bačen. Jedini GFW alarm sa GLOBALNOM
+    pokrivenošću je **DIST-ALERT** (sve vegetacijske smetnje, ne samo šuma) —
+    on bi pokrivao BiH i vrijedan je kandidat, ali je zaseban proizvod (nije
+    "požar") pa nije nabacan uz ovu izmjenu.
+  - Sažetak sad IMENUJE izvor kad je samo jedan ("Global Forest Watch") umjesto
+    da broji ("1 izvor") — sa terena je važnije znati KOJI je server prošao.
+    Sklonidba: `_poziBrojRijecIzvora` (1 izvor / 2+ izvora).
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/

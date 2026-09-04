@@ -92,8 +92,11 @@ const SRC2 = [
   extractFn('_poziEvtKljuc'),
   extractFn('_poziOznaciNove'),
   extractFn('_poziApiUrl'),
+  extractFn('_poziGfwUrl'),
+  extractFn('_poziParseGfwJson'),
   extractFn('_poziBrojRijecPozar'),
   extractFn('_poziBrojRijecNovih'),
+  extractFn('_poziBrojRijecIzvora'),
   extractFn('_poziVjetarPrijeti'),
   extractFn('_poziGreskaTxt'),
   extractFn('_nativeNetDostupan'),   // _poziSavjet pita je li APK ili browser
@@ -109,7 +112,7 @@ function makeApi2(store) {
   const vals = [store, 'seen', 'tvlake_pozari_okvir', 150];
   return new Function(...keys,
     SRC2 + '\nreturn { _poziOkvir, _poziOkvirNaziv, _poziUrl, _poziGrupisi, _poziGrupeBlizu, ' +
-    '_poziEvtKljuc, _poziOznaciNove, _poziApiUrl, _poziBrojRijecPozar, _poziBrojRijecNovih, ' +
+    '_poziEvtKljuc, _poziOznaciNove, _poziApiUrl, _poziGfwUrl, _poziParseGfwJson, _poziBrojRijecPozar, _poziBrojRijecNovih, _poziBrojRijecIzvora, ' +
     '_poziVjetarPrijeti, _poziGreskaTxt, _poziSavjet };'
   )(...vals);
 }
@@ -244,11 +247,71 @@ t('1 aktivan požar / 2-4 aktivna požara / 5+ aktivnih požara', () => {
   assert.strictEqual(api2._poziBrojRijecPozar(21), '21 aktivan požar');
 });
 
+t('"N izvora" — 1 izvor, ne "1 izvora"', () => {
+  const api2 = makeApi2(makeStore());
+  assert.strictEqual(api2._poziBrojRijecIzvora(1), '1 izvor');
+  assert.strictEqual(api2._poziBrojRijecIzvora(4), '4 izvora');
+  assert.strictEqual(api2._poziBrojRijecIzvora(11), '11 izvora');
+});
+
 t('"N novih" — 1 novi, 2-4 nova, 5+ novih (bug: prije je pisalo "1 novih")', () => {
   const api2 = makeApi2(makeStore());
   assert.strictEqual(api2._poziBrojRijecNovih(1), '1 novi');
   assert.strictEqual(api2._poziBrojRijecNovih(2), '2 nova');
   assert.strictEqual(api2._poziBrojRijecNovih(5), '5 novih');
+});
+
+console.log('Global Forest Watch — drugi server za ISTE VIIRS detekcije:');
+
+// Zašto GFW uopšte: detekcije su iste (GFW preuzima NASA VIIRS), ali server je
+// tuđi i ima svoju CORS politiku — jedini razlog dodavanja je DRUGI PUT do
+// istih podataka. NAMJERNO nisu dodati GLAD/RADD alarmi za sječu: GLAD-L radi
+// samo 30°N-30°S, RADD samo u vlažnim tropima, a Bosna je na ~44.9°N.
+t('_poziGfwUrl: bbox oko korisnika i datum od kojeg se traži su u SQL-u', () => {
+  const api2 = makeApi2(makeStore());
+  const u = api2._poziGfwUrl('24h', { la:44.88, lo:16.15 });
+  assert.ok(u.startsWith('https://data-api.globalforestwatch.org/dataset/nasa_viirs_fire_alerts/latest/query/json?sql='), u.slice(0,90));
+  const sql = decodeURIComponent(u.split('sql=')[1]);
+  assert.match(sql, /FROM results/);
+  assert.match(sql, /alert__date >= '\d{4}-\d{2}-\d{2}'/);
+  assert.match(sql, /latitude >= 43\./,  'južna granica oko 44.88 - 1.35°');
+  assert.match(sql, /latitude <= 46\./,  'sjeverna granica');
+  assert.match(sql, /LIMIT/);
+});
+
+t('_poziGfwUrl: 7d traži stariji datum nego 24h', () => {
+  const api2 = makeApi2(makeStore());
+  const d = u => decodeURIComponent(u.split('sql=')[1]).match(/alert__date >= '([\d-]+)'/)[1];
+  const a = d(api2._poziGfwUrl('24h', { la:44.88, lo:16.15 }));
+  const b = d(api2._poziGfwUrl('7d',  { la:44.88, lo:16.15 }));
+  assert.ok(b < a, '7d mora ići dalje u prošlost: ' + b + ' vs ' + a);
+});
+
+t('_poziParseGfwJson: GFW JSON se svede na ISTI oblik tačke kao FIRMS CSV', () => {
+  const api2 = makeApi2(makeStore());
+  const p = api2._poziParseGfwJson(JSON.stringify({ data: [
+    { longitude:16.20, latitude:44.91, alert__date:'2026-09-03', alert__time_utc:'11:22:00', confidence__cat:'h' },
+    { longitude:16.05, latitude:44.80, alert__date:'2026-09-03', alert__time_utc:'0234',     confidence__cat:'n' }
+  ]}));
+  assert.strictEqual(p.length, 2);
+  assert.strictEqual(p[0].la, 44.91);
+  assert.strictEqual(p[0].conf, 'h');
+  assert.ok(p[0].dt.endsWith('T11:22:00Z'), 'dobiveno: ' + p[0].dt);
+  assert.ok(p[1].dt.endsWith('T02:34:00Z'), '"0234" bez dvotačke mora dati 02:34, dobiveno: ' + p[1].dt);
+  assert.strictEqual(p[0].rez, 375, 'VIIRS rezolucija za grupisanje');
+});
+
+t('_poziParseGfwJson: FRP je NaN (GFW ga ne vraća), ne 0 — 0 bi značilo "nema snage"', () => {
+  const api2 = makeApi2(makeStore());
+  const p = api2._poziParseGfwJson('{"data":[{"longitude":16.2,"latitude":44.9,"alert__date":"2026-09-03","confidence__cat":"h"}]}');
+  assert.ok(Number.isNaN(p[0].frp));
+});
+
+t('_poziParseGfwJson: smeće/HTML/prazno ne ruši parser', () => {
+  const api2 = makeApi2(makeStore());
+  assert.deepStrictEqual(api2._poziParseGfwJson(''), []);
+  assert.deepStrictEqual(api2._poziParseGfwJson('<html>403</html>'), []);
+  assert.deepStrictEqual(api2._poziParseGfwJson('{"greska":"nema kljuca"}'), []);
 });
 
 console.log('Native most (APK) — jedini put oko CORS-a:');

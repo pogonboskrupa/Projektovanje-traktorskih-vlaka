@@ -399,11 +399,16 @@ public class MainActivity extends Activity {
             // Locale.ROOT namjerno: na turskom locale-u "I".toLowerCase() daje "ı",
             // pa bi poređenje hosta tiho palo i most bi bio mrtav bez ikakve poruke.
             String h = host.toLowerCase(java.util.Locale.ROOT);
-            return h.equals("firms.modaps.eosdis.nasa.gov") || h.endsWith(".modaps.eosdis.nasa.gov");
+            return h.equals("firms.modaps.eosdis.nasa.gov")
+                || h.endsWith(".modaps.eosdis.nasa.gov")
+                || h.equals("data-api.globalforestwatch.org");
         }
 
+        // zaglavljaJson: {"x-api-key":"..."} ili null. GFW traži vlastito
+        // zaglavlje, sto u browseru okida CORS preflight — ovdje ne, jer native
+        // poziv nema CORS uopste.
         @JavascriptInterface
-        public void fetchText(final String id, final String url, final int timeoutMs) {
+        public void fetchText(final String id, final String url, final int timeoutMs, final String zaglavljaJson) {
             new Thread(() -> {
                 int status = 0;
                 String b64 = "";
@@ -420,7 +425,15 @@ public class MainActivity extends Activity {
                         c.setReadTimeout(t);
                         c.setInstanceFollowRedirects(true);
                         c.setRequestProperty("User-Agent", "DendroMap-Android");
-                        c.setRequestProperty("Accept", "text/csv,text/plain,*/*");
+                        c.setRequestProperty("Accept", "text/csv,application/json,text/plain,*/*");
+                        if (zaglavljaJson != null && zaglavljaJson.length() > 2) {
+                            org.json.JSONObject zg = new org.json.JSONObject(zaglavljaJson);
+                            java.util.Iterator<String> it = zg.keys();
+                            while (it.hasNext()) {
+                                String k = it.next();
+                                c.setRequestProperty(k, zg.optString(k, ""));
+                            }
+                        }
                         status = c.getResponseCode();
                         InputStream is = (status >= 400) ? c.getErrorStream() : c.getInputStream();
                         if (is != null) {
