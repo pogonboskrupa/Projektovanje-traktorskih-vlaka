@@ -319,18 +319,6 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   internim kodom `'nema-kljuca'` (taj sentinel se prevodi u `_sjeSadrzajHtml`,
   ne procuri u UI). Isti princip kao Požari-jev `_poziProvjeriIzvore`: pusti
   korisnika da proba, objasni šta je pošlo po zlu tek ako pođe.
-- **Blizina VLASTITE šume uz svaki požar (v3.109.0)**: `_poziNajblizaVlaka`
-  računa udaljenost od požara do najbliže tačke bilo koje `vlake[]` i prikazuje
-  je u listi i popup-u ("🪵 T4 — 96 m (42, Grmeč)"), žuto istaknuto ispod 2 km.
-  Ovo je JEDINI podatak u cijelom panelu koji nijedan satelitski servis ne može
-  dati — NASA ne zna gdje su naše vlake; "požar 12 km" i "požar 12 km, a 600 m
-  od vlake T4" su različite odluke za dispečera. Računa se JEDNOM po učitavanju
-  (u `_poziLoad`, upisano na `g.vlaka`), ne pri crtanju panela — panel se
-  precrtava mnogo češće (svaki `_poziStatusSet`). Duge vlake se UZORKUJU (svaka
-  N-ta tačka, najviše ~80 po vlaki): za pitanje "koja je vlaka najbliža" na
-  kilometarskoj skali greška uzorkovanja je zanemariva (test drži < 200 m na
-  vlaki od 200 tačaka), a bez toga bi render sa desetinama vlaka po par hiljada
-  tačaka vidno zapinjao.
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/

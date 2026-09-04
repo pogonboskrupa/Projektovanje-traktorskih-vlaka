@@ -792,67 +792,6 @@ t('isključen prekidač → ništa se ne javlja čak i kad ima blizak požar', (
   assert.strictEqual(r, null);
 });
 
-console.log('Blizina VLASTITE šume — podatak koji satelit nema:');
-
-// NASA ne zna gdje su naše vlake. "Požar 12 km" i "požar 12 km, a 600 m od
-// vlake T4" su dvije potpuno različite informacije za odluku šalje li se ekipa.
-const SRC11 = [
-  SRC_DST,
-  extractFn('_poziNajblizaVlaka'),
-].join('\n');
-function makeVlaka(vlakeArr, projektiArr) {
-  const sandbox = { vlake: vlakeArr, _projekti: projektiArr || [] };
-  const keys = Object.keys(sandbox);
-  return new Function(...keys, SRC11 + '\nreturn { _poziNajblizaVlaka };')(...keys.map(k => sandbox[k]));
-}
-
-t('nema vlaka → null (ne ruši se, samo nema šta pokazati)', () => {
-  assert.strictEqual(makeVlaka([])._poziNajblizaVlaka(44.9, 16.2), null);
-  assert.strictEqual(makeVlaka([{ nm:'T1', pts:[] }])._poziNajblizaVlaka(44.9, 16.2), null);
-});
-
-t('bira NAJBLIŽU vlaku, ne prvu u nizu', () => {
-  const api = makeVlaka([
-    { nm:'Daleka', pts:[{ la:45.50, lo:17.00 }] },
-    { nm:'Bliska', pts:[{ la:44.905, lo:16.205 }] },
-  ]);
-  const r = api._poziNajblizaVlaka(44.91, 16.20);
-  assert.strictEqual(r.nm, 'Bliska');
-  assert.ok(r.d < 1000, 'd=' + r.d);
-});
-
-t('gleda SVE tačke vlake, ne samo prvu — najbliži segment pobjeđuje', () => {
-  // Vlaka počinje daleko, ali joj zadnja tačka prolazi tik uz požar.
-  const api = makeVlaka([{ nm:'Duga', pts:[
-    { la:45.60, lo:17.10 }, { la:45.30, lo:16.80 }, { la:44.912, lo:16.202 }
-  ]}]);
-  const r = api._poziNajblizaVlaka(44.91, 16.20);
-  assert.ok(r.d < 500, 'mora naći blisku tačku na sredini/kraju vlake, d=' + r.d);
-});
-
-t('dodaje ime projekta (odjel, GJ) kad vlaka pripada projektu', () => {
-  const api = makeVlaka(
-    [{ nm:'T4', pts:[{ la:44.911, lo:16.201 }], projektId:'p1' }],
-    [{ id:'p1', odjel:'42', gj:'Grmeč' }]
-  );
-  const r = api._poziNajblizaVlaka(44.91, 16.20);
-  assert.strictEqual(r.projekat, '42, Grmeč');
-});
-
-t('vlaka bez projekta nema polje projekat (ne izmišlja prazan tekst)', () => {
-  const api = makeVlaka([{ nm:'Samostalna', pts:[{ la:44.911, lo:16.201 }] }]);
-  assert.strictEqual(makeVlaka([{ nm:'X', pts:[{ la:44.911, lo:16.201 }] }])._poziNajblizaVlaka(44.91,16.20).projekat, undefined);
-});
-
-t('uzorkovanje dugih vlaka ne pravi grešku reda veličine (200 tačaka)', () => {
-  // 200 tačaka duž linije; najbliža je na sredini. Uzorkovanje (svaka N-ta)
-  // smije promašiti TAČNU tačku, ali ne smije dati besmislen rezultat.
-  const pts = Array.from({ length: 200 }, (_, k) => ({ la: 44.80 + k * 0.001, lo: 16.20 }));
-  const api = makeVlaka([{ nm:'Duga', pts }]);
-  const r = api._poziNajblizaVlaka(44.90, 16.20);   // tačno na liniji
-  assert.ok(r.d < 200, 'uzorkovana greška mora ostati mala, d=' + r.d);
-});
-
 console.log('Trake udaljenosti (do 20 km / 20-40 km / preko 40 km) — RAŠČLANI, ne filtriraj:');
 
 const SRC8 = [

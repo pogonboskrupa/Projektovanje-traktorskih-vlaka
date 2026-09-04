@@ -4831,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.109.0';
+const APP_VER = 'v3.109.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5737,7 +5737,6 @@ function _startupRestore() {
         const ref = _poziRefTacka();
         _poziPts = _poziFilterBlizu(c.pts, ref);
         _poziEvts = _poziOznaciNove(_poziGrupeBlizu(_poziGrupisi(_poziPts), ref));
-        _poziEvts.forEach(g => { g.vlaka = _poziNajblizaVlaka(g.la, g.lo); });
         _poziMeta = { izvori:c.izvori || (c.izvor ? [c.naziv] : []), dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir:_poziOkvir(), refGps:ref.gps };
         _poziRender();
       }
@@ -12259,38 +12258,6 @@ function _poziGrupeBlizu(grupe, ref) {
     .sort((a, b) => a.d - b.d);
 }
 
-// ── Koliko je požar daleko od MOJE šume ────────────────────────────────────
-// Ovo je jedini podatak koji nijedan satelitski servis ne može dati: NASA ne
-// zna gdje su naše vlake. "Požar 12 km" i "požar 12 km, a 600 m od vlake T4"
-// su dvije potpuno različite informacije za nekoga ko odlučuje hoće li danas
-// slati ekipu na teren.
-//
-// Računa se JEDNOM po učitavanju (u _poziLoad), ne pri svakom crtanju panela —
-// pri crtanju bi se vrtjelo desetine puta bez potrebe. Duge vlake se uzorkuju
-// (svaka N-ta tačka, najviše ~80 po vlaki): za pitanje "koja je vlaka najbliža"
-// na kilometarskoj skali to je sasvim dovoljno, a ne pretvara render u zastoj.
-function _poziNajblizaVlaka(la, lo) {
-  if (typeof vlake === 'undefined' || !Array.isArray(vlake) || !vlake.length) return null;
-  let naj = null;
-  vlake.forEach(v => {
-    if (!v || !Array.isArray(v.pts) || !v.pts.length) return;
-    const korak = Math.max(1, Math.ceil(v.pts.length / 80));
-    for (let i = 0; i < v.pts.length; i += korak) {
-      const p = v.pts[i];
-      if (!p || !isFinite(p.la) || !isFinite(p.lo)) continue;
-      const d = dst(la, lo, p.la, p.lo);
-      if (!naj || d < naj.d) naj = { d, nm: v.nm || '?', projektId: v.projektId || null };
-    }
-  });
-  if (!naj) return null;
-  // Ime projekta (odjel/GJ) ako vlaka pripada nekom — korisnije od golog ID-a.
-  if (naj.projektId && typeof _projekti !== 'undefined' && Array.isArray(_projekti)) {
-    const pr = _projekti.find(x => x && x.id === naj.projektId);
-    if (pr) naj.projekat = [pr.odjel, pr.gj].filter(Boolean).join(', ');
-  }
-  return naj;
-}
-
 // Ključ grupe stabilan preko dva učitavanja (za "novo od zadnje provjere") —
 // zaokruženo na ~1km da malo pomjeranje centroida (nova detekcija na rubu
 // grupe) ne izgleda kao "nov požar").
@@ -12697,9 +12664,6 @@ async function _poziLoad(tiho) {
       _poziMeta = { izvori:c.izvori || (c.izvor ? [c.naziv] : []), dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir, refGps:ref.gps };
     }
     _poziEvts = _poziOznaciNove(_poziGrupeBlizu(_poziGrupisi(_poziPts), ref));
-    // Blizina VLASTITE šume — jedini podatak koji satelit ne zna. Računa se
-    // ovdje (jednom), ne pri crtanju panela koje se dešava mnogo češće.
-    _poziEvts.forEach(g => { g.vlaka = _poziNajblizaVlaka(g.la, g.lo); });
     _poziRender();
     const s = _poziSazetak();
     _poziStatusSet(s.kratko);
@@ -12877,7 +12841,6 @@ function _poziGrupaPopupHtml(g, ref) {
     ${red('Pouzdanost', `<span style="color:${pz.boja};">${pz.txt}</span>`)}
     ${g.frpMax ? red('Najjača detekcija', g.frpMax.toFixed(1) + ' MW') : ''}
     ${g.spanM > 0 ? red('Raspon detekcija', fmtL(g.spanM)) : ''}
-    ${g.vlaka ? red('Najbliža tvoja vlaka', `<b style="color:${g.vlaka.d < 2000 ? '#fbbf24' : '#e2e8f0'};">${_escHtml(g.vlaka.nm)}</b> — ${fmtL(g.vlaka.d)}`) : ''}
     ${gk ? `<div style="font-size:11px;color:#fbbf24;font-family:monospace;margin-top:6px;">Y: ${gk.y} · X: ${gk.x}</div>` : ''}
     <div style="font-size:10px;color:#475569;margin-top:8px;line-height:1.4;">
       Sitne tačke oko markera su pojedinačni satelitski pikseli — pokazuju doseg, nisu zasebni požari.
@@ -12920,21 +12883,12 @@ function _poziRedHtml(g, i, ref) {
   const detalji = g.broj > 1
     ? g.broj + ' detekcija' + (g.sateliti.length > 1 ? ' · ' + g.sateliti.length + ' sat.' : '')
     : (g.sateliti[0] || '1 detekcija');
-  // Blizina vlastite vlake se ističe žuto kad je ispod 2 km — to je trenutak
-  // kad požar prestaje biti "negdje tamo" i postaje stvar tvoje šume.
-  const v = g.vlaka;
-  const vBlizu = v && v.d < 2000;
-  const vlakaTxt = v
-    ? `<div style="font-size:10px;color:${vBlizu ? '#fbbf24' : '#64748b'};${vBlizu ? 'font-weight:600;' : ''}">
-         🪵 ${_escHtml(v.nm)} — ${fmtL(v.d)}${v.projekat ? ' <span style="color:#475569;">(' + _escHtml(v.projekat) + ')</span>' : ''}
-       </div>` : '';
   return `<div onclick="_poziZoom(${i})" style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #1e293b;cursor:pointer;">
     <span style="width:9px;height:9px;border-radius:50%;background:${pz.boja};flex-shrink:0;"></span>
     <span style="flex:1;min-width:0;">
       <span style="font-size:12px;color:#e2e8f0;">${fmtL(g.d)} <span style="color:#64748b;">${smjer}</span></span>
       ${g.nov ? ' <span style="color:#fbbf24;font-size:10px;font-weight:700;">🆕 NOVO</span>' : ''}
       <div style="font-size:10px;color:#64748b;">${detalji} · ${_poziStarost(g.zadnji)}</div>
-      ${vlakaTxt}
     </span>
     <span style="font-size:10px;color:#64748b;text-align:right;">${pz.txt}</span>
   </div>`;
