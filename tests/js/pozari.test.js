@@ -50,8 +50,15 @@ const api = new Function('_POZ_RADIUS_KM',
   SRC + '\nreturn { _poziParseCsv, _poziPouzdanost, _poziFilterBlizu, _poziBrojRijec, _poziSatelit, _poziStarost };')(150);
 
 let pass = 0, fail = 0;
+// Sinhroni test. Ako fn vrati Promise, prebaci ga u red za asinhrone (inače bi
+// odbijeno obećanje tiho "prošlo" — test bez zuba je gori od nikakvog testa).
+const _async = [];
 function t(name, fn) {
-  try { fn(); pass++; console.log('  ✔ ' + name); }
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') { _async.push({ name, p: r }); return; }
+    pass++; console.log('  ✔ ' + name);
+  }
   catch (e) { fail++; console.log('  ✘ ' + name + '\n      ' + e.message); }
 }
 
@@ -89,6 +96,7 @@ const SRC2 = [
   extractFn('_poziBrojRijecNovih'),
   extractFn('_poziVjetarPrijeti'),
   extractFn('_poziGreskaTxt'),
+  extractFn('_nativeNetDostupan'),   // _poziSavjet pita je li APK ili browser
   extractFn('_poziSavjet'),
 ].join('\n');
 
@@ -243,6 +251,67 @@ t('"N novih" — 1 novi, 2-4 nova, 5+ novih (bug: prije je pisalo "1 novih")', (
   assert.strictEqual(api2._poziBrojRijecNovih(5), '5 novih');
 });
 
+console.log('Native most (APK) — jedini put oko CORS-a:');
+
+// Terenski dokaz: dobra veza (215 KB/s), okvir 24h, unesen MAP_KEY → svih pet
+// izvora "odbijeno odmah". CORS je pravilo browsera; u APK-u zahtjev ide kroz
+// Java sloj koji ga nema. Ovdje se testira JS polovina tog mosta.
+const SRC3 = [
+  extractFn('_nativeNetDostupan'),
+  extractFn('_nativeNetOdgovor'),
+  extractFn('_nativeNetFetch'),
+].join('\n');
+
+function makeNet(androidNet) {
+  const sandbox = {
+    AndroidNet: androidNet,
+    atob: (b64) => Buffer.from(b64, 'base64').toString('binary'),
+    TextDecoder,
+    setTimeout, clearTimeout,
+    _NET_ceka: {}, _netSeq: 0,
+  };
+  const keys = Object.keys(sandbox);
+  return new Function(...keys,
+    'let _netSeq2=0;' + SRC3 + '\nreturn { _nativeNetDostupan, _nativeNetOdgovor, _nativeNetFetch, _NET_ceka };'
+  )(...keys.map(k => sandbox[k]));
+}
+
+t('bez AndroidNet objekta most se ne koristi (webapp put ostaje netaknut)', () => {
+  assert.strictEqual(makeNet(undefined)._nativeNetDostupan(), false);
+  assert.strictEqual(makeNet({})._nativeNetDostupan(), false, 'objekat bez fetchText ne valja');
+  assert.strictEqual(makeNet({ fetchText(){} })._nativeNetDostupan(), true);
+});
+
+t('Base64 tijelo se dekodira u ISPRAVAN UTF-8 (dijakritika u CSV-u)', async () => {
+  let zadnji = null;
+  const api3 = makeNet({ fetchText(id) { zadnji = id; } });
+  const p = api3._nativeNetFetch('https://firms.modaps.eosdis.nasa.gov/x', 1000);
+  const csv = 'latitude,longitude,naziv\n44.9,16.2,Bosanska Krupa — šuma';
+  api3._nativeNetOdgovor(zadnji, 200, Buffer.from(csv, 'utf8').toString('base64'), null);
+  const r = await p;
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.text, csv, 'dijakritika mora preživjeti prenos');
+});
+
+t('greška sa native strane odbija obećanje, ne visi', async () => {
+  let zadnji = null;
+  const api3 = makeNet({ fetchText(id) { zadnji = id; } });
+  const p = api3._nativeNetFetch('https://firms.modaps.eosdis.nasa.gov/x', 1000);
+  api3._nativeNetOdgovor(zadnji, 0, '', 'UnknownHostException: nema DNS-a');
+  await assert.rejects(p, /UnknownHostException/);
+});
+
+t('ako native strana NIKAD ne odgovori, obećanje ipak istekne (ne visi zauvijek)', async () => {
+  const api3 = makeNet({ fetchText() { /* namjerno tišina */ } });
+  const p = api3._nativeNetFetch('https://firms.modaps.eosdis.nasa.gov/x', 20);
+  await assert.rejects(p, e => e.name === 'TimeoutError');
+});
+
+t('odgovor za nepoznat/već obrađen id se ignoriše (nema duplog resolve-a)', () => {
+  const api3 = makeNet({ fetchText() {} });
+  api3._nativeNetOdgovor('nepostojeci', 200, '', null);   // ne smije baciti
+});
+
 console.log('Razlikovanje kvarova (sa terena: 1× "odbijeno odmah" + 4× "veza visi"):');
 
 t('TypeError = odbijeno odmah, TimeoutError = veza visi — NE ista poruka', () => {
@@ -275,11 +344,14 @@ t('sve isteklo → savjetuje 24h okvir, VPN i MAP_KEY (ne tvrdi da je CORS)', ()
   assert.ok(!/CORS blokada nego/.test(s) || /nije CORS/.test(s), 'ne smije tvrditi da je CORS');
 });
 
-t('sve odbijeno odmah → objašnjava CORS/nema mreže, ne spominje sporu vezu kao uzrok', () => {
-  const api2 = makeApi2(makeStore());
+t('sve odbijeno odmah u BROWSERU → kaže da je CORS i da APK radi, i NE obećava MAP_KEY', () => {
+  const api2 = makeApi2(makeStore());   // bez AndroidNet → web verzija
   const s = api2._poziSavjet('VIIRS: odbijeno odmah (CORS ili nema mreže)');
   assert.match(s, /CORS/);
-  assert.match(s, /MAP_KEY/);
+  assert.match(s, /APK/);
+  // Terenski dokaz: sa unesenim MAP_KEY-em API ruta je odbijena JEDNAKO kao
+  // arhiva, pa savjet "unesi ključ" ovdje ne smije stajati — bio bi laž.
+  assert.ok(!/MAP_KEY/.test(s), 'ne smije nuditi ključ kao rješenje CORS-a u browseru');
 });
 
 t('miješano → savjet pokriva oboje', () => {
@@ -428,5 +500,11 @@ t('starost podatka: "upravo" za svjež, sati/dani za stariji', () => {
   assert.ok(/dana$/.test(api._poziStarost(now - 4 * 86400000)));
 });
 
-console.log('\n' + pass + ' prošlo, ' + fail + ' palo');
-process.exit(fail ? 1 : 0);
+(async () => {
+  for (const a of _async) {
+    try { await a.p; pass++; console.log('  ✔ ' + a.name); }
+    catch (e) { fail++; console.log('  ✘ ' + a.name + '\n      ' + e.message); }
+  }
+  console.log('\n' + pass + ' prošlo, ' + fail + ' palo');
+  process.exit(fail ? 1 : 0);
+})();

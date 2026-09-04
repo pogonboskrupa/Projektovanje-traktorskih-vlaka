@@ -4804,7 +4804,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.104.1';
+const APP_VER = 'v3.105.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12259,6 +12259,16 @@ function _poziSavjet(greska) {
   const g = String(greska || '');
   const visi = /veza visi/.test(g);
   const odbijeno = /odbijeno odmah/.test(g);
+  // U browseru je "odbijeno odmah" na SVIM izvorima praktično sigurno CORS —
+  // a to se iz web verzije ne može zaobići. APK ima native most koji nema CORS.
+  if (odbijeno && !visi && !_nativeNetDostupan()) {
+    return 'Svi izvori su odbijeni ODMAH, a ovo je web verzija (browser). NASA FIRMS ne šalje CORS '
+      + 'zaglavlja koja browser traži, pa ih JavaScript ne smije pročitati bez obzira na to što '
+      + 'internet radi — to nije kvar aplikacije i ne može se popraviti iz web verzije.\n\n'
+      + 'U APK-u (instalirana aplikacija) isti zahtjev ide kroz native sloj koji nema CORS '
+      + 'ograničenje — tamo detekcije rade. Ako si offline, poruka je ista jer browser ta dva '
+      + 'slučaja namjerno ne razlikuje.';
+  }
   if (visi && !odbijeno) {
     return 'Svi zahtjevi su OTIŠLI ali se ništa nije vratilo na vrijeme — to nije CORS blokada nego spora '
       + 'ili zagušena veza. Šta pomaže, redom:\n'
@@ -12276,7 +12286,67 @@ function _poziSavjet(greska) {
     + 'okvir "24 sata", isključi VPN ako ga koristiš, i unesi besplatni MAP_KEY niže (povlači samo tvoju okolinu).';
 }
 
+// ── Native HTTP most (APK) — jedini način da se zaobiđe CORS ───────────────
+// FIRMS ne šalje CORS zaglavlja ni za arhivske CSV izvoze ni za Area API sa
+// MAP_KEY-em: terenski test sa dobrom vezom (215 KB/s), okvirom 24h i unesenim
+// ključem dao je "odbijeno odmah" na svih pet izvora. CORS je pravilo BROWSERA
+// — iz JS-a se ne može zaobići ni jednim trikom. Ali u APK-u zahtjev može
+// otići kroz native Java sloj (MainActivity.NetBridge), koji CORS uopšte nema.
+// U običnom browseru (webapp na GitHub Pages) `AndroidNet` ne postoji pa se
+// tiho koristi stari fetch() put — tamo blokada ostaje dok je NASA ne ukloni.
+const _NET_ceka = {};
+let _netSeq = 0;
+
+function _nativeNetDostupan() {
+  return typeof AndroidNet !== 'undefined' && AndroidNet && typeof AndroidNet.fetchText === 'function';
+}
+
+// Java zove ovo kad zahtjev završi. Tijelo stiže kao Base64 da se CSV (navodnici,
+// prelomi reda, dijakritika) ne pokvari pri ubacivanju u JS.
+function _nativeNetOdgovor(id, status, b64, greska) {
+  const p = _NET_ceka[id];
+  if (!p) return;
+  delete _NET_ceka[id];
+  clearTimeout(p.t);
+  if (greska) { const e = new Error(greska); e.name = 'NativeError'; p.reject(e); return; }
+  let txt = '';
+  try {
+    const bin = atob(b64 || '');
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    txt = new TextDecoder('utf-8').decode(bytes);
+  } catch(e) { p.reject(e); return; }
+  p.resolve({ status, text: txt });
+}
+
+function _nativeNetFetch(url, ms) {
+  return new Promise((resolve, reject) => {
+    const id = 'n' + (++_netSeq);
+    // Sigurnosna mreža: ako native strana iz bilo kojeg razloga nikad ne
+    // odgovori, obećanje ne smije visjeti zauvijek (isti razlog kao _fetchT).
+    const t = setTimeout(() => {
+      delete _NET_ceka[id];
+      const e = new Error('native timeout'); e.name = 'TimeoutError'; reject(e);
+    }, (ms || 20000) + 5000);
+    _NET_ceka[id] = { resolve, reject, t };
+    try { AndroidNet.fetchText(id, url, ms || 20000); }
+    catch(e) { clearTimeout(t); delete _NET_ceka[id]; reject(e); }
+  });
+}
+
 async function _poziDohvatiJedan(naziv, url, ms) {
+  // U APK-u prvo native put (nema CORS); u browseru ga nema pa ide fetch().
+  if (_nativeNetDostupan()) {
+    try {
+      const r = await _nativeNetFetch(url, ms || 20000);
+      if (r.status && r.status >= 400) return { ok:false, naziv, greska:'HTTP ' + r.status };
+      const pts = _poziParseCsv(r.text);
+      if (!pts.length && !/latitude/i.test(r.text)) return { ok:false, naziv, greska:'neočekivan odgovor' };
+      return { ok:true, naziv, pts, native:true };
+    } catch(e) {
+      return { ok:false, naziv, greska: _poziGreskaTxt(e) };
+    }
+  }
   try {
     const r = await _fetchT(url, ms || 15000, { mode:'cors' });
     if (!r.ok) return { ok:false, naziv, greska:'HTTP ' + r.status };
@@ -12645,16 +12715,14 @@ async function _poziProvjeriIzvore() {
   const izvori = _POZ_IZVORI.map(izv => ({ naziv:izv.naziv, url:_poziUrl(izv, okvir) }));
   const kljuc = _poziMapKey();
   if (kljuc) izvori.push({ naziv:'FIRMS API (MAP_KEY)', url:_poziApiUrl(kljuc, okvir, ref) });
+  // Kojim putem zahtjev uopšte ide — to je prva stvar koju treba vidjeti sa
+  // terena, jer objašnjava razliku između APK-a (native, bez CORS-a) i weba.
+  const put = _nativeNetDostupan() ? 'aplikacija (native, bez CORS-a)' : 'browser (fetch, CORS pravila važe)';
+  red.push('🔌 Način pristupa: ' + put);
   for (const izv of izvori) {
     const t0 = Date.now();
-    try {
-      const r = await _fetchT(izv.url, 30000, { mode:'cors' });
-      const txt = r.ok ? await r.text() : '';
-      const n = r.ok ? _poziParseCsv(txt).length : 0;
-      red.push(`${r.ok ? '✅' : '❌'} ${izv.naziv}\n   HTTP ${r.status} · ${n} detekcija · ${Date.now()-t0} ms`);
-    } catch(e) {
-      red.push(`❌ ${izv.naziv}\n   ${_poziGreskaTxt(e)} · ${Date.now()-t0} ms`);
-    }
+    const r = await _poziDohvatiJedan(izv.naziv, izv.url, 30000);
+    red.push(`${r.ok ? '✅' : '❌'} ${izv.naziv}\n   ${r.ok ? (r.pts.length + ' detekcija (Evropa/bbox)') : r.greska} · ${Date.now()-t0} ms`);
   }
   // EFFIS rasteri (opasnost + opožarene površine) — probaj jednu pločicu
   for (const [k, naziv] of [['fwi','EFFIS indeks opasnosti'], ['opozareno','EFFIS opožarene površine']]) {

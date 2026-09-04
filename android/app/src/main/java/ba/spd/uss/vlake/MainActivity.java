@@ -40,11 +40,15 @@ import android.content.Context;
 import android.content.IntentFilter;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 public class MainActivity extends Activity {
 
@@ -171,6 +175,7 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new DownloadBridge(), "AndroidDownload");
         webView.addJavascriptInterface(new GpsBridge(), "AndroidGps");
         webView.addJavascriptInterface(new ShareBridge(), "AndroidShare");
+        webView.addJavascriptInterface(new NetBridge(), "AndroidNet");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -370,6 +375,104 @@ public class MainActivity extends Activity {
             if (filename.endsWith(".csv")) return "text/csv";
             if (filename.endsWith(".txt")) return "text/plain";
             return "application/octet-stream";
+        }
+    }
+
+    // ── Native HTTP most (zaobilazi CORS) ──────────────────────────────────
+    // Zašto postoji: NASA FIRMS (detekcije požara) ne šalje CORS zaglavlja —
+    // ni arhivski CSV izvozi (/data/...), ni Area API sa MAP_KEY-em (/api/...).
+    // Terenski test sa dobrom vezom (215 KB/s), najmanjim okvirom (24h) i
+    // unesenim ključem dao je "odbijeno odmah" na SVIH pet izvora. CORS je
+    // pravilo BROWSERA i iz JavaScripta se ne može zaobići — ali native Java
+    // HTTP poziv ga uopšte nema. Zato JS strana (_poziDohvatiJedan) prvo
+    // proba ovaj most, pa tek onda fetch() (koji ostaje za webapp u browseru).
+    //
+    // NAMJERNO NIJE opšti proxy: samo https i samo NASA FIRMS host. Bez tog
+    // ograničenja bi bilo koji JS na stranici — uključujući nešto ubačeno kroz
+    // uvezeni KML/GeoJSON sadržaj — mogao preko native sloja dohvatiti bilo
+    // šta, zaobilazeći sve zaštite koje browser inače nameće.
+    class NetBridge {
+        private static final int MAX_BYTES = 12 * 1024 * 1024;   // evropski 7d CSV zna biti krupan
+
+        private boolean dozvoljenHost(String host) {
+            if (host == null) return false;
+            // Locale.ROOT namjerno: na turskom locale-u "I".toLowerCase() daje "ı",
+            // pa bi poređenje hosta tiho palo i most bi bio mrtav bez ikakve poruke.
+            String h = host.toLowerCase(java.util.Locale.ROOT);
+            return h.equals("firms.modaps.eosdis.nasa.gov") || h.endsWith(".modaps.eosdis.nasa.gov");
+        }
+
+        @JavascriptInterface
+        public void fetchText(final String id, final String url, final int timeoutMs) {
+            new Thread(() -> {
+                int status = 0;
+                String b64 = "";
+                String greska = null;
+                HttpURLConnection c = null;
+                try {
+                    URL u = new URL(url);
+                    if (!"https".equalsIgnoreCase(u.getProtocol()) || !dozvoljenHost(u.getHost())) {
+                        greska = "nedozvoljena adresa";
+                    } else {
+                        int t = timeoutMs > 0 ? timeoutMs : 20000;
+                        c = (HttpURLConnection) u.openConnection();
+                        c.setConnectTimeout(t);
+                        c.setReadTimeout(t);
+                        c.setInstanceFollowRedirects(true);
+                        c.setRequestProperty("User-Agent", "DendroMap-Android");
+                        c.setRequestProperty("Accept", "text/csv,text/plain,*/*");
+                        status = c.getResponseCode();
+                        InputStream is = (status >= 400) ? c.getErrorStream() : c.getInputStream();
+                        if (is != null) {
+                            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                            byte[] buf = new byte[16384];
+                            int n, ukupno = 0;
+                            while ((n = is.read(buf)) > 0) {
+                                ukupno += n;
+                                if (ukupno > MAX_BYTES) { greska = "odgovor prevelik"; break; }
+                                bos.write(buf, 0, n);
+                            }
+                            is.close();
+                            if (greska == null) b64 = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+                        }
+                    }
+                } catch (Exception e) {
+                    // Java baca konkretne izuzetke (SocketTimeoutException,
+                    // UnknownHostException...) — za razliku od fetch() koji sve
+                    // svede na jednu genericnu gresku. Proslijedi ime klase da
+                    // JS strana moze reci sta se STVARNO desilo.
+                    greska = e.getClass().getSimpleName();
+                    if (e.getMessage() != null) greska += ": " + e.getMessage();
+                } finally {
+                    if (c != null) c.disconnect();
+                }
+                final int fStatus = status;
+                final String fB64 = b64;
+                final String fGreska = greska;
+                runOnUiThread(() -> {
+                    if (webView == null) return;
+                    StringBuilder js = new StringBuilder("if(typeof _nativeNetOdgovor==='function')_nativeNetOdgovor(");
+                    js.append(jsStr(id)).append(',').append(fStatus).append(',')
+                      .append(jsStr(fB64)).append(',').append(fGreska == null ? "null" : jsStr(fGreska)).append(')');
+                    webView.evaluateJavascript(js.toString(), null);
+                });
+            }).start();
+        }
+
+        // Base64 i imena izuzetaka su bezbjedni znakovi, ali navodnik/backslash
+        // iz poruke izuzetka bi razbio ubaceni JS — zato se svaki string escape-uje.
+        private String jsStr(String s) {
+            if (s == null) return "null";
+            StringBuilder b = new StringBuilder("\"");
+            for (int i = 0; i < s.length(); i++) {
+                char ch = s.charAt(i);
+                if (ch == '"' || ch == '\\') b.append('\\').append(ch);
+                else if (ch == '\n') b.append("\\n");
+                else if (ch == '\r') b.append("\\r");
+                else if (ch < 0x20 || ch > 0x7e) b.append(String.format("\\u%04x", (int) ch));
+                else b.append(ch);
+            }
+            return b.append('"').toString();
         }
     }
 

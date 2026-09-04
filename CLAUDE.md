@@ -156,6 +156,37 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   - `_poziSavjet` bira savjet prema tipu kvara (sve isteklo → skrati okvir na
     24h, isključi VPN, unesi MAP_KEY; sve odbijeno → CORS/nema mreže objašnjenje),
     umjesto da uvijek ispisuje isti tekst o CORS-u.
+- **Native HTTP most `AndroidNet` — CORS se NE može zaobići iz JS-a** (v3.105.0):
+  treći terenski test je bio presudan — dobra veza (215 KB/s), najmanji okvir
+  (24h), unesen MAP_KEY, i **svih pet izvora "odbijeno odmah"**, uključujući
+  `/api/` rutu. Time je potvrđeno: FIRMS ne šalje CORS zaglavlja ni za arhivu
+  ni za Area API, a CORS je pravilo BROWSERA koje JavaScript ne može zaobići
+  nikakvim trikom (proxy servisi su tuđi serveri — nepouzdani i nisu rješenje
+  za alat na koji se oslanja neko na terenu).
+  - **U APK-u rješenje postoji**: native Java HTTP poziv nema CORS. Dodan je
+    `MainActivity.NetBridge` (`webView.addJavascriptInterface(..., "AndroidNet")`,
+    isti obrazac kao `AndroidGps`/`AndroidShare`). JS strana:
+    `_nativeNetDostupan`/`_nativeNetFetch`/`_nativeNetOdgovor`, a
+    `_poziDohvatiJedan` prvo proba most pa tek onda `fetch()`.
+  - **Most NIJE opšti proxy** — samo `https` i samo `*.modaps.eosdis.nasa.gov`.
+    Bez tog ograničenja bi bilo koji JS na stranici (uključujući nešto ubačeno
+    kroz uvezeni KML/GeoJSON) mogao preko native sloja dohvatiti bilo šta,
+    zaobilazeći sve zaštite koje browser inače nameće. Novi izvor koji treba
+    most = novi unos u `dozvoljenHost`, svjesno i namjerno.
+  - Tijelo se prenosi kao **Base64** (`Base64.NO_WRAP` → `atob` + `TextDecoder`)
+    jer bi CSV sa navodnicima/prelomima reda/dijakritikom razbio ubacivanje u
+    JS; svaki string koji ide u `evaluateJavascript` se escape-uje (`jsStr`).
+  - **U web verziji (GitHub Pages) blokada OSTAJE** — tamo `AndroidNet` ne
+    postoji pa se koristi stari `fetch()` put. `_poziSavjet` to sad i kaže
+    otvoreno umjesto da nudi MAP_KEY kao rješenje (terenski test je dokazao
+    da ključ ne pomaže protiv CORS-a). "Provjeri izvore" u prvom redu ispiše
+    **način pristupa** (native vs browser) — bez toga se ne može znati koji
+    je put uopšte testiran.
+  - **Traži pun rebuild u Android Studiju** (mijenjan je `.java`) — sam
+    `copy-assets` NE prenosi Javu, vidi pravilo o APK buildu gore.
+  - Test: `tests/js/pozari.test.js` (JS polovina mosta — Base64/UTF-8,
+    odbijanje, istek kad native strana zanijemi). Java se iz sandboxa ne može
+    kompajlirati (nema Android SDK-a), pa je provjerena strukturno.
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/
