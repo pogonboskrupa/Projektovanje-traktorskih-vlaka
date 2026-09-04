@@ -653,6 +653,90 @@ t('_sjeBrojRijec: 1 alarm / 2+ alarma', () => {
   assert.strictEqual(api5._sjeBrojRijec(7), '7 alarma');
 });
 
+console.log('Upozorenje na nov požar — native most oko WebView Notification zamke:');
+
+// Zašto ovo postoji: korisnik je na STVARNOM telefonu dobio "Ovaj uređaj ne
+// podržava obavještenja" pri uključivanju prekidača. Uzrok: Android WebView na
+// mnogim OEM verzijama uopšte nema window.Notification ('Notification' in
+// window je false), iako sistem sasvim normalno prikazuje prave Android
+// notifikacije (dokazano kod GPS snimanja — vidi GpsService, koji ide preko
+// native NotificationManager-a). AndroidNotif most (MainActivity.AppNotifBridge)
+// zaobilazi to potpuno, isto kao AndroidNet zaobilazi CORS.
+const SRC6 = [
+  extractFn('_poziNotifNativnoDostupan'),
+  extractFn('_poziEvtKljuc'),
+].join('\n');
+
+function makeNotifDetekcija(androidNotif) {
+  const sandbox = { AndroidNotif: androidNotif };
+  const keys = Object.keys(sandbox);
+  return new Function(...keys, SRC6 + '\nreturn { _poziNotifNativnoDostupan };')(...keys.map(k => sandbox[k]));
+}
+
+t('_poziNotifNativnoDostupan: false bez AndroidNet-olikog objekta (web/browser)', () => {
+  assert.strictEqual(makeNotifDetekcija(undefined)._poziNotifNativnoDostupan(), false);
+  assert.strictEqual(makeNotifDetekcija({})._poziNotifNativnoDostupan(), false, 'objekat bez show() ne valja');
+});
+
+t('_poziNotifNativnoDostupan: true kad AndroidNotif.show postoji (APK)', () => {
+  assert.strictEqual(makeNotifDetekcija({ show(){} })._poziNotifNativnoDostupan(), true);
+});
+
+// Puna provjera _poziNotifProvjeri: u APK-u MORA zvati AndroidNotif.show, NE
+// smije ni pipnuti window.Notification/service worker (koji su tamo ionako
+// slomljeni po nalazu s terena).
+const SRC7 = [
+  SRC_DST,
+  extractFn('_bearing'),
+  extractFn('_azimutSmjer'),
+  extractFn('fmtL'),
+  extractFn('_poziPouzdanost'),
+  extractFn('_poziBrojRijecPozar'),
+  extractFn('_poziEvtKljuc'),
+  extractFn('_poziNotifNativnoDostupan'),
+  extractFn('_poziNotifOn'),
+  extractFn('_poziNotifKm'),
+  extractFn('_poziNotifProvjeri'),
+].join('\n');
+
+function makeNotifProvjeri({ androidNotif, notifOn, km, evts, ref, store }) {
+  let posljednji = null;
+  const swPostMessage = () => { throw new Error('SW put NE SMIJE se zvati kad je native dostupan'); };
+  const sandbox = {
+    localStorage: store || { getItem:()=>null, setItem(){}, removeItem(){} },
+    _POZ_NOTIF_KEY: 'on', _POZ_NOTIF_KM: 'km', _POZ_NOTIF_SEEN: 'seen',
+    AndroidNotif: androidNotif ? { show: (naslov, tijelo) => { posljednji = { naslov, tijelo }; } } : undefined,
+    Notification: { permission: 'granted' },   // namjerno "ispravan" web fallback — native ipak mora pobijediti
+    navigator: { serviceWorker: { controller: { postMessage: swPostMessage } } },
+    _poziEvts: evts, _poziRefTacka: () => ref,
+  };
+  sandbox.localStorage.getItem = (k) => k === 'on' ? (notifOn ? '1' : '0') : (k === 'km' ? String(km||25) : null);
+  const keys = Object.keys(sandbox);
+  const api = new Function(...keys, SRC7 + '\nreturn { _poziNotifProvjeri };')(...keys.map(k => sandbox[k]));
+  api._poziNotifProvjeri();
+  return posljednji;
+}
+
+t('u APK-u (AndroidNotif prisutan) upozorenje ide preko native mosta, ne preko SW-a', () => {
+  const evts = [{ la:44.91, lo:16.20, d:5000, conf:'h', zadnji:Date.now() }];
+  const r = makeNotifProvjeri({ androidNotif:true, notifOn:true, km:50, evts, ref:{ la:44.88, lo:16.15, gps:true } });
+  assert.ok(r, 'AndroidNotif.show mora biti pozvan');
+  assert.match(r.naslov, /Nov požar/);
+  assert.match(r.tijelo, /5\.00 km|5 km/);
+});
+
+t('požar dalji od praga ne javlja ništa', () => {
+  const evts = [{ la:45.50, lo:16.90, d:90000, conf:'h', zadnji:Date.now() }]; // 90 km > prag 50 km
+  const r = makeNotifProvjeri({ androidNotif:true, notifOn:true, km:50, evts, ref:{ la:44.88, lo:16.15, gps:true } });
+  assert.strictEqual(r, null);
+});
+
+t('isključen prekidač → ništa se ne javlja čak i kad ima blizak požar', () => {
+  const evts = [{ la:44.91, lo:16.20, d:5000, conf:'h', zadnji:Date.now() }];
+  const r = makeNotifProvjeri({ androidNotif:true, notifOn:false, km:50, evts, ref:{ la:44.88, lo:16.15, gps:true } });
+  assert.strictEqual(r, null);
+});
+
 console.log('_poziSazetak — upozorenje kad udaljenost NIJE od stvarne GPS pozicije:');
 
 // Zašto ovo postoji: prije ove izmjene je udaljenost do požara tiho padala na

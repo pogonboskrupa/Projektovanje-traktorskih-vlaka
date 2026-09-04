@@ -342,6 +342,31 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
+- **Android WebView nema `window.Notification`** (v3.107.1): korisnik je na
+  STVARNOM telefonu, pri uključivanju "Javi mi kad se pojavi nov požar", dobio
+  "Ovaj uređaj ne podržava obavještenja". Uzrok: `'Notification' in window`
+  je `false` na mnogim OEM WebView verzijama — JS Notifications API (`new
+  Notification(...)`) tu jednostavno nije implementiran, ISTA zamka koja je
+  već davno riješena za GPS snimanje (`GpsService` u Javi koristi
+  `NotificationManager` direktno, ne ide kroz `window.Notification`). Rasterski
+  reflex "znači notifikacije ne rade u WebView-u" bio bi pogrešan — Android
+  sasvim normalno prikazuje prave notifikacije, samo ne kroz TAJ JS API.
+  Rješenje je isti obrazac kao `AndroidGps`/`AndroidNet`: nova native klasa
+  `MainActivity.AppNotifBridge` (`webView.addJavascriptInterface(...,
+  "AndroidNotif")`) sa `NotificationManagerCompat` + vlastitim kanalom
+  (`IMPORTANCE_HIGH`, za razliku od GPS-ovog `IMPORTANCE_LOW` — upozorenje na
+  požar MORA upasti u oči, GPS snimanje je namjerno tiho). JS strana
+  (`_poziNotifNativnoDostupan`/`_poziNotifToggle`/`_poziNotifProvjeri`) prvo
+  proba `AndroidNotif.show(naslov, tijelo)`, i SAMO ako mosta nema (webapp na
+  GitHub Pages) pada na stari `window.Notification` put. `POST_NOTIFICATIONS`
+  dozvola se već traži pri prvom pokretanju app-a (`requestPermissions()`),
+  pa native put ne mora ništa dodatno pitati. **Traži pun rebuild u Android
+  Studiju** (mijenjan `.java`). Test: `tests/js/pozari.test.js` (mock
+  `AndroidNotif`, provjera da web `Notification`/service worker put NIJE
+  dotaknut kad je native dostupan — SW poziv namjerno baca u testu ako se
+  ipak pozove).
+
+
 - **WebView JS dijalozi**: `MainActivity` ima override za `onJsAlert` i
   `onJsConfirm` (naslov = ime app-a). `onJsPrompt` NIJE override-ovan — za
   unos teksta koristi postojeći `_dlgPrompt`/`_dlgConfirm` (HTML dijalozi u

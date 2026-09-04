@@ -3,6 +3,10 @@ package ba.spd.uss.vlake;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -32,6 +36,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.app.NotificationCompat;
 import androidx.core.content.FileProvider;
 import androidx.webkit.WebViewAssetLoader;
 
@@ -176,6 +181,7 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new GpsBridge(), "AndroidGps");
         webView.addJavascriptInterface(new ShareBridge(), "AndroidShare");
         webView.addJavascriptInterface(new NetBridge(), "AndroidNet");
+        webView.addJavascriptInterface(new AppNotifBridge(), "AndroidNotif");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -375,6 +381,64 @@ public class MainActivity extends Activity {
             if (filename.endsWith(".csv")) return "text/csv";
             if (filename.endsWith(".txt")) return "text/plain";
             return "application/octet-stream";
+        }
+    }
+
+    // ── Native obavještenja (zaobilazi WebView Notification API) ────────────
+    // Zašto postoji: korisnik je na STVARNOM telefonu dobio "Ovaj uređaj ne
+    // podržava obavještenja" pri uključivanju upozorenja na nov požar. Uzrok:
+    // Android WebView na mnogim OEM verzijama uopšte NEMA implementiran
+    // window.Notification (JS Notifications API) — 'Notification' in window
+    // je false — iako sistem sasvim normalno prikazuje prave Android
+    // notifikacije. Ista zamka je već riješena za GPS snimanje (vidi
+    // GpsService — foreground servis koristi NotificationManager direktno,
+    // ne window.Notification), i sad se isto rješenje primjenjuje ovdje:
+    // obična (ne-foreground, ne-ongoing) native notifikacija preko
+    // NotificationManagerCompat, potpuno nezavisna od WebView Notification API-ja.
+    class AppNotifBridge {
+        private static final String CHANNEL_ID = "pozari_upozorenja";
+        private static final int NOTIF_ID_BASE = 5000;
+        private int seq = 0;
+
+        private void ensureChannel() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationManager nm = getSystemService(NotificationManager.class);
+                if (nm != null && nm.getNotificationChannel(CHANNEL_ID) == null) {
+                    NotificationChannel ch = new NotificationChannel(
+                            CHANNEL_ID, "Upozorenja na požar",
+                            NotificationManager.IMPORTANCE_HIGH);
+                    ch.setDescription("Nov požar u zadanom krugu od tvoje pozicije");
+                    nm.createNotificationChannel(ch);
+                }
+            }
+        }
+
+        @JavascriptInterface
+        public void show(String naslov, String tijelo) {
+            runOnUiThread(() -> {
+                ensureChannel();
+                Intent openApp = new Intent(MainActivity.this, MainActivity.class);
+                openApp.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                PendingIntent pending = PendingIntent.getActivity(MainActivity.this,
+                        1000 + (seq % 100), openApp,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                Notification n = new NotificationCompat.Builder(MainActivity.this, CHANNEL_ID)
+                        .setContentTitle(naslov)
+                        .setContentText(tijelo)
+                        .setStyle(new NotificationCompat.BigTextStyle().bigText(tijelo))
+                        .setSmallIcon(android.R.drawable.stat_sys_warning)
+                        .setContentIntent(pending)
+                        .setAutoCancel(true)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .build();
+                try {
+                    androidx.core.app.NotificationManagerCompat.from(MainActivity.this)
+                            .notify(NOTIF_ID_BASE + (seq++ % 20), n);
+                } catch (SecurityException e) {
+                    // POST_NOTIFICATIONS nije odobrena (Android 13+, korisnik odbio pri startu) —
+                    // tiho preskoči, JS stranu ionako ne čeka nikakav odgovor odavde.
+                }
+            });
         }
     }
 

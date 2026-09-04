@@ -4831,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.107.0';
+const APP_VER = 'v3.107.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -13042,6 +13042,17 @@ async function _poziProvjeriIzvore() {
 function _poziNotifOn()  { return localStorage.getItem(_POZ_NOTIF_KEY) === '1'; }
 function _poziNotifKm()  { const v = parseFloat(localStorage.getItem(_POZ_NOTIF_KM)); return isFinite(v) && v > 0 ? v : 25; }
 
+// Terenski dokaz: na stvarnom telefonu 'Notification' in window je FALSE —
+// Android WebView na mnogim OEM verzijama nema implementiran JS Notifications
+// API uopšte, iako sistem sasvim normalno prikazuje prave Android notifikacije
+// (dokazano već kod GPS snimanja, koje ide preko native NotificationManager-a,
+// ne preko window.Notification). Zato APK strana ima svoj most (AndroidNotif,
+// MainActivity.AppNotifBridge) koji ne zavisi od te web-only provjere —
+// dozvola (POST_NOTIFICATIONS) se traži pri prvom pokretanju app-a, ne ovdje.
+function _poziNotifNativnoDostupan() {
+  return typeof AndroidNotif !== 'undefined' && AndroidNotif && typeof AndroidNotif.show === 'function';
+}
+
 function _poziNotifToggle(on) {
   if (!on) {
     try { localStorage.setItem(_POZ_NOTIF_KEY, '0'); } catch(e) {}
@@ -13049,8 +13060,15 @@ function _poziNotifToggle(on) {
     _poziRenderPanel();
     return;
   }
+  if (_poziNotifNativnoDostupan()) {
+    try { localStorage.setItem(_POZ_NOTIF_KEY, '1'); } catch(e) {}
+    _poziNotifTimerStart();
+    showToast('🔔 Javiću ti kad se pojavi nov požar bliže od ' + _poziNotifKm() + ' km');
+    _poziRenderPanel();
+    return;
+  }
   if (!('Notification' in window)) {
-    showToast('⚠ Ovaj uređaj ne podržava obavještenja');
+    showToast('⚠ Ovaj uređaj/browser ne podržava web obavještenja (u APK-u bi trebalo raditi — provjeri da imaš najnoviju verziju)');
     _poziRenderPanel();
     return;
   }
@@ -13098,7 +13116,9 @@ function _poziNotifTimerStop() {
 // (a) bliži od praga i (b) za koje još nije javljeno — inače bi svako
 // osvježavanje ponovo zvonilo za isti požar.
 function _poziNotifProvjeri() {
-  if (!_poziNotifOn() || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!_poziNotifOn()) return;
+  const nativno = _poziNotifNativnoDostupan();
+  if (!nativno && (!('Notification' in window) || Notification.permission !== 'granted')) return;
   const prag = _poziNotifKm() * 1000;
   let javljeni = [];
   try { javljeni = JSON.parse(localStorage.getItem(_POZ_NOTIF_SEEN)) || []; } catch(e) {}
@@ -13112,8 +13132,12 @@ function _poziNotifProvjeri() {
   const tijelo = 'Najbliži ' + fmtL(naj.d) + ' ' + smjer
     + (ref.gps ? '' : ' (od centra karte — GPS nema fix)')
     + ' · ' + _poziPouzdanost(naj.conf).txt + ' pouzdanost';
-  const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
-  if (sw) sw.postMessage({ type:'show-pozar-notification', naslov, tijelo, la:naj.la, lo:naj.lo });
+  if (nativno) {
+    try { AndroidNotif.show(naslov, tijelo); } catch(e) {}
+  } else {
+    const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (sw) sw.postMessage({ type:'show-pozar-notification', naslov, tijelo, la:naj.la, lo:naj.lo });
+  }
   // Zapamti SVE trenutne (ne samo ove nove) — tako se skup ne gomila unedogled
   // i požar koji se ugasio pa ponovo planuo opet dobije upozorenje.
   try { localStorage.setItem(_POZ_NOTIF_SEEN, JSON.stringify(_poziEvts.map(g => _poziEvtKljuc(g)))); } catch(e) {}
