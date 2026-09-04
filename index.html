@@ -4831,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.108.0';
+const APP_VER = 'v3.108.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -13505,8 +13505,6 @@ function _sjeSadrzajHtml() {
       ${sadrzaj}
     </div>`;
 
-  const imaKljuc = !!_poziGfwKljuc();
-
   const okvirChips = `<div style="display:flex;gap:6px;margin:8px 0;">` +
     _SJE_OKVIRI.map(o => {
       const on = _sjeOkvir() === o.id;
@@ -13514,14 +13512,18 @@ function _sjeSadrzajHtml() {
         border:1px solid ${on ? '#d97706' : '#1e3a5f'};background:${on ? '#d9770633' : '#14233c'};color:${on ? '#fbbf24' : '#94a3b8'};">${o.naziv}</button>`;
     }).join('') + `</div>`;
 
-  // Lista alarma
+  // Prekidač je UVIJEK vidljiv (isti obrazac kao Požari) — nedostatak GFW
+  // ključa NIJE razlog da se sakrije cijeli alat, nego obična greška koju
+  // _sjeLoad već vraća kao _sjeMeta.greska='nema-kljuca'. Blokirajuća poruka
+  // koja je ranije stajala OVDJE (prije nego korisnik i pokuša) je uklonjena —
+  // sad korisnik uključi prekidač i ODMAH vidi tačno šta fali, sa akcijom.
   let lista;
-  if (!imaKljuc) {
-    lista = `<div style="font-size:12px;color:#94a3b8;line-height:1.6;padding:4px 0;">
-      Za ovaj sloj treba <b style="color:#e2e8f0;">besplatan Global Forest Watch ključ</b> — isti onaj iz podtaba
-      Požari. Unesi ga tamo (polje "GFW API ključ") pa se vrati ovdje.</div>`;
-  } else if (!_sjeOn) {
+  if (!_sjeOn) {
     lista = `<div style="font-size:12px;color:#64748b;padding:4px 0;">Uključi prikaz da dohvatiš alarme.</div>`;
+  } else if (m.greska === 'nema-kljuca') {
+    lista = `<div style="font-size:12px;color:#94a3b8;line-height:1.6;padding:4px 0;">
+      ⚠ Treba <b style="color:#e2e8f0;">besplatan Global Forest Watch ključ</b> — isti onaj iz podtaba
+      Požari. Unesi ga tamo (polje "GFW API ključ") pa se vrati ovdje i uključi prekidač ponovo.</div>`;
   } else if (m.greska) {
     lista = `<div style="font-size:12px;color:#f87171;line-height:1.5;padding:4px 0;">❌ ${_escHtml(m.greska)}</div>`;
   } else if (!_sjeEvts.length) {
@@ -13550,17 +13552,16 @@ function _sjeSadrzajHtml() {
       'Satelit poredi trenutno stanje vegetacije sa istorijskom normom i javi gdje je NESTALA — '
       + 'sječa, vjetroizvala, klizište ili opožarena površina. Piksel je 30 m, osvježava se svakih 2-4 dana, '
       + 'u krugu ' + _SJE_RADIUS_KM + ' km od tebe. NIJE dokaz bespravne sječe — traži izlazak na teren.',
-      (imaKljuc ? `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0;">
+      `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0;">
           <input type="checkbox" ${_sjeOn ? 'checked' : ''} onchange="_sjeToggle(this.checked)"
             style="width:18px;height:18px;accent-color:#d97706;cursor:pointer;flex-shrink:0;">
           <span style="font-size:13px;color:#cbd5e1;">Prikaži alarme na karti</span>
         </label>` + okvirChips
-        + `<div id="sje-status" style="font-size:11px;color:#94a3b8;margin:6px 0 8px;">${_escHtml(_sjeOn ? _sjeSazetak().kratko : '—')}</div>`
-        : '')
+      + `<div id="sje-status" style="font-size:11px;color:#94a3b8;margin:6px 0 8px;">${_escHtml(_sjeOn ? _sjeSazetak().kratko : '—')}</div>`
       + lista
-      + (imaKljuc ? `<div style="display:flex;gap:7px;margin-top:10px;">
+      + `<div style="display:flex;gap:7px;margin-top:10px;">
            <button onclick="_sjeLoad(false)" style="flex:1;padding:9px;background:#14233c;border:1px solid #1e3a5f;border-radius:9px;color:#fbbf24;font-size:12px;font-weight:600;cursor:pointer;"><svg class="ic"><use href="#ic-osvjezi"/></svg> Osvježi</button>
-         </div>` : ''))
+         </div>`)
 
     + kart('ℹ Šta ovaj sloj jeste, a šta nije',
       '',

@@ -653,6 +653,61 @@ t('_sjeBrojRijec: 1 alarm / 2+ alarma', () => {
   assert.strictEqual(api5._sjeBrojRijec(7), '7 alarma');
 });
 
+console.log('Prekidač sječe je UVIJEK vidljiv (bez ključa ne smije biti blokiran, samo greška):');
+
+// Zašto ovo postoji: korisnik je prijavio da blokirajuća poruka "treba GFW
+// ključ" stoji PRIJE nego korisnik i pokuša, sakrivajući prekidač potpuno.
+// _sjeLoad već vraća čitljivu grešku (_sjeMeta.greska='nema-kljuca') kad se
+// prekidač uključi bez ključa — dupli, blokirajući gate iznad njega je bio
+// suvišan i frustrirajući. Ovaj test čuva da se to ne vrati.
+const SRC10 = [
+  extractConst('_SJE_OKVIRI'),
+  extractFn('_sjeOkvir'),
+  extractFn('_sjeOkvirNaziv'),
+  extractFn('_sjePouzdanost'),
+  extractFn('_bearing'),
+  extractFn('_azimutSmjer'),
+  extractFn('fmtL'),
+  extractConst('_SJE_RADIUS_KM'),
+  extractFn('_sjeBrojRijec'),
+  extractFn('_sjeSazetak'),
+  extractFn('_poziStarost'),
+  extractFn('_sjeSadrzajHtml'),
+].join('\n');
+
+function makeSjeHtml({ on, meta, evts, store }) {
+  const sandbox = {
+    localStorage: store || { getItem:()=>null, setItem(){}, removeItem(){} },
+    _SJE_ON_KEY:'on', _SJE_OKVIR_KEY:'okvir',
+    _sjeOn: !!on, _sjeMeta: meta || null, _sjeEvts: evts || [],
+    _poziRefTacka: () => ({ la:44.88, lo:16.15, gps:true }),
+    _escHtml: (s) => s,
+  };
+  const keys = Object.keys(sandbox);
+  return new Function(...keys, SRC10 + '\nreturn _sjeSadrzajHtml();')(...keys.map(k => sandbox[k]));
+}
+
+t('prekidač je vidljiv i BEZ ključa (nema blokirajuće poruke prije uključivanja)', () => {
+  const html = makeSjeHtml({ on:false, meta:null, evts:[] });
+  assert.match(html, /onchange="_sjeToggle/, 'checkbox mora postojati');
+  assert.ok(!/Za ovaj sloj treba/.test(html), 'stara blokirajuća poruka ne smije se vratiti');
+});
+
+t('uključen prekidač BEZ ključa → čitljiva poruka sa akcijom, ne sirov "nema-kljuca"', () => {
+  const html = makeSjeHtml({ on:true, meta:{ greska:'nema-kljuca' }, evts:[] });
+  assert.match(html, /onchange="_sjeToggle/, 'checkbox i dalje vidljiv');
+  assert.match(html, /Global Forest Watch ključ/);
+  assert.ok(!/>nema-kljuca</.test(html), 'sirovi interni kod greške ne smije procuriti u UI');
+});
+
+t('uključen prekidač SA ključem i podacima → normalna lista, ne poruka o ključu', () => {
+  const html = makeSjeHtml({ on:true, meta:{ okvir:'30d' }, evts:[
+    { la:44.91, lo:16.20, d:5000, conf:'highest', broj:1, zadnji:Date.now(), nov:false }
+  ]});
+  assert.ok(!/Global Forest Watch ključ/.test(html));
+  assert.match(html, /5\.00 km|5 km/);
+});
+
 console.log('Upozorenje na nov požar — native most oko WebView Notification zamke:');
 
 // Zašto ovo postoji: korisnik je na STVARNOM telefonu dobio "Ovaj uređaj ne

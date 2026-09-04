@@ -307,6 +307,18 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   redoslijed traka da uhvati baš tu zamku. Svaka traka prikazuje do
   `_POZ_PO_TRACI`=6 požara pa "…i još N", a brojka u zaglavlju ("Preko 40 km
   (12)") uvijek broji SVE u toj traci, ne samo prikazane.
+- **Blokirajuća poruka PRIJE pokušaja je gora od greške POSLIJE pokušaja**
+  (v3.108.1): podtab Sječa je pri uvođenju (v3.107.0) sakrivao CIJELI prekidač
+  i sadržaj iza teksta "za ovaj sloj treba GFW ključ" ako ključ nije unesen —
+  korisnik ne bi mogao ni pokušati dok ne ode do drugog podtaba. `_sjeLoad` je
+  već imao ISPRAVNO ponašanje (`_sjeMeta.greska='nema-kljuca'` kad se prekidač
+  uključi bez ključa) — blokada iznad njega je bila suvišan DRUGI gate koji je
+  samo dodavao trenje. Uklonjen: prekidač je sad UVIJEK vidljiv (isti obrazac
+  kao Požari), a nedostatak ključa se prikazuje kao obična, čitljiva greška
+  TEK kad korisnik stvarno pokuša — sa uputstvom šta uraditi, ne sirovim
+  internim kodom `'nema-kljuca'` (taj sentinel se prevodi u `_sjeSadrzajHtml`,
+  ne procuri u UI). Isti princip kao Požari-jev `_poziProvjeriIzvore`: pusti
+  korisnika da proba, objasni šta je pošlo po zlu tek ako pođe.
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/
