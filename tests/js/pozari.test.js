@@ -55,6 +55,214 @@ function t(name, fn) {
   catch (e) { fail++; console.log('  ✘ ' + name + '\n      ' + e.message); }
 }
 
+// ── v3.104.0: grupisanje u požare, MAP_KEY Area API, vjetar-prijeti-mi ──────
+// Zašto ovo postoji: korisnik je sa STVARNOG telefona prijavio da su sva 4
+// FIRMS arhivska CSV izvora "blokiran (CORS/mreža)" — fetch() iz browsera ne
+// razlikuje CORS blok od mrtve mreže (isto baca generičku TypeError), pa se
+// paralelno umjesto redom-dok-jedan-ne-uspije PROBAJU SVI (brže javlja grešku,
+// spaja sve što UPSJE), dodaje se opcioni MAP_KEY (druga ruta servera), i
+// višestruke detekcije ISTOG požara (različiti sateliti/preleti) se grupišu —
+// inače "12 aktivnih detekcija" zvuči kao 12 požara umjesto 1 praćenog.
+function extractConst(name) {
+  const re = new RegExp('const ' + name + '\\s*=\\s*[\\s\\S]*?;'); // stani na PRVI ';' (ne na ';\n' — dosta linija ima komentar iza ';')
+  const m = re.exec(HTML);
+  assert.ok(m, 'nije nađena const ' + name + ' u index.html');
+  return m[0];
+}
+const SRC2 = [
+  SRC_DST,
+  extractConst('_POZ_GRUPA_M'),
+  extractConst('_POZ_BAZA'),
+  extractConst('_POZ_IZVORI'),
+  extractConst('_POZ_OKVIRI'),
+  extractFn('_poziPouzdanost'),
+  extractFn('_poziSatelit'),
+  extractFn('_poziOkvir'),
+  extractFn('_poziOkvirNaziv'),
+  extractFn('_poziUrl'),
+  extractFn('_poziGrupisi'),
+  extractFn('_poziGrupeBlizu'),
+  extractFn('_poziEvtKljuc'),
+  extractFn('_poziOznaciNove'),
+  extractFn('_poziApiUrl'),
+  extractFn('_poziBrojRijecPozar'),
+  extractFn('_poziBrojRijecNovih'),
+  extractFn('_poziVjetarPrijeti'),
+].join('\n');
+
+function makeStore() {
+  const m = {};
+  return { getItem:k => (k in m ? m[k] : null), setItem:(k,v) => { m[k]=String(v); }, removeItem:k => { delete m[k]; } };
+}
+function makeApi2(store) {
+  const keys = ['localStorage', '_POZ_SEEN_KEY', '_POZ_OKVIR_KEY', '_POZ_RADIUS_KM'];
+  const vals = [store, 'seen', 'tvlake_pozari_okvir', 150];
+  return new Function(...keys,
+    SRC2 + '\nreturn { _poziOkvir, _poziOkvirNaziv, _poziUrl, _poziGrupisi, _poziGrupeBlizu, ' +
+    '_poziEvtKljuc, _poziOznaciNove, _poziApiUrl, _poziBrojRijecPozar, _poziBrojRijecNovih, _poziVjetarPrijeti };'
+  )(...vals);
+}
+
+console.log('\n_poziGrupisi — više detekcija ISTOG požara postaju JEDAN događaj:');
+
+t('detekcije unutar _POZ_GRUPA_M se spajaju u jednu grupu', () => {
+  const api2 = makeApi2(makeStore());
+  const pts = [
+    { la:44.910, lo:16.200, dt:'2026-09-03T11:22:00Z', sat:'N', conf:'h', frp:12.7 },
+    { la:44.911, lo:16.201, dt:'2026-09-03T13:00:00Z', sat:'1', conf:'n', frp:8.0  }, // ~140m dalje, isti požar
+  ];
+  const g = api2._poziGrupisi(pts);
+  assert.strictEqual(g.length, 1, 'dvije bliske detekcije = JEDAN požar');
+  assert.strictEqual(g[0].broj, 2);
+  assert.strictEqual(g[0].sateliti.length, 2, 'oba satelita zabilježena');
+});
+
+t('udaljene detekcije (>_POZ_GRUPA_M) ostaju ODVOJENI požari', () => {
+  const api2 = makeApi2(makeStore());
+  const pts = [
+    { la:44.910, lo:16.200, dt:'2026-09-03T11:00:00Z', sat:'N', conf:'h', frp:5 },
+    { la:45.300, lo:16.150, dt:'2026-09-03T11:00:00Z', sat:'N', conf:'h', frp:5 }, // ~43km dalje
+  ];
+  const g = api2._poziGrupisi(pts);
+  assert.strictEqual(g.length, 2);
+});
+
+t('grupa pamti najpouzdaniju detekciju i maksimalni FRP', () => {
+  const api2 = makeApi2(makeStore());
+  const pts = [
+    { la:44.910, lo:16.200, dt:'2026-09-03T11:00:00Z', sat:'N', conf:'l', frp:3.0 },
+    { la:44.910, lo:16.200, dt:'2026-09-03T12:00:00Z', sat:'1', conf:'h', frp:22.5 },
+  ];
+  const g = api2._poziGrupisi(pts);
+  assert.strictEqual(g[0].conf, 'h', 'zadržava najvišu pouzdanost, ne posljednju');
+  assert.strictEqual(g[0].frpMax, 22.5);
+});
+
+t('span (raspon) grupe od jedne tačke je 0, od dvije > 0', () => {
+  const api2 = makeApi2(makeStore());
+  const jedna = api2._poziGrupisi([{ la:44.91, lo:16.20, dt:'2026-09-03T11:00:00Z', sat:'N', conf:'h', frp:5 }]);
+  assert.strictEqual(jedna[0].spanM, 0);
+  const dvije = api2._poziGrupisi([
+    { la:44.910, lo:16.200, dt:'2026-09-03T11:00:00Z', sat:'N', conf:'h', frp:5 },
+    { la:44.912, lo:16.202, dt:'2026-09-03T11:05:00Z', sat:'1', conf:'h', frp:5 }
+  ]);
+  assert.ok(dvije[0].spanM > 0);
+});
+
+console.log('_poziGrupeBlizu — udaljenost i sortiranje na grupama:');
+
+t('sortira grupe po udaljenosti od reference', () => {
+  const api2 = makeApi2(makeStore());
+  const grupe = [{ la:45.30, lo:16.15, pts:[] }, { la:44.90, lo:16.15, pts:[] }];
+  const r = api2._poziGrupeBlizu(grupe, { la:44.88, lo:16.15 });
+  assert.ok(r[0].d < r[1].d);
+});
+
+console.log('_poziOznaciNove — "novo od zadnje provjere" preživljava dva učitavanja:');
+
+t('prvi put SVE je novo, drugi put ISTI požar više nije nov', () => {
+  const store = makeStore();
+  const api2 = makeApi2(store);
+  const g = [{ la:44.910, lo:16.200, pts:[] }];
+  const prvi = api2._poziOznaciNove(g);
+  assert.strictEqual(prvi[0].nov, true);
+  const drugi = api2._poziOznaciNove(g);
+  assert.strictEqual(drugi[0].nov, false, 'isti požar iz prošlog pregleda nije "nov"');
+});
+
+t('sasvim nov požar (druga lokacija) OSTAJE nov i kad stari nestane', () => {
+  const store = makeStore();
+  const api2 = makeApi2(store);
+  api2._poziOznaciNove([{ la:44.910, lo:16.200, pts:[] }]);
+  const drugi = api2._poziOznaciNove([{ la:45.500, lo:16.900, pts:[] }]);
+  assert.strictEqual(drugi[0].nov, true);
+});
+
+console.log('Vremenski okvir (24h/48h/7d):');
+
+t('_poziOkvir vraća 24h kad ništa nije sačuvano ili je sačuvana vrijednost neispravna', () => {
+  const store = makeStore();
+  const api2 = makeApi2(store);
+  assert.strictEqual(api2._poziOkvir(), '24h');
+  store.setItem('tvlake_pozari_okvir', 'nepostojeci');
+  assert.strictEqual(api2._poziOkvir(), '24h');
+});
+
+t('_poziUrl mijenja SAMO sufiks vremenskog okvira, ne i izvor', () => {
+  const api2 = makeApi2(makeStore());
+  const izv = { pref:'suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_Europe_' };
+  assert.ok(api2._poziUrl(izv, '24h').endsWith('_Europe_24h.csv'));
+  assert.ok(api2._poziUrl(izv, '7d').endsWith('_Europe_7d.csv'));
+});
+
+t('_poziOkvirNaziv daje čitljivo bosansko ime', () => {
+  const api2 = makeApi2(makeStore());
+  assert.strictEqual(api2._poziOkvirNaziv('48h'), '48 sati');
+  assert.strictEqual(api2._poziOkvirNaziv('7d'), '7 dana');
+});
+
+console.log('_poziApiUrl — bbox oko referentne tačke, MAP_KEY u putanji:');
+
+t('bbox okružuje referentnu tačku (zapad<istok, jug<sjever)', () => {
+  const api2 = makeApi2(makeStore());
+  const u = api2._poziApiUrl('MOJKLJUC', '24h', { la:44.88, lo:16.15 });
+  assert.ok(u.includes('/MOJKLJUC/'), 'ključ mora biti u putanji: ' + u);
+  const dijelovi = u.split('/');
+  const dani = dijelovi.pop();
+  const bboxStr = dijelovi.pop();
+  const [w, s, e, n] = bboxStr.split(',').map(Number);
+  assert.ok(w < e, 'zapad mora biti manji od istok');
+  assert.ok(s < n, 'jug mora biti manji od sjever');
+  assert.strictEqual(dani, '1', '24h okvir → 1 dan');
+});
+
+t('7d okvir traži 7 dana', () => {
+  const api2 = makeApi2(makeStore());
+  const u = api2._poziApiUrl('K', '7d', { la:44.88, lo:16.15 });
+  assert.ok(u.endsWith('/7'));
+});
+
+console.log('Bosanska množina za GRUPISANE požare (muški rod, drugačija sklonidba od detekcija):');
+
+t('1 aktivan požar / 2-4 aktivna požara / 5+ aktivnih požara', () => {
+  const api2 = makeApi2(makeStore());
+  assert.strictEqual(api2._poziBrojRijecPozar(1), '1 aktivan požar');
+  assert.strictEqual(api2._poziBrojRijecPozar(2), '2 aktivna požara');
+  assert.strictEqual(api2._poziBrojRijecPozar(5), '5 aktivnih požara');
+  assert.strictEqual(api2._poziBrojRijecPozar(11), '11 aktivnih požara');
+  assert.strictEqual(api2._poziBrojRijecPozar(21), '21 aktivan požar');
+});
+
+t('"N novih" — 1 novi, 2-4 nova, 5+ novih (bug: prije je pisalo "1 novih")', () => {
+  const api2 = makeApi2(makeStore());
+  assert.strictEqual(api2._poziBrojRijecNovih(1), '1 novi');
+  assert.strictEqual(api2._poziBrojRijecNovih(2), '2 nova');
+  assert.strictEqual(api2._poziBrojRijecNovih(5), '5 novih');
+});
+
+console.log('_poziVjetarPrijeti — meteorološka konvencija (smjer ODAKLE vjetar duva):');
+
+t('vjetar iz smjera požara (u odnosu na mene) → prijeti', () => {
+  const api2 = makeApi2(makeStore());
+  // Požar je SJEVERNO od mene (azimut od požara ka meni = jug = 180°).
+  // Vjetar duva IZ smjera sjevera (0°) → nosi vatru ka jugu (180°) → ka meni.
+  assert.strictEqual(api2._poziVjetarPrijeti(180, 0), true);
+});
+
+t('vjetar duva u SUPROTNOM smjeru → ne prijeti', () => {
+  const api2 = makeApi2(makeStore());
+  // Isti geometrijski slučaj, ali vjetar duva IZ juga (180°) → nosi ka sjeveru,
+  // dakle OD mene, nazad ka požaru.
+  assert.strictEqual(api2._poziVjetarPrijeti(180, 180), false);
+});
+
+t('granica ±45° se poštuje', () => {
+  const api2 = makeApi2(makeStore());
+  assert.strictEqual(api2._poziVjetarPrijeti(180, 44), true);   // 180-(44+180)=44° unutra
+  assert.strictEqual(api2._poziVjetarPrijeti(180, 46), false);  // 46° van granice
+});
+
+
 // Pravi FIRMS formati — VIIRS i MODIS NEMAJU isti raspored kolona
 const CSV_VIIRS = `country_id,latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_ti5,frp,daynight
 BIH,44.9100,16.2000,331.5,0.45,0.42,2026-09-03,1122,N,VIIRS,h,2.0NRT,289.1,12.7,D

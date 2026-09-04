@@ -81,13 +81,60 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   karte se ne vidi da li nema požara (najčešći i ISPRAVAN ishod), je li pao
   endpoint ili nema CORS-a. Podaci daju jednoznačan odgovor ("0 detekcija u
   krugu 150 km"), udaljenost/azimut od korisnika, popup sa vremenom i FRP-om,
-  rade na svakom zumu i keširaju se za offline. `_poziLoad`/`_poziParseCsv`;
-  izvori (4 satelita) se probavaju redom, uspješan se pamti. **"Provjeri
-  izvore" (`_poziProvjeriIzvore`) je alat za teren** — testira svaki izvor i
-  ispiše HTTP status/CORS grešku, jer se iz razvojnog okruženja nijedan
-  vanjski server ne može dozvati. Prijava požara je obična tačka
+  rade na svakom zumu i keširaju se za offline. `_poziLoad`/`_poziParseCsv`.
+  **"Provjeri izvore" (`_poziProvjeriIzvore`) je alat za teren** — testira
+  svaki izvor i ispiše HTTP status/CORS grešku, jer se iz razvojnog okruženja
+  nijedan vanjski server ne može dozvati. Prijava požara je obična tačka
   (`_createTacka`) — namjerno, jer tačke već imaju offline rad, sync i
   dijeljenje. Test: `tests/js/pozari.test.js`.
+- **Požari — "najbolji mogući podaci" (v3.104.0)**: korisnik je sa STVARNOG
+  telefona (pravi internet, ne sandbox) prijavio da su sva 4 FIRMS arhivska
+  CSV izvora "blokiran (CORS/mreža)". Istraženo (WebSearch, jer sandbox ne
+  može dozvati `firms.modaps.eosdis.nasa.gov` ni za dokumentaciju): NASA-in
+  arhivski CSV server (`/data/active_fire/.../csv/...`) je napravljen za
+  wget/curl direktan preuzimanje, ne za browser `fetch()` — vrlo vjerovatno
+  NE šalje `Access-Control-Allow-Origin` zaglavlje, pa ga ISPRAVNO
+  konfigurisan browser odbija bez obzira na mrežu. **`fetch()` namjerno NE
+  razlikuje CORS blok od mrtve mreže** (obje bacaju istu generičku
+  `TypeError` — sigurnosno pravilo browsera), pa se to ne može pouzdano
+  utvrditi iz JS-a; poruke u `_poziDohvati`/`_poziProvjeriIzvore` to sada
+  eksplicitno objašnjavaju umjesto da pogađaju jedno od dvoje.
+  Promjene:
+  - **Svi izvori paralelno i SPOJENI** (`Promise.all`, bilo je redom-dok-
+    jedan-ne-uspije) — VIIRS S-NPP/NOAA-20/NOAA-21 i MODIS imaju RAZLIČITE
+    prelete, uzimanje samo prvog znači svjesno odbacivanje detekcija koje su
+    OSTALI vidjeli. I brže javlja grešku (~15s umjesto do 60s).
+  - **Grupisanje u požare** (`_poziGrupisi`, prag `_POZ_GRUPA_M`=1500m): isti
+    požar vide RAZLIČITI sateliti/preleti — bez grupisanja "12 aktivnih
+    detekcija" zvuči kao 12 požara umjesto 1 praćenog. Lista/sažetak/toast
+    sad broje POŽARE (`_poziBrojRijecPozar`, muški rod — zaseban od
+    `_poziBrojRijec` jer sklonidba mijenja i pridjev, ne samo imenicu).
+  - **Vremenski okvir 24h/48h/7d** (`_poziOkvir`/`_POZ_OKVIRI`) — FIRMS iste
+    izvore objavljuje u tri prozora, korisnik bira.
+  - **"Novo od zadnje provjere"** (`_poziOznaciNove`, `localStorage
+    tvlake_pozari_vidjeno`) — ključ požara (zaokružene koordinate) se pamti
+    između učitavanja; forester na terenu odmah vidi ŠTA je novo bez da
+    upoređuje ručno.
+  - **Opcioni FIRMS MAP_KEY** (`_poziMapKey`/`_poziApiUrl`, `localStorage
+    tvlake_pozari_mapkey`) — korisnik se SAM besplatno registruje na
+    `firms.modaps.eosdis.nasa.gov/api/map_key/` (samo email, aplikacija taj
+    email nikad ne vidi ni ne šalje) i zalijepi ključ u panelu. Dodaje Area
+    API kao PETI, bbox-scoped izvor na DRUGAČIJOJ ruti servera (`/api/` vs
+    `/data/`) — moguće da ima drugačiju CORS politiku od arhive.
+  - **Vjetar kod najbližeg požara** (`_poziVrijeme`/`_poziOsvjeziMeteo`,
+    Open-Meteo — ISTI API/pattern već dokazano CORS-prijateljski u ovoj app
+    za N.V./elevaciju) + `_poziVjetarPrijeti` upozorenje kad vjetar duva OD
+    požara KA korisniku (meteorološka konvencija: `wind_direction` je smjer
+    ODAKLE vjetar duva, vatra ide u suprotnom). **Namjerno se NE kešira za
+    offline** — prikazati JUČERAŠNJI smjer vjetra kao trenutan bi bilo opasno
+    pogrešno usred stvarnog požara; bez mreže kartica se jednostavno ne
+    prikaže.
+  - **Namjerno NIJE dodato**: procjena izgorjele površine u hektarima iz broja
+    detekcija — VIIRS/MODIS piksel je "vreo piksel", ne stvarna granica
+    požara, i app već ima ISPRAVAN, precizniji alat za to (EFFIS opožarene
+    površine, `_OVL.opozareno`). Umjesto toga grupa nosi `spanM` (najveća
+    udaljenost između dvije detekcije u grupi) — geometrijska činjenica iz
+    GPS koordinata, ne izmišljen broj.
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/
