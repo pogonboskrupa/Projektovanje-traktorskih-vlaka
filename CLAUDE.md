@@ -135,6 +135,27 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
     površine, `_OVL.opozareno`). Umjesto toga grupa nosi `spanM` (najveća
     udaljenost između dvije detekcije u grupi) — geometrijska činjenica iz
     GPS koordinata, ne izmišljen broj.
+- **Paralelno NIJE uvijek brže — na izgladnjeloj vezi je gore** (v3.104.1):
+  drugi terenski test (sa MAP_KEY-em, VPN-om i vezom od ~1.4 KB/s, okvir "7
+  dana") dao je 1× "blokiran" + 4× `signal timed out`. To je bio dokaz da
+  v3.104.0 paralelizacija ima naličje: arhivski FIRMS CSV-ovi su izvozi za
+  CIJELU Evropu (7-dnevni ide u megabajte), pa četiri istovremena preuzimanja
+  dijele istu mrvicu propusnosti i **nijedno** ne stigne prije isteka —
+  redom bi barem jedno prošlo. Zato sada:
+  - Kad MAP_KEY POSTOJI, dohvaća se **samo** bbox Area API (krug oko
+    korisnika, djelić veličine), a arhive se preskaču; ako ključ padne,
+    arhive ostaju kao rezerva (`_poziDohvati` → `_poziDohvatiArhive`).
+    Provjereno u browseru: bez ključa 4 arhive/0 API, sa ključem 0 arhiva/1
+    API, sa neispravnim ključem 1 API + 4 arhive (rezerva radi).
+  - Timeout za arhive podignut na 30s (veliki fajlovi), API ostaje 20s.
+  - **Tip kvara se sada razlikuje i prevodi** (`_poziGreskaTxt`): `TypeError`
+    → "odbijeno odmah (CORS ili nema mreže)", `TimeoutError`/`AbortError` →
+    "nema odgovora na vrijeme (veza visi)". To su različiti problemi sa
+    različitim rješenjima, a ranije je kroz UI curila sirova engleska poruka
+    `signal timed out` iz `AbortSignal.timeout()`.
+  - `_poziSavjet` bira savjet prema tipu kvara (sve isteklo → skrati okvir na
+    24h, isključi VPN, unesi MAP_KEY; sve odbijeno → CORS/nema mreže objašnjenje),
+    umjesto da uvijek ispisuje isti tekst o CORS-u.
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/

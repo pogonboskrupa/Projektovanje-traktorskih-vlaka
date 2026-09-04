@@ -88,6 +88,8 @@ const SRC2 = [
   extractFn('_poziBrojRijecPozar'),
   extractFn('_poziBrojRijecNovih'),
   extractFn('_poziVjetarPrijeti'),
+  extractFn('_poziGreskaTxt'),
+  extractFn('_poziSavjet'),
 ].join('\n');
 
 function makeStore() {
@@ -99,7 +101,8 @@ function makeApi2(store) {
   const vals = [store, 'seen', 'tvlake_pozari_okvir', 150];
   return new Function(...keys,
     SRC2 + '\nreturn { _poziOkvir, _poziOkvirNaziv, _poziUrl, _poziGrupisi, _poziGrupeBlizu, ' +
-    '_poziEvtKljuc, _poziOznaciNove, _poziApiUrl, _poziBrojRijecPozar, _poziBrojRijecNovih, _poziVjetarPrijeti };'
+    '_poziEvtKljuc, _poziOznaciNove, _poziApiUrl, _poziBrojRijecPozar, _poziBrojRijecNovih, ' +
+    '_poziVjetarPrijeti, _poziGreskaTxt, _poziSavjet };'
   )(...vals);
 }
 
@@ -238,6 +241,51 @@ t('"N novih" — 1 novi, 2-4 nova, 5+ novih (bug: prije je pisalo "1 novih")', (
   assert.strictEqual(api2._poziBrojRijecNovih(1), '1 novi');
   assert.strictEqual(api2._poziBrojRijecNovih(2), '2 nova');
   assert.strictEqual(api2._poziBrojRijecNovih(5), '5 novih');
+});
+
+console.log('Razlikovanje kvarova (sa terena: 1× "odbijeno odmah" + 4× "veza visi"):');
+
+t('TypeError = odbijeno odmah, TimeoutError = veza visi — NE ista poruka', () => {
+  const api2 = makeApi2(makeStore());
+  const a = api2._poziGreskaTxt({ name: 'TypeError', message: 'Failed to fetch' });
+  const b = api2._poziGreskaTxt({ name: 'TimeoutError', message: 'signal timed out' });
+  assert.match(a, /odbijeno odmah/);
+  assert.match(b, /veza visi/);
+  assert.notStrictEqual(a, b, 'dva različita kvara ne smiju davati istu poruku');
+});
+
+t('sirova engleska poruka iz browsera ("signal timed out") se NE prikazuje korisniku', () => {
+  const api2 = makeApi2(makeStore());
+  const txt = api2._poziGreskaTxt({ name: 'TimeoutError', message: 'signal timed out' });
+  assert.ok(!/signal timed out/.test(txt), 'dobiveno: ' + txt);
+});
+
+t('AbortError se tretira kao istek, ne kao nepoznata greška', () => {
+  const api2 = makeApi2(makeStore());
+  assert.match(api2._poziGreskaTxt({ name: 'AbortError' }), /veza visi/);
+});
+
+console.log('_poziSavjet — savjet prati TIP kvara, ne samo činjenicu da ga ima:');
+
+t('sve isteklo → savjetuje 24h okvir, VPN i MAP_KEY (ne tvrdi da je CORS)', () => {
+  const api2 = makeApi2(makeStore());
+  const s = api2._poziSavjet('VIIRS: nema odgovora na vrijeme (veza visi) · MODIS: nema odgovora na vrijeme (veza visi)');
+  assert.match(s, /24 sata/);
+  assert.match(s, /VPN/);
+  assert.ok(!/CORS blokada nego/.test(s) || /nije CORS/.test(s), 'ne smije tvrditi da je CORS');
+});
+
+t('sve odbijeno odmah → objašnjava CORS/nema mreže, ne spominje sporu vezu kao uzrok', () => {
+  const api2 = makeApi2(makeStore());
+  const s = api2._poziSavjet('VIIRS: odbijeno odmah (CORS ili nema mreže)');
+  assert.match(s, /CORS/);
+  assert.match(s, /MAP_KEY/);
+});
+
+t('miješano → savjet pokriva oboje', () => {
+  const api2 = makeApi2(makeStore());
+  const s = api2._poziSavjet('A: odbijeno odmah (CORS ili nema mreže) · B: nema odgovora na vrijeme (veza visi)');
+  assert.match(s, /dio/i);
 });
 
 console.log('_poziVjetarPrijeti — meteorološka konvencija (smjer ODAKLE vjetar duva):');

@@ -4804,7 +4804,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.104.0';
+const APP_VER = 'v3.104.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12240,19 +12240,52 @@ function _poziApiUrl(kljuc, okvir, ref) {
 }
 
 // Jedan izvor: dohvati i parsiraj, nikad ne baca (za Promise.allSettled).
-async function _poziDohvatiJedan(naziv, url) {
+// Razlika između "odbijeno ODMAH" i "visjelo pa isteklo" je JEDINI trag koji
+// browser uopšte daje o uzroku, pa mora biti čitljiv (v3.104.1 — s terena je
+// stizalo sirovo englesko "signal timed out" iz AbortSignal.timeout()):
+//   • TypeError      → server je odgovorio (ili nije bilo mreže) i browser je
+//                      odbio prije nego išta stigne: CORS ili nema veze.
+//   • TimeoutError   → zahtjev je OTIŠAO, ali ništa se nije vratilo na vrijeme:
+//                      veza visi (spor/zagušen link, VPN, server ne odgovara).
+function _poziGreskaTxt(e) {
+  if (e?.name === 'TypeError') return 'odbijeno odmah (CORS ili nema mreže)';
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError') return 'nema odgovora na vrijeme (veza visi)';
+  return e?.message || 'greška';
+}
+
+// Savjet se bira prema TIPU kvara, jer to su različiti problemi sa različitim
+// rješenjima. Bez ovoga korisnik dobije samo popis grešaka i nema šta uraditi.
+function _poziSavjet(greska) {
+  const g = String(greska || '');
+  const visi = /veza visi/.test(g);
+  const odbijeno = /odbijeno odmah/.test(g);
+  if (visi && !odbijeno) {
+    return 'Svi zahtjevi su OTIŠLI ali se ništa nije vratilo na vrijeme — to nije CORS blokada nego spora '
+      + 'ili zagušena veza. Šta pomaže, redom:\n'
+      + '• prebaci okvir na "24 sata" (7-dnevni izvoz za cijelu Evropu je višestruko veći fajl)\n'
+      + '• ako je VPN uključen, isključi ga i probaj ponovo — često baš on guši ovakve zahtjeve\n'
+      + '• unesi besplatni MAP_KEY niže: tada se povlači samo krug oko tebe umjesto cijele Evrope';
+  }
+  if (odbijeno && !visi) {
+    return 'Zahtjevi su odbijeni ODMAH. To znači ili da uređaj nema mreže (onda je ovo očekivano), '
+      + 'ili da server ne dozvoljava pristup iz browsera (CORS). fetch() te dvije stvari namjerno ne '
+      + 'razlikuje, pa se iz aplikacije ne može reći koje je. Ako internet inače radi, unesi besplatni '
+      + 'MAP_KEY niže — on ide drugom rutom servera koja ponekad prolazi tamo gdje arhiva ne.';
+  }
+  return 'Dio izvora je odbijen odmah, dio je istekao bez odgovora. Ako internet inače radi, probaj '
+    + 'okvir "24 sata", isključi VPN ako ga koristiš, i unesi besplatni MAP_KEY niže (povlači samo tvoju okolinu).';
+}
+
+async function _poziDohvatiJedan(naziv, url, ms) {
   try {
-    const r = await _fetchT(url, 15000, { mode:'cors' });
+    const r = await _fetchT(url, ms || 15000, { mode:'cors' });
     if (!r.ok) return { ok:false, naziv, greska:'HTTP ' + r.status };
     const txt = await r.text();
     const pts = _poziParseCsv(txt);
     if (!pts.length && !/latitude/i.test(txt)) return { ok:false, naziv, greska:'neočekivan odgovor' };
     return { ok:true, naziv, pts };
   } catch(e) {
-    // fetch() namjerno NE razlikuje CORS blok od mrtve mreže (browser
-    // sigurnosno pravilo) — obje bacaju istu generičku TypeError. Otud
-    // formulacija ispod pokriva oba, umjesto da pogrešno tvrdi jedno.
-    return { ok:false, naziv, greska: e?.name === 'TypeError' ? 'blokiran (CORS/mreža)' : (e?.message || 'greška') };
+    return { ok:false, naziv, greska: _poziGreskaTxt(e) };
   }
 }
 
@@ -12266,10 +12299,32 @@ async function _poziDohvatiJedan(naziv, url) {
 // peti izvor, bbox-scoped oko korisnika.
 async function _poziDohvati(okvir) {
   const ref = _poziRefTacka();
-  const zahtjevi = _POZ_IZVORI.map(izv => ({ naziv:izv.naziv, url:_poziUrl(izv, okvir) }));
   const kljuc = _poziMapKey();
-  if (kljuc) zahtjevi.push({ naziv:'FIRMS API (MAP_KEY)', url:_poziApiUrl(kljuc, okvir, ref) });
-  const rez = await Promise.all(zahtjevi.map(z => _poziDohvatiJedan(z.naziv, z.url)));
+
+  // SA KLJUČEM: samo bbox Area API, i to SAM (v3.104.1). Arhivski CSV-ovi su
+  // izvozi za CIJELU Evropu — 7-dnevni zna biti više megabajta. Sa terena je
+  // stigao dokaz zašto to nije svejedno: na vezi od ~1.4 KB/s četiri takva
+  // PARALELNA preuzimanja se međusobno guše i SVA isteknu (4× "nema odgovora
+  // na vrijeme"), dok Area API vraća samo krug oko korisnika — isti podaci,
+  // djelić veličine. Paralelno je brže samo kad ima propusnosti; kad je nema,
+  // dijeljenje mrvica bandwidth-a na 4 zahtjeva garantuje da nijedan ne stigne.
+  if (kljuc) {
+    const r = await _poziDohvatiJedan('FIRMS API (MAP_KEY)', _poziApiUrl(kljuc, okvir, ref), 20000);
+    if (r.ok) return { ok:true, pts:r.pts, izvori:[r.naziv], djelomicno:false, greske:[] };
+    // Ključ nije prošao — probaj arhive kao rezervu, ali reci i zašto je pao ključ.
+    const rez = await _poziDohvatiArhive(okvir);
+    if (rez.ok) return rez;
+    return { ok:false, greska: [r.naziv + ': ' + r.greska, rez.greska].filter(Boolean).join(' · ') };
+  }
+  return _poziDohvatiArhive(okvir);
+}
+
+// BEZ ključa nema izbora nego evropski izvozi. Timeout je namjerno duži nego
+// za API (30s) — ovo su veliki fajlovi i na mobilnoj vezi im 15s zna biti
+// premalo, a prerano odustajanje izgleda isto kao da izvor ne radi.
+async function _poziDohvatiArhive(okvir) {
+  const zahtjevi = _POZ_IZVORI.map(izv => ({ naziv:izv.naziv, url:_poziUrl(izv, okvir) }));
+  const rez = await Promise.all(zahtjevi.map(z => _poziDohvatiJedan(z.naziv, z.url, 30000)));
   const uspjeh = rez.filter(r => r.ok);
   const greske = rez.filter(r => !r.ok).map(r => r.naziv + ': ' + r.greska);
   if (!uspjeh.length) return { ok:false, greska: greske.join(' · ') };
@@ -12360,11 +12415,7 @@ async function _poziLoad(tiho) {
         _poziRender();
         _poziStatusSet('❌ Nijedan izvor nije dostupan');
         if (!tiho) _dlgConfirm(
-          'Nijedan izvor detekcija nije odgovorio.\n\n' + r.greska +
-          '\n\nfetch() u browseru NE razlikuje "blokirano CORS pravilom" od "nema mreže" — ' +
-          'obje bacaju istu grešku iz sigurnosnih razloga, pa se ne može sa sigurnošću reći koje je od to dvoje. ' +
-          'Ako si offline, ovo je očekivano. Ako ima interneta, otvori "Provjeri izvore" za HTTP status svakog ' +
-          'izvora, ili unesi besplatni FIRMS MAP_KEY niže (drugi put pristupa istim podacima).',
+          'Nijedan izvor detekcija nije odgovorio.\n\n' + r.greska + '\n\n' + _poziSavjet(r.greska),
           { title:'🔥 Požari — nema podataka', okLabel:'U redu' });
         return;
       }
@@ -12597,15 +12648,12 @@ async function _poziProvjeriIzvore() {
   for (const izv of izvori) {
     const t0 = Date.now();
     try {
-      const r = await _fetchT(izv.url, 15000, { mode:'cors' });
+      const r = await _fetchT(izv.url, 30000, { mode:'cors' });
       const txt = r.ok ? await r.text() : '';
       const n = r.ok ? _poziParseCsv(txt).length : 0;
       red.push(`${r.ok ? '✅' : '❌'} ${izv.naziv}\n   HTTP ${r.status} · ${n} detekcija · ${Date.now()-t0} ms`);
     } catch(e) {
-      // fetch() ne razlikuje CORS blok od mrtve mreže — obje bacaju istu
-      // generičku TypeError (browser sigurnosno pravilo), pa poruka mora
-      // pokriti oba, ne tvrditi pogrešno jedno od to dvoje.
-      red.push(`❌ ${izv.naziv}\n   blokiran (CORS ili nema mreže) · ${Date.now()-t0} ms`);
+      red.push(`❌ ${izv.naziv}\n   ${_poziGreskaTxt(e)} · ${Date.now()-t0} ms`);
     }
   }
   // EFFIS rasteri (opasnost + opožarene površine) — probaj jednu pločicu
@@ -12620,7 +12668,7 @@ async function _poziProvjeriIzvore() {
       const ct = r.headers.get('content-type') || '';
       red.push(`${r.ok && /image/.test(ct) ? '✅' : '❌'} ${naziv}\n   HTTP ${r.status} · ${ct || '?'} · ${Date.now()-t0} ms`);
     } catch(e) {
-      red.push(`❌ ${naziv}\n   blokiran (CORS ili nema mreže) · ${Date.now()-t0} ms`);
+      red.push(`❌ ${naziv}\n   ${_poziGreskaTxt(e)} · ${Date.now()-t0} ms`);
     }
   }
   // Open-Meteo (vjetar kod požara) — isti API već korišten za N.V./elevaciju u ovoj app
@@ -12631,14 +12679,10 @@ async function _poziProvjeriIzvore() {
         + '&longitude=' + ref.lo.toFixed(2) + '&current=wind_speed_10m', 10000);
       red.push(`${r.ok ? '✅' : '❌'} Open-Meteo (vjetar)\n   HTTP ${r.status} · ${Date.now()-t0} ms`);
     } catch(e) {
-      red.push(`❌ Open-Meteo (vjetar)\n   blokiran (CORS ili nema mreže) · ${Date.now()-t0} ms`);
+      red.push(`❌ Open-Meteo (vjetar)\n   ${_poziGreskaTxt(e)} · ${Date.now()-t0} ms`);
     }
   }
-  await _dlgConfirm(red.join('\n\n')
-    + '\n\nAko je sve ❌ a internet radi: fetch() u browseru ne razlikuje "CORS blok" od "nema mreže" (obje '
-    + 'bacaju istu grešku), pa se ne može reći koje od to dvoje je uzrok. Ako je baš NASA FIRMS ❌ a ostalo ✅, '
-    + 'najvjerovatnije je da FIRMS arhivski CSV server ne šalje CORS zaglavlja za browser pristup (napravljen je '
-    + 'za wget/curl, ne za JavaScript) — probaj besplatni MAP_KEY gore, druga ruta servera ponekad prolazi tamo gdje ova ne.',
+  await _dlgConfirm(red.join('\n\n') + '\n\n' + _poziSavjet(red.join(' ')),
     { title:'🔥 Provjera izvora', okLabel:'U redu' });
 }
 
