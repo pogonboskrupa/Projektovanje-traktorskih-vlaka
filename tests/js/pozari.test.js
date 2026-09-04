@@ -563,6 +563,65 @@ t('starost podatka: "upravo" za svjež, sati/dani za stariji', () => {
   assert.ok(/dana$/.test(api._poziStarost(now - 4 * 86400000)));
 });
 
+console.log('_poziSazetak — upozorenje kad udaljenost NIJE od stvarne GPS pozicije:');
+
+// Zašto ovo postoji: prije ove izmjene je udaljenost do požara tiho padala na
+// centar karte kad GPS nema fix — za alat o bezbjednosti to je aktivno
+// pogrešno (korisnik je mogao ranije pomjeriti kartu bilo gdje), ne samo manje
+// precizno. _poziToggle sad pokreće GPS i _poziMeta pamti refGps; _poziSazetak
+// mora to napadno pokazati dok se ne popravi.
+const SRC4 = [
+  SRC_DST,
+  extractFn('_bearing'),
+  extractFn('_azimutSmjer'),
+  extractFn('fmtL'),
+  extractFn('_poziStarost'),
+  extractFn('_poziBrojRijecPozar'),
+  extractFn('_poziBrojRijecNovih'),
+  extractFn('_poziBrojRijecIzvora'),
+  extractConst('_POZ_OKVIRI'),
+  extractFn('_poziOkvirNaziv'),
+  extractFn('_poziSazetak'),
+].join('\n');
+
+function makeSazetak({ meta, evts, ref }) {
+  const sandbox = {
+    _POZ_RADIUS_KM: 150,
+    _poziMeta: meta,
+    _poziEvts: evts,
+    _poziRefTacka: () => ref,
+  };
+  const keys = Object.keys(sandbox);
+  return new Function(...keys, SRC4 + '\nreturn _poziSazetak();')(...keys.map(k => sandbox[k]));
+}
+
+t('BEZ GPS fixa (refGps:false) — kratko I toast nose upozorenje, čak i kad nema požara', () => {
+  const s = makeSazetak({
+    meta: { izvori:['VIIRS S-NPP'], dohvacenoMs:Date.now(), okvir:'24h', refGps:false },
+    evts: [], ref: { la:44.88, lo:16.15, gps:false }
+  });
+  assert.match(s.kratko, /centra karte/, 'kratko: ' + s.kratko);
+  assert.match(s.toast, /centra karte/, 'toast: ' + s.toast);
+});
+
+t('SA GPS fixom (refGps:true) — upozorenja NEMA', () => {
+  const s = makeSazetak({
+    meta: { izvori:['VIIRS S-NPP'], dohvacenoMs:Date.now(), okvir:'24h', refGps:true },
+    evts: [], ref: { la:44.88, lo:16.15, gps:true }
+  });
+  assert.ok(!/centra karte/.test(s.kratko), 'kratko: ' + s.kratko);
+  assert.ok(!/centra karte/.test(s.toast), 'toast: ' + s.toast);
+});
+
+t('upozorenje se pojavljuje i kad IMA požara, ne samo u praznom slučaju', () => {
+  const s = makeSazetak({
+    meta: { izvori:['VIIRS S-NPP'], dohvacenoMs:Date.now(), okvir:'24h', refGps:false },
+    evts: [{ la:44.91, lo:16.20, d:5000, broj:1, sateliti:['Suomi-NPP'], zadnji:Date.now(), nov:true }],
+    ref: { la:44.88, lo:16.15, gps:false }
+  });
+  assert.match(s.kratko, /centra karte/, 'kratko: ' + s.kratko);
+});
+
 (async () => {
   for (const a of _async) {
     try { await a.p; pass++; console.log('  ✔ ' + a.name); }

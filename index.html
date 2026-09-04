@@ -4804,7 +4804,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.106.0';
+const APP_VER = 'v3.106.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5710,9 +5710,13 @@ function _startupRestore() {
         const ref = _poziRefTacka();
         _poziPts = _poziFilterBlizu(c.pts, ref);
         _poziEvts = _poziOznaciNove(_poziGrupeBlizu(_poziGrupisi(_poziPts), ref));
-        _poziMeta = { izvori:c.izvori || (c.izvor ? [c.naziv] : []), dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir:_poziOkvir() };
+        _poziMeta = { izvori:c.izvori || (c.izvor ? [c.naziv] : []), dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir:_poziOkvir(), refGps:ref.gps };
         _poziRender();
       }
+      // Ako pri pokretanju GPS još nije uhvatio fix, čim uhvati _poziCekajGps
+      // pravilo (iz _poziToggle) treba da radi i ovdje — direktan poziv umjesto
+      // duplog if-a jer je logika identična.
+      if (!(typeof lastP !== 'undefined' && lastP && isFinite(lastP.la))) _poziCekajGps();
       if (navigator.onLine) _poziLoad(true);
     });
     // Trajna pohrana: bez persist() browser pod pritiskom diska smije obrisati
@@ -12588,7 +12592,7 @@ async function _poziLoad(tiho) {
       _poziSaveCache(r.pts, r.izvori);
       _poziPts = _poziFilterBlizu(r.pts, ref);
       _poziMeta = { izvori:r.izvori, dohvacenoMs:Date.now(), ukupno:r.pts.length, kes:false, okvir,
-                    djelomicno:r.djelomicno, greske:r.greske };
+                    djelomicno:r.djelomicno, greske:r.greske, refGps:ref.gps };
     } else {
       const c = _poziLoadCache();
       if (!c) {
@@ -12602,7 +12606,7 @@ async function _poziLoad(tiho) {
         return;
       }
       _poziPts = _poziFilterBlizu(c.pts || [], ref);
-      _poziMeta = { izvori:c.izvori || (c.izvor ? [c.naziv] : []), dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir };
+      _poziMeta = { izvori:c.izvori || (c.izvor ? [c.naziv] : []), dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir, refGps:ref.gps };
     }
     _poziEvts = _poziOznaciNove(_poziGrupeBlizu(_poziGrupisi(_poziPts), ref));
     _poziRender();
@@ -12628,10 +12632,13 @@ function _poziSazetak() {
   const izv = (izvL.length === 1 ? izvL[0] : (izvL.length ? _poziBrojRijecIzvora(izvL.length) : ''))
             + (m.kes ? ' · iz keša' : '');
   const okvirTxt = _poziOkvirNaziv(m.okvir);
+  // Dok GPS nema fix, udaljenost/pravac su od CENTRA KARTE, ne od korisnika —
+  // za alat o bezbjednosti to mora biti napadno vidljivo, ne fusnota u popup-u.
+  const nijeGps = m.refGps === false ? ' ⚠ od centra karte, ne tvoje pozicije' : '';
   if (!_poziEvts.length) {
     return {
-      kratko: '✓ nema požara · ' + okvirTxt + (st ? ' · ' + st : ''),
-      toast:  '✓ Nema aktivnih požara u krugu ' + _POZ_RADIUS_KM + ' km, zadnjih ' + okvirTxt + ' (' + izv + ', ' + st + ')'
+      kratko: '✓ nema požara · ' + okvirTxt + (st ? ' · ' + st : '') + nijeGps,
+      toast:  '✓ Nema aktivnih požara u krugu ' + _POZ_RADIUS_KM + ' km, zadnjih ' + okvirTxt + ' (' + izv + ', ' + st + ')' + nijeGps
     };
   }
   const naj = _poziEvts[0];
@@ -12639,10 +12646,10 @@ function _poziSazetak() {
   const novih = _poziEvts.filter(g => g.nov).length;
   return {
     kratko: '🔥 ' + _poziEvts.length + ' · najbliži ' + fmtL(naj.d) + ' ' + smjer
-            + (novih ? ' · 🆕 ' + _poziBrojRijecNovih(novih) : '') + ' · ' + izv,
+            + (novih ? ' · 🆕 ' + _poziBrojRijecNovih(novih) : '') + ' · ' + izv + nijeGps,
     toast:  '🔥 ' + _poziBrojRijecPozar(_poziEvts.length)
             + ' — najbliži ' + fmtL(naj.d) + ' ' + smjer + (novih ? ', ' + _poziBrojRijecNovih(novih) + ' od zadnje provjere' : '')
-            + ' (' + izv + ', ' + st + ')'
+            + ' (' + izv + ', ' + st + ')' + nijeGps
   };
 }
 
@@ -12775,17 +12782,28 @@ function _poziListaHtml() {
     ? `<div style="font-size:10px;color:#475569;padding:4px;">…i još ${_poziEvts.length - 8}</div>` : '');
 }
 
+// Klik na požar u listi MORA stvarno odvesti korisnika tamo — dok je panel
+// otvoren iz Menija preko cijelog ekrana (isto kao Doznaka/Vlake), karta iza
+// njega je SAKRIVENA (#pozari-panel prekriva #main). Bez switchTab('karta')
+// se map.setView() dešavao na nevidljivoj karti — korisnik ne bi vidio NIŠTA
+// se pomjerilo dok se ne vrati ručno na Kartu.
 function _poziZoom(i) {
   const g = _poziEvts[i];
   if (!g) return;
   closeLayerSheet();
+  switchTab('karta');
   const zoom = g.spanM > 2000 ? 12 : 13;
-  map.setView([g.la, g.lo], Math.max(map.getZoom(), zoom));
-  // isti objekat-referenca kao u _poziPts (postavljeno u _poziGrupisi) — pouzdano
-  // nalazi odgovarajući marker bez oslanjanja na redoslijed u DOM-u/nizu.
-  const idx = g.zadnjaTacka ? _poziPts.indexOf(g.zadnjaTacka) : -1;
-  const mk = idx >= 0 && _poziLayer ? _poziLayer.getLayers()[idx] : null;
-  if (mk) setTimeout(() => mk.openPopup(), 250);
+  // switchTab('karta') sam po sebi zove map.invalidateSize() poslije 50ms (karta
+  // je bila display:none pa Leaflet ne zna svoju pravu veličinu) — pomjeranje
+  // pogleda ide TEK poslije toga, inače zna ispasti pogrešno centrirano.
+  setTimeout(() => {
+    map.setView([g.la, g.lo], Math.max(map.getZoom(), zoom));
+    // isti objekat-referenca kao u _poziPts (postavljeno u _poziGrupisi) — pouzdano
+    // nalazi odgovarajući marker bez oslanjanja na redoslijed u DOM-u/nizu.
+    const idx = g.zadnjaTacka ? _poziPts.indexOf(g.zadnjaTacka) : -1;
+    const mk = idx >= 0 && _poziLayer ? _poziLayer.getLayers()[idx] : null;
+    if (mk) setTimeout(() => mk.openPopup(), 250);
+  }, 80);
 }
 
 function _poziToggle(on) {
@@ -12797,7 +12815,30 @@ function _poziToggle(on) {
     return;
   }
   if (_poziLayer) _poziLayer.addTo(map);
+  // Udaljenost do požara MORA biti od STVARNE pozicije, ne od centra karte —
+  // korisnik je mogao ranije pomjeriti/zumirati kartu bilo gdje, pa bi tihi pad
+  // na map.getCenter() za alat o bezbjednosti bio aktivno POGREŠAN, ne samo
+  // manje precizan. Ako GPS watch (isti onaj koji koristi 📍 dugme na karti,
+  // vidi fabLokacija) još nije pokrenut, pokreni ga sad.
+  if (!(typeof lastP !== 'undefined' && lastP && isFinite(lastP.la))) _poziCekajGps();
   _poziLoad(false);
+}
+
+// Isti obrazac kao fabLokacija (poll na 500ms, odustani nakon 15s) — kad
+// stigne prvi STVARNI fix, tiho ponovo učitaj sa ispravnom referentnom tačkom.
+// Ne blokira ništa: keš/prvi dohvat (od centra karte) se odmah pokažu, ovo samo
+// naknadno popravi udaljenosti čim GPS uhvati signal.
+function _poziCekajGps() {
+  if (!gpsOn && typeof startGPS === 'function') startGPS();
+  const t0 = Date.now();
+  const wait = setInterval(() => {
+    if (typeof lastP !== 'undefined' && lastP && isFinite(lastP.la)) {
+      clearInterval(wait);
+      if (_poziOn) _poziLoad(true);
+    } else if (Date.now() - t0 > 15000) {
+      clearInterval(wait);
+    }
+  }, 500);
 }
 
 // Promjena vremenskog okvira (24h/48h/7d) — ponovo dohvati sa novim rasponom.

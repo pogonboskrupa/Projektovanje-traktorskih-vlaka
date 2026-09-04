@@ -217,6 +217,35 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   - Sažetak sad IMENUJE izvor kad je samo jedan ("Global Forest Watch") umjesto
     da broji ("1 izvor") — sa terena je važnije znati KOJI je server prošao.
     Sklonidba: `_poziBrojRijecIzvora` (1 izvor / 2+ izvora).
+- **Udaljenost do požara i klik-navigacija (v3.106.1)**: dva stvarna bug-a sa
+  ekipe koja testira na terenu.
+  - **Udaljenost je tiho padala na centar karte** kad GPS nema fix
+    (`_poziRefTacka` fallback) — za alat o BEZBJEDNOSTI to nije samo manje
+    precizno, nego aktivno POGREŠNO: korisnik je mogao ranije pomjeriti/
+    zumirati kartu bilo gdje (drugi odjel, drugi kraj karte), pa bi "5 km"
+    prikazano na osnovu centra karte moglo biti kilometrima pogrešno u odnosu
+    na stvarnu udaljenost. `_poziToggle(true)` sad, ako `lastP` (GPS fix) još
+    ne postoji, pokreće GPS (`startGPS()`, ISTI watch koji koristi 📍 dugme na
+    karti — `fabLokacija`) i tiho ponovo učita čim stigne prvi fix
+    (`_poziCekajGps`, poll na 500ms / odustani nakon 15s, isti obrazac kao
+    `fabLokacija`). Dok se čeka, `_poziMeta.refGps` je `false` i `_poziSazetak`
+    to NAPADNO ispisuje ("⚠ od centra karte, ne tvoje pozicije") umjesto tihe
+    fusnote — ranije je to pisalo SAMO u popup-u pojedinačnog markera, ne i u
+    statusnoj liniji/listi/toast-u gdje ga korisnik prvo vidi.
+  - **Klik na požar u listi nije vidljivo navigirao nigdje** — `_poziZoom`
+    je pomjerao `map.setView(...)`, ali #pozari-panel je OTVOREN PREKO CIJELE
+    KARTE (isti obrazac kao Doznaka/Vlake), pa je karta iza njega SAKRIVENA.
+    Korisnik klikne, ništa se vidljivo ne desi, i mora ručno otići na Kartu da
+    provjeri je li se uopšte nešto pomjerilo. Sad `_poziZoom` prvo zove
+    `switchTab('karta')` (isti obrazac kao `_poziPrijavi`), pa TEK POSLIJE
+    (unutar `setTimeout` — `switchTab('karta')` sam zove `map.invalidateSize()`
+    poslije 50ms jer je karta bila `display:none` i Leaflet ne zna svoju pravu
+    veličinu) pomjera pogled i otvara popup markera.
+  - Provjereno u browseru (Playwright): klik na požar mijenja aktivni tab na
+    "Karta" i centrira TAČNO na koordinate požara; GPS mock koji "uhvati"
+    fix poslije 1.5s pokazuje upozorenje prije toga i ispravnu udaljenost
+    (5.16 km, ne udaljenost od stare pozicije karte) poslije. 3 nova testa u
+    `tests/js/pozari.test.js` (52 ukupno) za `_poziSazetak` upozorenje.
 - **Panel bez svog taba u traci MORA imati dugme Nazad** (v3.103.2): Požari se
   otvaraju iz Menija (`switchTab('pozari')` u `.mdrop-item`), a ne iz `#tab-bar`
   — traka je već puna sa 7 tabova i požari nisu svakodnevni alat kao Vlake/
