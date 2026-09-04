@@ -4831,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.108.1';
+const APP_VER = 'v3.109.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -5737,6 +5737,7 @@ function _startupRestore() {
         const ref = _poziRefTacka();
         _poziPts = _poziFilterBlizu(c.pts, ref);
         _poziEvts = _poziOznaciNove(_poziGrupeBlizu(_poziGrupisi(_poziPts), ref));
+        _poziEvts.forEach(g => { g.vlaka = _poziNajblizaVlaka(g.la, g.lo); });
         _poziMeta = { izvori:c.izvori || (c.izvor ? [c.naziv] : []), dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir:_poziOkvir(), refGps:ref.gps };
         _poziRender();
       }
@@ -12258,9 +12259,41 @@ function _poziGrupeBlizu(grupe, ref) {
     .sort((a, b) => a.d - b.d);
 }
 
+// ── Koliko je požar daleko od MOJE šume ────────────────────────────────────
+// Ovo je jedini podatak koji nijedan satelitski servis ne može dati: NASA ne
+// zna gdje su naše vlake. "Požar 12 km" i "požar 12 km, a 600 m od vlake T4"
+// su dvije potpuno različite informacije za nekoga ko odlučuje hoće li danas
+// slati ekipu na teren.
+//
+// Računa se JEDNOM po učitavanju (u _poziLoad), ne pri svakom crtanju panela —
+// pri crtanju bi se vrtjelo desetine puta bez potrebe. Duge vlake se uzorkuju
+// (svaka N-ta tačka, najviše ~80 po vlaki): za pitanje "koja je vlaka najbliža"
+// na kilometarskoj skali to je sasvim dovoljno, a ne pretvara render u zastoj.
+function _poziNajblizaVlaka(la, lo) {
+  if (typeof vlake === 'undefined' || !Array.isArray(vlake) || !vlake.length) return null;
+  let naj = null;
+  vlake.forEach(v => {
+    if (!v || !Array.isArray(v.pts) || !v.pts.length) return;
+    const korak = Math.max(1, Math.ceil(v.pts.length / 80));
+    for (let i = 0; i < v.pts.length; i += korak) {
+      const p = v.pts[i];
+      if (!p || !isFinite(p.la) || !isFinite(p.lo)) continue;
+      const d = dst(la, lo, p.la, p.lo);
+      if (!naj || d < naj.d) naj = { d, nm: v.nm || '?', projektId: v.projektId || null };
+    }
+  });
+  if (!naj) return null;
+  // Ime projekta (odjel/GJ) ako vlaka pripada nekom — korisnije od golog ID-a.
+  if (naj.projektId && typeof _projekti !== 'undefined' && Array.isArray(_projekti)) {
+    const pr = _projekti.find(x => x && x.id === naj.projektId);
+    if (pr) naj.projekat = [pr.odjel, pr.gj].filter(Boolean).join(', ');
+  }
+  return naj;
+}
+
 // Ključ grupe stabilan preko dva učitavanja (za "novo od zadnje provjere") —
 // zaokruženo na ~1km da malo pomjeranje centroida (nova detekcija na rubu
-// grupe) ne izgleda kao "nov požar".
+// grupe) ne izgleda kao "nov požar").
 function _poziEvtKljuc(g, preciznost) {
   // 100 = ~1.1 km (požari, grupisani na 1.5 km). Sječa ima 30 m piksele i
   // grupiše se na 300 m, pa joj treba finiji ključ (1000 = ~110 m) — inače bi
@@ -12664,6 +12697,9 @@ async function _poziLoad(tiho) {
       _poziMeta = { izvori:c.izvori || (c.izvor ? [c.naziv] : []), dohvacenoMs:c.ts, ukupno:(c.pts||[]).length, kes:true, okvir, refGps:ref.gps };
     }
     _poziEvts = _poziOznaciNove(_poziGrupeBlizu(_poziGrupisi(_poziPts), ref));
+    // Blizina VLASTITE šume — jedini podatak koji satelit ne zna. Računa se
+    // ovdje (jednom), ne pri crtanju panela koje se dešava mnogo češće.
+    _poziEvts.forEach(g => { g.vlaka = _poziNajblizaVlaka(g.la, g.lo); });
     _poziRender();
     const s = _poziSazetak();
     _poziStatusSet(s.kratko);
@@ -12841,6 +12877,7 @@ function _poziGrupaPopupHtml(g, ref) {
     ${red('Pouzdanost', `<span style="color:${pz.boja};">${pz.txt}</span>`)}
     ${g.frpMax ? red('Najjača detekcija', g.frpMax.toFixed(1) + ' MW') : ''}
     ${g.spanM > 0 ? red('Raspon detekcija', fmtL(g.spanM)) : ''}
+    ${g.vlaka ? red('Najbliža tvoja vlaka', `<b style="color:${g.vlaka.d < 2000 ? '#fbbf24' : '#e2e8f0'};">${_escHtml(g.vlaka.nm)}</b> — ${fmtL(g.vlaka.d)}`) : ''}
     ${gk ? `<div style="font-size:11px;color:#fbbf24;font-family:monospace;margin-top:6px;">Y: ${gk.y} · X: ${gk.x}</div>` : ''}
     <div style="font-size:10px;color:#475569;margin-top:8px;line-height:1.4;">
       Sitne tačke oko markera su pojedinačni satelitski pikseli — pokazuju doseg, nisu zasebni požari.
@@ -12883,12 +12920,21 @@ function _poziRedHtml(g, i, ref) {
   const detalji = g.broj > 1
     ? g.broj + ' detekcija' + (g.sateliti.length > 1 ? ' · ' + g.sateliti.length + ' sat.' : '')
     : (g.sateliti[0] || '1 detekcija');
+  // Blizina vlastite vlake se ističe žuto kad je ispod 2 km — to je trenutak
+  // kad požar prestaje biti "negdje tamo" i postaje stvar tvoje šume.
+  const v = g.vlaka;
+  const vBlizu = v && v.d < 2000;
+  const vlakaTxt = v
+    ? `<div style="font-size:10px;color:${vBlizu ? '#fbbf24' : '#64748b'};${vBlizu ? 'font-weight:600;' : ''}">
+         🪵 ${_escHtml(v.nm)} — ${fmtL(v.d)}${v.projekat ? ' <span style="color:#475569;">(' + _escHtml(v.projekat) + ')</span>' : ''}
+       </div>` : '';
   return `<div onclick="_poziZoom(${i})" style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #1e293b;cursor:pointer;">
     <span style="width:9px;height:9px;border-radius:50%;background:${pz.boja};flex-shrink:0;"></span>
     <span style="flex:1;min-width:0;">
       <span style="font-size:12px;color:#e2e8f0;">${fmtL(g.d)} <span style="color:#64748b;">${smjer}</span></span>
       ${g.nov ? ' <span style="color:#fbbf24;font-size:10px;font-weight:700;">🆕 NOVO</span>' : ''}
       <div style="font-size:10px;color:#64748b;">${detalji} · ${_poziStarost(g.zadnji)}</div>
+      ${vlakaTxt}
     </span>
     <span style="font-size:10px;color:#64748b;text-align:right;">${pz.txt}</span>
   </div>`;
@@ -13549,9 +13595,7 @@ function _sjeSadrzajHtml() {
 
   return (
     kart('🪵 Smetnje vegetacije (sječa, vjetroizvale)',
-      'Satelit poredi trenutno stanje vegetacije sa istorijskom normom i javi gdje je NESTALA — '
-      + 'sječa, vjetroizvala, klizište ili opožarena površina. Piksel je 30 m, osvježava se svakih 2-4 dana, '
-      + 'u krugu ' + _SJE_RADIUS_KM + ' km od tebe. NIJE dokaz bespravne sječe — traži izlazak na teren.',
+      'Piksel 30 m · osvježavanje 2-4 dana · krug ' + _SJE_RADIUS_KM + ' km',
       `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0;">
           <input type="checkbox" ${_sjeOn ? 'checked' : ''} onchange="_sjeToggle(this.checked)"
             style="width:18px;height:18px;accent-color:#d97706;cursor:pointer;flex-shrink:0;">
@@ -13563,22 +13607,6 @@ function _sjeSadrzajHtml() {
            <button onclick="_sjeLoad(false)" style="flex:1;padding:9px;background:#14233c;border:1px solid #1e3a5f;border-radius:9px;color:#fbbf24;font-size:12px;font-weight:600;cursor:pointer;"><svg class="ic"><use href="#ic-osvjezi"/></svg> Osvježi</button>
          </div>`)
 
-    + kart('ℹ Šta ovaj sloj jeste, a šta nije',
-      '',
-      `<div style="font-size:11.5px;color:#94a3b8;line-height:1.7;">
-         <div style="margin-bottom:7px;"><b style="color:#e2e8f0;">Pokriva nas.</b> GFW-ovi stariji alarmi za sječu
-           (GLAD, RADD) rade samo u tropima — Bosna je izvan njih. Ovdje se koristi integrisani sloj koji uključuje
-           <b style="color:#e2e8f0;">DIST-ALERT</b> (UMD + NASA), jedini sa globalnom pokrivenošću.</div>
-         <div style="margin-bottom:7px;"><b style="color:#e2e8f0;">Kasni nekoliko dana.</b> Ovo nije uživo kao požari —
-           satelit prođe i obradi snimak svakih 2-4 dana, a oblaci to znaju odgoditi.</div>
-         <div><b style="color:#e2e8f0;">Ne razlikuje uzrok.</b> Alarm kaže da je vegetacija nestala, ne i zašto:
-           redovna doznaka, bespravna sječa, vjetroizvala i požarište izgledaju isto sa satelita.</div>
-       </div>`)
-
-    + `<div style="font-size:10px;color:#334155;line-height:1.6;text-align:center;padding:4px 8px 16px;">
-         Izvor: Global Forest Watch — integrisani alarmi (GLAD-L, GLAD-S2, RADD, DIST-ALERT).<br>
-         Traži besplatan GFW ključ. Zadnji dohvat se čuva za offline pregled.
-       </div>`
   );
 }
 
@@ -13646,7 +13674,7 @@ function _poziSadrzajHtml() {
     const kp = _poziMet.kodPozara;
     const smjerOd = _azimutSmjer(kp.vjetarSmjer);
     meteoKart = kart('🌬 Vjetar kod najbližeg požara',
-      'Open-Meteo — trenutni uslovi na lokaciji najbližeg požara. Vjetar nosi vatru u SUPROTNOM smjeru od onog odakle duva.',
+      'Vatra ide u SUPROTNOM smjeru od onog odakle vjetar duva',
       `<div style="display:flex;gap:14px;flex-wrap:wrap;">
          <div><div style="font-size:20px;font-weight:800;color:#7dd3fc;">${kp.vjetarMs.toFixed(1)} <span style="font-size:12px;font-weight:600;">m/s</span></div>
               <div style="font-size:10px;color:#64748b;">vjetar iz smjera ${smjerOd}</div></div>
@@ -13662,8 +13690,7 @@ function _poziSadrzajHtml() {
 
   return (
     kart('🛰 Detekcija sa satelita',
-      'NASA FIRMS — toplotne anomalije koje su sateliti uočili u krugu '
-      + _POZ_RADIUS_KM + ' km od tebe. Detekcija nije potvrda požara na terenu.',
+      'NASA FIRMS · krug ' + _POZ_RADIUS_KM + ' km · detekcija nije potvrda požara na terenu',
       prekidac('_poziToggle(this.checked)', _poziOn, 'Prikaži detekcije na karti')
       + okvirChips
       + `<div id="poz-status" style="font-size:11px;color:#94a3b8;margin:6px 0 8px;">${_escHtml(_poziOn ? _poziSazetak().kratko : '—')}</div>`
@@ -13677,8 +13704,7 @@ function _poziSadrzajHtml() {
     + meteoKart
 
     + kart('🔔 Javi mi kad se pojavi nov požar',
-      'Provjerava u pozadini na svakih 15 minuta i javi obavještenjem kad NOV požar uđe u zadani krug. '
-      + 'Radi dok je aplikacija pokrenuta (i kad je u pozadini) — ne radi kad je potpuno zatvoriš.',
+      'Provjera na 15 min · radi dok je app pokrenuta (i u pozadini), ne kad je zatvoriš',
       prekidac('_poziNotifToggle(this.checked)', _poziNotifOn(), 'Upozori me na nov požar u blizini')
       + `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
            <span style="font-size:12px;color:#94a3b8;">Prag:</span>
@@ -13690,17 +13716,17 @@ function _poziSadrzajHtml() {
          </div>`)
 
     + kart('🔥 Prijavi požar sa terena',
-      'Satelit vidi tek požar koji je narastao — ti ga vidiš prvi. Prijava se upisuje kao tačka na tvojoj GPS poziciji, radi i bez signala i ode kolegama čim se veza pojavi.',
+      'Tačka na tvojoj GPS poziciji · radi bez signala · ide kolegama kad se veza pojavi',
       `<button onclick="_poziPrijavi()" style="width:100%;padding:12px;background:linear-gradient(135deg,#b91c1c,#ef4444);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">
          <svg class="ic"><use href="#ic-pozicija"/></svg> Zabilježi požar na mojoj poziciji
        </button>`)
 
     + kart('🗺 Opožarene površine',
-      'Copernicus EFFIS — granice područja koja su STVARNO izgorjela (satelitski kartirano). Korisno za sanaciju, planiranje pošumljavanja i procjenu štete.',
+      'Copernicus EFFIS · granice stvarno izgorjelih područja',
       prekidac("_instToggle('opozareno',this.checked);_poziRenderPanel()", !!_ovlState.opozareno, 'Prikaži opožarene površine na karti'))
 
     + kart('⚠ Indeks opasnosti od požara (FWI)',
-      'Copernicus EFFIS — prognoza opasnosti na osnovu vremena (suša, vjetar, vlaga). Pokazuje gdje je danas rizično raditi sa mehanizacijom ili paliti.',
+      'Copernicus EFFIS · prognoza po vremenu (suša, vjetar, vlaga)',
       prekidac("_instToggle('fwi',this.checked);_poziRenderPanel()", !!_ovlState.fwi, 'Prikaži indeks opasnosti na karti')
       + `<div style="display:flex;gap:4px;margin-top:8px;">`
       + [['#22c55e','vrlo nizak'],['#a3e635','nizak'],['#facc15','srednji'],['#f97316','visok'],['#dc2626','vrlo visok'],['#7f1d1d','ekstreman']]
@@ -13709,8 +13735,7 @@ function _poziSadrzajHtml() {
              <div style="font-size:8.5px;color:#64748b;margin-top:3px;line-height:1.2;">${l}</div></div>`).join('')
       + `</div>`)
 
-    + kart('📞 Hitni brojevi',
-      'Poziv ide direktno — radi i bez interneta, treba samo signal mobilne mreže.',
+    + kart('📞 Hitni brojevi', '',
       [['123','Vatrogasci','#ef4444'],['122','Policija','#3b82f6'],['124','Hitna pomoć','#22c55e']]
         .map(([br, nm, boja]) => `
           <a href="tel:${br}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;margin-bottom:6px;
@@ -13721,8 +13746,7 @@ function _poziSadrzajHtml() {
           </a>`).join(''))
 
     + `<div style="font-size:10px;color:#334155;line-height:1.6;text-align:center;padding:4px 8px 16px;">
-         Izvori: NASA FIRMS (detekcije) · Copernicus EFFIS (opožarene površine, indeks opasnosti).<br>
-         Besplatni javni servisi — traže internet. Zadnji dohvat se čuva za offline pregled.
+         NASA FIRMS · Copernicus EFFIS · Global Forest Watch
        </div>`
   );
 }
