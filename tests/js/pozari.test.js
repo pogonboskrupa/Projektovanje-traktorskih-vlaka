@@ -821,6 +821,9 @@ const SRC9 = [
   SRC_DST,
   extractConst('_POZ_TRAKE'),
   extractFn('_poziTraka'),
+  extractConst('_POZ_SORTOVI'),
+  extractConst('_POZ_SORT_KEY'),
+  extractFn('_poziSort'),
   extractFn('_bearing'),
   extractFn('_azimutSmjer'),
   extractFn('fmtL'),
@@ -828,15 +831,17 @@ const SRC9 = [
   extractFn('_poziStarost'),
   extractFn('_poziRedHtml'),
   extractConst('_POZ_PO_TRACI'),
+  extractConst('_POZ_LISTA_MAX'),
   extractFn('_poziListaHtml'),
 ].join('\n');
 
-function makeLista({ evts, on = true, meta = {} }) {
+function makeLista({ evts, on = true, meta = {}, sort = null }) {
   const sandbox = {
     _poziOn: on, _poziMeta: meta, _poziEvts: evts,
     _poziRefTacka: () => ({ la:44.88, lo:16.15, gps:true }),
     _poziOkvirNaziv: () => '24 sata', _POZ_RADIUS_KM: 150,
     _escHtml: (s) => s,
+    localStorage: { getItem: () => sort, setItem(){}, removeItem(){} },
   };
   const keys = Object.keys(sandbox);
   return new Function(...keys, SRC9 + '\nreturn _poziListaHtml();')(...keys.map(k => sandbox[k]));
@@ -874,6 +879,54 @@ t('traka sa više od _POZ_PO_TRACI požara ispiše "i još N", ostale i dalje br
   const html = makeLista({ evts });
   assert.match(html, /Do 20 km.*\(9\)/s, 'zaglavlje mora brojati SVIH 9, ne samo prikazanih');
   assert.match(html, /i još 3 u ovoj traci/);
+});
+
+console.log('Sort/filter liste požara (v3.110.0) — bliže/dalje/novije prvo:');
+
+t('zadano (bez sačuvanog sorta) je "bliže prvo" i zadržava trake — nepromijenjeno ponašanje', () => {
+  const html = makeLista({ evts: [
+    { d:5000,  la:44.9, lo:16.2, conf:'h', broj:1, sateliti:['A'], zadnji:1000, nov:false },
+    { d:90000, la:45.5, lo:17.0, conf:'h', broj:1, sateliti:['A'], zadnji:2000, nov:false },
+  ] });
+  assert.match(html, /Do 20 km/);
+  assert.match(html, /Preko 40 km/);
+});
+
+t('"dalje prvo" (d_desc): ravna lista bez traka, sortirana OPADAJUĆE po udaljenosti', () => {
+  const evts = [
+    { d:5000,  la:44.9, lo:16.2, conf:'h', broj:1, sateliti:['A'], zadnji:1000, nov:false },  // i=0
+    { d:90000, la:45.5, lo:17.0, conf:'h', broj:1, sateliti:['A'], zadnji:2000, nov:false },  // i=1
+    { d:25000, la:45.1, lo:16.4, conf:'h', broj:1, sateliti:['A'], zadnji:3000, nov:false },  // i=2
+  ];
+  const html = makeLista({ evts, sort: 'd_desc' });
+  assert.ok(!/Do 20 km|Preko 40 km/.test(html), 'trake se ne smiju prikazati van zadanog sorta');
+  const iDalje = html.indexOf('_poziZoom(1)');   // 90km — najdalji, mora biti PRVI
+  const iSred  = html.indexOf('_poziZoom(2)');   // 25km — srednji
+  const iBlizu = html.indexOf('_poziZoom(0)');   // 5km — najbliži, mora biti ZADNJI
+  assert.ok(iDalje >= 0 && iSred > iDalje && iBlizu > iSred, 'poredak mora biti dalje→bliže: ' + [iDalje, iSred, iBlizu]);
+});
+
+t('"novije prvo" (t_desc): ravna lista, sortirana OPADAJUĆE po vremenu zadnje detekcije', () => {
+  const evts = [
+    { d:5000,  la:44.9, lo:16.2, conf:'h', broj:1, sateliti:['A'], zadnji:1000, nov:false },  // i=0, najstariji
+    { d:90000, la:45.5, lo:17.0, conf:'h', broj:1, sateliti:['A'], zadnji:3000, nov:false },  // i=1, najnoviji
+    { d:25000, la:45.1, lo:16.4, conf:'h', broj:1, sateliti:['A'], zadnji:2000, nov:false },  // i=2, srednje
+  ];
+  const html = makeLista({ evts, sort: 't_desc' });
+  assert.ok(!/Do 20 km|Preko 40 km/.test(html), 'trake se ne smiju prikazati van zadanog sorta');
+  const iNoviji = html.indexOf('_poziZoom(1)');
+  const iSred   = html.indexOf('_poziZoom(2)');
+  const iStar   = html.indexOf('_poziZoom(0)');
+  assert.ok(iNoviji >= 0 && iSred > iNoviji && iStar > iSred, 'poredak mora biti novije→starije: ' + [iNoviji, iSred, iStar]);
+});
+
+t('"dalje prvo"/"novije prvo": kapa na _POZ_LISTA_MAX sa "i još N", ORIGINALNI indeksi ostaju netaknuti', () => {
+  const evts = Array.from({ length: 20 }, (_, k) => ({
+    d: 1000 * (k + 1), la:44.9, lo:16.2, conf:'h', broj:1, sateliti:['A'], zadnji:1000 + k, nov:false
+  }));
+  const html = makeLista({ evts, sort: 'd_desc' });
+  assert.match(html, /i još 2/);
+  assert.match(html, /_poziZoom\(19\)/, 'najdalji (i=19) mora biti prikazan prvi u d_desc');
 });
 
 console.log('_poziSazetak — upozorenje kad udaljenost NIJE od stvarne GPS pozicije:');

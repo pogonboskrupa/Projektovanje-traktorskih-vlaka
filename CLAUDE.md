@@ -307,6 +307,20 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   redoslijed traka da uhvati baš tu zamku. Svaka traka prikazuje do
   `_POZ_PO_TRACI`=6 požara pa "…i još N", a brojka u zaglavlju ("Preko 40 km
   (12)") uvijek broji SVE u toj traci, ne samo prikazane.
+- **Sort/filter liste požara + suženje radijusa na 100 km (v3.110.0)**: na
+  eksplicitan zahtjev dodan je `_POZ_SORTOVI` izbor iznad liste — "Bliže prvo"
+  (zadano), "Dalje prvo", "Novije prvo" (`_poziSort`/`_poziPostaviSort`,
+  `localStorage tvlake_pozari_sort`). **Trake udaljenosti (v3.108.0) imaju
+  smisla SAMO za "bliže prvo"** — taj sort ih zadržava nepromijenjene jer je
+  `_poziEvts` već rastuće sortiran po udaljenosti; ostala dva načina namjerno
+  prikazuju RAVNU listu bez traka (kapa `_POZ_LISTA_MAX`=18, "…i još N") jer bi
+  sortiranje po vremenu miješalo bliske i daleke požare pa bi podjela na trake
+  bila zbunjujuća. `_poziListaHtml` u sva tri slučaja pravi NOVI poredak nad
+  kopijom parova `{g,i}` — `i` (indeks koji `onclick="_poziZoom(i)"` nosi)
+  ostaje ORIGINALNI indeks u `_poziEvts`, isti princip kao kod traka. Uz to je
+  `_POZ_RADIUS_KM` sužen sa 150 na 100 km (eksplicitan zahtjev) — utiče na sve
+  što ga čita (`_poziFilterBlizu`, tekst "krug X km" u statusu/toastu/karticama)
+  bez posebne izmjene na tim mjestima jer svi čitaju istu konstantu.
 - **Blokirajuća poruka PRIJE pokušaja je gora od greške POSLIJE pokušaja**
   (v3.108.1): podtab Sječa je pri uvođenju (v3.107.0) sakrivao CIJELI prekidač
   i sadržaj iza teksta "za ovaj sloj treba GFW ključ" ako ključ nije unesen —

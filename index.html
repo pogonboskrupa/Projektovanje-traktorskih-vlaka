@@ -4831,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.109.1';
+const APP_VER = 'v3.110.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12077,11 +12077,13 @@ const _POZ_NOTIF_SEEN= 'tvlake_pozari_notif_seen'; // za koje požare je već ja
 // prikazivanje JUČERAŠNJEG smjera vjetra kao da je trenutan bi bilo opasno
 // pogrešno u pravoj situaciji požara. Bez mreže _poziOsvjeziMeteo() tiho ne
 // vrati ništa i kartica se jednostavno ne prikaže, umjesto da slaže stare podatke.
-const _POZ_RADIUS_KM = 150;    // šire od bilo koje šumarije — da se vidi i šta se približava
+const _POZ_RADIUS_KM = 100;    // v3.110.0: suženo sa 150 na 100 km na eksplicitan zahtjev —
+                                // šire od bilo koje šumarije i dalje, ali bez detekcija toliko
+                                // daleko da su za korisnika samo šum
 const _POZ_GRUPA_M   = 1500;   // detekcije bliže od ovoga su ISTI požar (v. _poziGrupisi)
 
 // Trake udaljenosti (v3.108.0) — lista se RAŠČLANJUJE na "koliko je hitno",
-// ne filtrira: požar na 45 km i dalje treba biti vidljiv (u krugu 150 km je),
+// ne filtrira: požar na 45 km i dalje treba biti vidljiv (u krugu 100 km je),
 // samo ne smije zauzeti isti vizuelni prioritet kao onaj na 5 km. Granice u
 // METRIMA jer je g.d (i sav ostatak modula) već u metrima.
 const _POZ_TRAKE = [
@@ -12091,6 +12093,26 @@ const _POZ_TRAKE = [
 ];
 function _poziTraka(d) {
   return _POZ_TRAKE.find(t => d >= t.min && d < t.max) || _POZ_TRAKE[_POZ_TRAKE.length - 1];
+}
+
+// Sort/filter liste (v3.110.0) — "bliže prvo" (zadano) zadržava trake udaljenosti
+// gore (već su u tom redoslijedu); "dalje prvo" i "novije prvo" prikazuju RAVNU
+// listu bez traka, jer sortiranje po vremenu/obrnutoj udaljenosti miješa bliske i
+// daleke požare pa bi podjela na trake bila zbunjujuća, ne korisna.
+const _POZ_SORT_KEY = 'tvlake_pozari_sort';
+const _POZ_SORTOVI = [
+  { id:'d_asc',  naziv:'📍 Bliže prvo' },
+  { id:'d_desc', naziv:'📍 Dalje prvo' },
+  { id:'t_desc', naziv:'🕐 Novije prvo' }
+];
+function _poziSort() {
+  const v = localStorage.getItem(_POZ_SORT_KEY);
+  return _POZ_SORTOVI.some(s => s.id === v) ? v : 'd_asc';
+}
+function _poziPostaviSort(id) {
+  if (!_POZ_SORTOVI.some(s => s.id === id)) return;
+  localStorage.setItem(_POZ_SORT_KEY, id);
+  _poziRenderPanel();
 }
 
 // Svi izvori se dohvaćaju PARALELNO i SPAJAJU (v3.104.0), ne "prvi koji uspije".
@@ -12894,13 +12916,14 @@ function _poziRedHtml(g, i, ref) {
   </div>`;
 }
 
-// Lista se RAŠČLANJUJE na tri trake udaljenosti (_POZ_TRAKE) — ne filtrira.
-// Požar na 45 km je i dalje u krugu od 150 km i mora ostati vidljiv, samo
-// grupisan pod "Preko 40 km" da ne konkuriše vizuelno onome na 5 km. _poziEvts
-// je već sortiran po udaljenosti (_poziGrupeBlizu), pa se svaka traka samo
-// filtrira iz JEDNOG prolaza — indeks `i` ostaje ORIGINALNI indeks u
-// _poziEvts (ne pozicija unutar trake), jer _poziZoom(i) čita baš iz njega.
+// Lista se, u ZADANOM sortu (bliže prvo), RAŠČLANJUJE na tri trake udaljenosti
+// (_POZ_TRAKE) — ne filtrira. Požar na 45 km je i dalje u krugu od 100 km i mora
+// ostati vidljiv, samo grupisan pod "Preko 40 km" da ne konkuriše vizuelno
+// onome na 5 km. U svakom slučaju (trake ili ravna lista, v3.110.0 sort) indeks
+// `i` ostaje ORIGINALNI indeks u _poziEvts (ne pozicija u prikazu), jer
+// _poziZoom(i) čita baš iz njega.
 const _POZ_PO_TRACI = 6;
+const _POZ_LISTA_MAX = 18; // kapa za ravnu listu (dalje prvo / novije prvo)
 function _poziListaHtml() {
   if (!_poziOn) return '';
   const m = _poziMeta || {};
@@ -12912,6 +12935,20 @@ function _poziListaHtml() {
   }
   const ref = _poziRefTacka();
   const sIndeksom = _poziEvts.map((g, i) => ({ g, i }));
+
+  if (_poziSort() !== 'd_asc') {
+    // _poziEvts je već sortiran po udaljenosti rastuće (_poziGrupeBlizu) — za
+    // "dalje prvo"/"novije prvo" se pravi NOVI, zaseban poredak nad kopijom
+    // parova {g,i}; `i` se ne dira, samo se mijenja redoslijed u kom se čita.
+    const poredjeno = [...sIndeksom].sort((a, b) => _poziSort() === 'd_desc'
+      ? b.g.d - a.g.d
+      : (b.g.zadnji || 0) - (a.g.zadnji || 0));
+    const redovi = poredjeno.slice(0, _POZ_LISTA_MAX).map(({ g, i }) => _poziRedHtml(g, i, ref)).join('');
+    const ostatak = poredjeno.length > _POZ_LISTA_MAX
+      ? `<div style="font-size:10px;color:#475569;padding:4px;">…i još ${poredjeno.length - _POZ_LISTA_MAX}</div>` : '';
+    return redovi + ostatak;
+  }
+
   return _POZ_TRAKE.map(traka => {
     const uTraci = sIndeksom.filter(({ g }) => g.d >= traka.min && g.d < traka.max);
     if (!uTraci.length) return '';
@@ -13599,6 +13636,14 @@ function _poziSadrzajHtml() {
         border:1px solid ${on ? '#f97316' : '#1e3a5f'};background:${on ? '#f9731633' : '#14233c'};color:${on ? '#fdba74' : '#94a3b8'};">${o.naziv}</button>`;
     }).join('') + `</div>`;
 
+  // v3.110.0: sort/filter liste — samo kad ima šta sortirati.
+  const sortChips = (_poziOn && !m.greska && _poziEvts.length) ? `<div style="display:flex;gap:6px;margin:0 0 8px;">` +
+    _POZ_SORTOVI.map(s => {
+      const on = _poziSort() === s.id;
+      return `<button onclick="_poziPostaviSort('${s.id}')" style="flex:1;padding:6px 4px;border-radius:8px;font-size:10.5px;font-weight:600;cursor:pointer;
+        border:1px solid ${on ? '#38bdf8' : '#1e3a5f'};background:${on ? '#38bdf833' : '#14233c'};color:${on ? '#7dd3fc' : '#94a3b8'};">${s.naziv}</button>`;
+    }).join('') + `</div>` : '';
+
   const mapKeyPolje = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #1e293b;">
       <div style="font-size:10.5px;color:#64748b;line-height:1.5;margin-bottom:6px;">
         Opciono: besplatni FIRMS MAP_KEY (registracija na
@@ -13648,6 +13693,7 @@ function _poziSadrzajHtml() {
       prekidac('_poziToggle(this.checked)', _poziOn, 'Prikaži detekcije na karti')
       + okvirChips
       + `<div id="poz-status" style="font-size:11px;color:#94a3b8;margin:6px 0 8px;">${_escHtml(_poziOn ? _poziSazetak().kratko : '—')}</div>`
+      + sortChips
       + detekcije
       + `<div style="display:flex;gap:7px;margin-top:10px;">
            <button onclick="_poziLoad(false)" style="flex:1;padding:9px;background:#14233c;border:1px solid #1e3a5f;border-radius:9px;color:#7dd3fc;font-size:12px;font-weight:600;cursor:pointer;"><svg class="ic"><use href="#ic-osvjezi"/></svg> Osvježi</button>
