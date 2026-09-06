@@ -90,7 +90,20 @@ window.addEventListener('DOMContentLoaded',function(){
    .leaflet-proxy/.leaflet-zoom-animated zadržavaju will-change, pa panovanje/
    zumiranje cijele karte ostaje GPU-ubrzano, samo pojedinačne pločice više
    ne dobijaju svoj zaseban sloj. */
-.leaflet-tile { backface-visibility: hidden; opacity:1; }
+/* v3.111.5: korisnik i dalje vidi mrežu na STVARNOM Android uređaju i poslije
+   v3.111.3 (potvrđeno preko verzije u Meniju — v3.111.4 je aktivna), iako je
+   ista popravka u izolovanoj Playwright reprodukciji (softverski renderovan
+   Chromium, bez pravog GPU-a) potpuno uklonila hairline razmak. Zaključak:
+   na stvarnom telefonskom GPU-u/drajveru postoji DODATNI ili DRUGAČIJI
+   mehanizam od onog dokazanog u sandboxu — `backface-visibility:hidden` je
+   POZNATO da i sam, nezavisno od will-change, tjera browser da promoviše
+   element u zaseban compositor layer na nekim GPU-ima, pa je uklonjen i on.
+   Dodat je i `outline:1px solid transparent` — odvojen, dobro dokumentovan
+   trik iz Leaflet zajednice (GitHub issue #3575 i slični) za hairline
+   razmake koji dolaze od Blink layout sub-piksel zaokruživanja, DRUGAČIJI
+   mehanizam od GPU compositor-slojeva koji je v3.111.3 riješio. Kombinacija
+   cilja OBA poznata mehanizma odjednom umjesto nagađanja jednog po jednog. */
+.leaflet-tile { opacity:1; outline:1px solid transparent; }
 .leaflet-tile-loaded { opacity:1; }
 .leaflet-zoom-animated { will-change: transform; }
 .leaflet-map-pane { will-change: transform; }
@@ -4845,7 +4858,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.111.4';
+const APP_VER = 'v3.111.5';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 

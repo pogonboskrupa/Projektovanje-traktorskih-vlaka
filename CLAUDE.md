@@ -481,6 +481,35 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
     pločicama i PIKSELIMA, ne nagađati redom koji CSS red "izgleda sumnjivo"
     — druga pretpostavka (v3.111.2) je bila stvarna ali NEDOVOLJNA promjena,
     i bez piksel-tačne provjere bi treći pokušaj opet bio nagađanje.
+  - **v3.111.4 (deploy provjeren, ali korisnik i dalje "opet isto")**: prije
+    daljeg nagađanja provjereno preko `mcp__github__actions_list`
+    (`list_workflow_runs` za `deploy.yml`) da je deploy za v3.111.3 stvarno
+    uspio i da korisnik (potvrđeno preko broja verzije u Meniju) STVARNO
+    gleda tu verziju — dakle popravka sa v3.111.3 JESTE live, a linije SU I
+    DALJE tu. Ovo je važno razlikovati od ranijih "opet isto" javljanja gdje
+    je uzrok bio isporuka (v. zamku "Više verzija zaredom u istoj kartici"
+    gore), ne sadržaj popravke.
+  - **v3.111.5 (i dalje NEPOTVRĐENO na stvarnom uređaju)**: pošto je izolovana
+    Playwright reprodukcija (softverski renderovan Chromium bez pravog GPU-a)
+    potvrdila da je `will-change` mehanizam uklonjen, a stvarni Android
+    telefon i dalje pokazuje mrežu, zaključak je da REALAN GPU/drajver ima
+    DODATNI ili DRUGAČIJI mehanizam koji sandbox ne može reprodukovati.
+    Dodano: `backface-visibility:hidden` uklonjen i sa `.leaflet-tile` (i on
+    je, nezavisno od will-change, poznat kao trigger za promociju u zaseban
+    compositor layer na nekim GPU-ima), plus `outline:1px solid transparent`
+    — poseban, dobro dokumentovan trik iz Leaflet zajednice (GitHub issue
+    #3575) za hairline razmake koji dolaze od Blink layout sub-piksel
+    zaokruživanja, DRUGAČIJI mehanizam od GPU compositor-slojeva riješenog u
+    v3.111.3. Isključeno testom da GOOGLE MAPS na ISTOM telefonu NEMA ovaj
+    problem — dakle nije hardver/ekran/OS-podešavanje, nego nešto specifično
+    za Leaflet-ov raster-tile pristup (Google Maps koristi WebGL/vektorske
+    pločice, ne DOM `<img>` rastere). Ako i OVO ne pomogne, sljedeći korak
+    nije još jedna CSS pretpostavka nego drugačija dijagnostika (npr. screen
+    recording sa terena, ili razmatranje da se ukloni blob-URL pristup u
+    `createTile` u korist direktnog `img.src = url`, jer blob: URL-ovi na
+    nekim Android Chrome verzijama dobijaju vlastitu compositor promociju
+    NEZAVISNO od CSS-a, što bi objasnilo zašto sandbox (koji ne pravi tu
+    promociju) ne vidi bug koji stvaran telefon vidi).
 - **"Script error." bez linije/poruke = maskirana cross-origin greška**
   (v3.111.1): korisnik je na webapp-u (browseru) prijavio crveni baner "JS
   GREŠKA: Script error. (linija 0)" odmah pri otvaranju. `window.onerror`
