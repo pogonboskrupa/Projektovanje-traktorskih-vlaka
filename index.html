@@ -4858,7 +4858,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.111.6';
+const APP_VER = 'v3.111.7';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -11389,6 +11389,28 @@ function makeCachedTileLayer(cacheName, baseClass) {
       const url = this.getTileUrl(coords);
       img._ctls = new Set();   // AbortController-i u letu — prekidaju se na tileunload
 
+      // v3.111.7: PRAZAN URL (sloj napravljen bez predloška, npr. Wayback prije
+      // nego korisnik izabere datum) — `fetch('')` bi dohvatio SAMU STRANICU
+      // (HTML, 200 OK!), pa bi se HTML pokušao prikazati kao slika i svaka
+      // pločica bi bila SLOMLJENA SLIKA. Ne dirati mrežu dok URL ne postoji.
+      if (!url) { img._empty = true; done(null, img); return img; }
+
+      // v3.111.7: server koji vrati 200 OK ali NIJE slika (klasičan WMS
+      // ServiceException u XML-u kad je ime sloja/endpoint pogrešan, ili HTML
+      // stranica greške) je do sada prolazio kao ispravan odgovor: pravio se
+      // blob, upisivao u keš i dodjeljivao img.src — browser to ne može
+      // dekodirati pa nacrta IKONU SLOMLJENE SLIKE, a njene ivice se preko
+      // cijele karte vide kao siva MREŽA (tačno prijavljeni bug). Sadržaj se
+      // zato provjerava po Content-Type zaglavlju prije nego postane slika.
+      // Prazan Content-Type se DOPUŠTA — neki tile serveri ga ne šalju, a
+      // pogrešan sadržaj u praksi UVIJEK dolazi sa text/xml ili text/html.
+      const jeSlika = (r) => {
+        try {
+          const ct = (r.headers && r.headers.get) ? (r.headers.get('content-type') || '') : '';
+          return !ct || /^image\//i.test(ct.trim());
+        } catch(e) { return true; }
+      };
+
       // v3.111.6: blob URL se NE revoke-uje odmah na onload (kao ranije) — Leaflet
       // REUSE-uje postojeće <img> tile elemente (keepBuffer, zoom in pa out), pa
       // pločica koja je već prikazana može ostati u DOM-u van ekrana. Ako browser
@@ -11478,7 +11500,10 @@ function makeCachedTileLayer(cacheName, baseClass) {
           await new Promise(rs => setTimeout(rs, 1200));
           r = await fetchTile(url, 8000);
         }
-        if (r && r.ok) {
+        // 200 OK koji NIJE slika (WMS ServiceException, HTML stranica greške) se
+        // tretira kao NEUSPJEH — ne kešira se i ne postaje img.src (inače:
+        // slomljena slika po pločici → siva mreža preko cijele karte).
+        if (r && r.ok && jeSlika(r)) {
           try { const c = await caches.open(cacheName); c.put(url, r.clone()); } catch(e) {}
           const u = URL.createObjectURL(await r.blob());
           img.onload = () => { img._empty = false; if (!isRetry) done(null, img); };
@@ -11497,7 +11522,11 @@ function makeCachedTileLayer(cacheName, baseClass) {
           if ('caches' in window) {
             const c = await caches.open(cacheName);
             const m = await c.match(url);
-            if (m) {
+            // Keš može sadržavati OTROVAN zapis upisan prije v3.111.7 (WMS XML
+            // greška sa 200 OK) — takav se briše odmah, bez pokušaja prikaza,
+            // inače bi se slomljena slika servirala TRAJNO i offline.
+            if (m && !jeSlika(m)) { try { await c.delete(url); } catch(e) {} }
+            else if (m) {
               const u = URL.createObjectURL(await m.blob());
               img.onload = () => { img._empty = false; if (!isRetry) done(null, img); };
               // Pokvaren keš zapis (odsječen download na lošoj mreži) se ne može

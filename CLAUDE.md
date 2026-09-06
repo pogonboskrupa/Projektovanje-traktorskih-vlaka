@@ -544,6 +544,42 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
     za PRAVU izolaciju) bi ovdje značio da kasniji test svojim `makeEnv()`
     pozivom prepiše globals dok je raniji test još u letu — testovi ovdje
     zato idu striktno redom, svaki čeka svoj kraj prije sljedećeg.
+- **Odgovor 200 OK koji NIJE slika = slomljena pločica = siva MREŽA preko
+  karte** (v3.111.7 — konačan uzrok mreže linija, poslije pet promašenih
+  pokušaja): ključni trag je bio POLOŽAJ malih "slomljena slika" ikonica na
+  korisnikovim screenshot-ovima — one su tačno u GORNJEM LIJEVOM UGLU svake
+  ćelije mreže, a razmak ćelija je (uz DPR uređaja) tačno 256 CSS px. Dakle
+  linije NISU spojevi pločica podloge (kako su pretpostavljale sve CSS
+  popravke v3.111.2/.3/.5), nego IVICE SLOMLJENIH SLIKA jednog sloja PREKO
+  karte: browser za `<img>` čiji se sadržaj ne može dekodirati crta ikonu
+  slomljene slike u gornjem lijevom uglu i vidljivu kutiju — 256px do 256px
+  = mreža preko cijelog ekrana. Zato se vidjelo na SVAKOJ podlozi (uklj.
+  offline MBTiles) — jer je krivac bio OVERLAY iznad njih, a ne podloga.
+  - Uzrok u `createTile`: svaki `r.ok` odgovor je tretiran kao slika. WMS
+    server sa POGREŠNIM imenom sloja/endpointom klasično vraća **200 OK sa
+    XML ServiceException** (ne 404!) — a EFFIS (`_OVL.fwi`/`_OVL.opozareno`)
+    i WorldCover su upravo takvi, NIKAD PROVJERENI endpointi (CLAUDE.md to
+    izričito piše od v3.103.0). Taj XML je pretvaran u blob, upisivan u KEŠ
+    i dodjeljivan `img.src` → slomljena slika po pločici, i to TRAJNO jer se
+    otrovan zapis servirao iz keša i offline. `_ovlState` se čuva u
+    localStorage i vraća pri svakom pokretanju → problem "uvijek tu".
+  - Popravka: `jeSlika(r)` provjerava `Content-Type` prije nego odgovor
+    postane slika (prazan CT se DOPUŠTA — neki tile serveri ga ne šalju, a
+    pogrešan sadržaj u praksi uvijek dolazi kao text/xml ili text/html);
+    ne-slika se ne kešira i ne postaje `img.src`. Keš se usput ČISTI: zapis
+    koji nije slika se briše pri prvom nailasku (otrovani zapisi upisani
+    starijim verzijama nestaju sami).
+  - Uz to: `_wbTileLayer` (Vremenska traka) je konstruisan sa PRAZNIM URL
+    predloškom dok korisnik ne izabere datum — `fetch('')` dohvata SAMU
+    STRANICU (HTML, 200 OK!), što bi kroz isti put dalo istu slomljenu
+    mrežu. Sad `createTile` odmah odustane ako je URL prazan.
+  - **Pouka**: kad se render-bug opire CSS popravkama, pogledati DA LI ima
+    ikonica slomljene slike i GDJE su — položaj (gornji lijevi ugao ćelije)
+    i razmak (256 CSS px) odmah razlikuju "spoj pločica" od "pločica čiji
+    sadržaj nije slika". I: nikad ne pretpostaviti da je `r.ok` ⇒ slika.
+  - Test: `tests/js/tile-bloburl.test.js` (XML/HTML odgovor se odbija, prazan
+    Content-Type se dopušta, otrovan keš zapis se briše, prazan URL ne dira
+    mrežu).
 - **"Script error." bez linije/poruke = maskirana cross-origin greška**
   (v3.111.1): korisnik je na webapp-u (browseru) prijavio crveni baner "JS
   GREŠKA: Script error. (linija 0)" odmah pri otvaranju. `window.onerror`

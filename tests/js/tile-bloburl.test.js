@@ -70,11 +70,12 @@ function makeFakeL() {
 
 // Minimalan <img>/document/caches/fetch mock. `revokes`/`created` bilježe
 // svaki poziv radi provjere REDOSLIJEDA i BROJA revoke-a.
-function makeEnv({ networkOk = true, cacheHit = null } = {}) {
+function makeEnv({ networkOk = true, cacheHit = null, contentType = 'image/png', cacheContentType = 'image/png' } = {}) {
   const revokes = [];
   const created = [];
   let nextId = 1;
   const blobStore = new Map();
+  const env = { revokes, created };
 
   class FakeBlob { constructor(tag) { this.tag = tag; } }
   class FakeImg {
@@ -99,20 +100,28 @@ function makeEnv({ networkOk = true, cacheHit = null } = {}) {
     revokeObjectURL: (u) => { revokes.push(u); blobStore.delete(u); },
   };
   global.AbortController = class { constructor() { this.signal = {}; } abort() {} };
+  const cacheDeletes = [];
+  const cachePuts = [];
+  const hdr = (ct) => ({ get: (n) => (String(n).toLowerCase() === 'content-type' ? ct : null) });
   global.caches = {
     open: async () => ({
-      match: async (u) => (cacheHit && u === cacheHit ? { blob: async () => new FakeBlob('cache:' + u) } : undefined),
-      put: async () => {},
-      delete: async () => {},
+      match: async (u) => (cacheHit && u === cacheHit
+        ? { headers: hdr(cacheContentType), blob: async () => new FakeBlob('cache:' + u) }
+        : undefined),
+      put: async (u) => { cachePuts.push(u); },
+      delete: async (u) => { cacheDeletes.push(u); return true; },
     }),
   };
   global.fetch = async (u) => {
     if (!networkOk) throw new Error('mreza pala');
-    return { ok: true, clone: () => ({}), blob: async () => new FakeBlob('net:' + u) };
+    return { ok: true, headers: hdr(contentType), clone: () => ({}), blob: async () => new FakeBlob('net:' + u) };
   };
+  env.cacheDeletes = cacheDeletes;
+  env.cachePuts = cachePuts;
   global.createImageBitmap = async () => ({});
 
-  return { revokes, created, FakeImg };
+  env.FakeImg = FakeImg;
+  return env;
 }
 
 function makeLayer(TILE_CACHE_NAME) {
@@ -171,6 +180,60 @@ t('retry na istom img-u revoke-uje STARI blob prije dodjele NOVOG (ne curi memor
   assert.strictEqual(created.length, 2, 'drugi (retry) blob URL kreiran');
   assert.strictEqual(revokes.length, 1, 'PRVI blob URL mora biti revoke-ovan čim se dodijeli drugi — ne poslije tileunload-a');
   assert.strictEqual(revokes[0], created[0], 'revoke-ovan mora biti baš PRVI (stari), ne drugi (novi, još aktivan)');
+});
+
+console.log('Odgovor koji NIJE slika (WMS 200 OK + XML greška) ne smije postati pločica:');
+
+t('WMS ServiceException (200 OK, text/xml) → NE kešira se i NE postaje img.src', async () => {
+  const env = makeEnv({ networkOk: true, contentType: 'text/xml; charset=utf-8' });
+  const layer = makeLayer();
+  await new Promise(res => layer.createTile({ z: 10, x: 1, y: 1 }, (err, tile) => res(tile)));
+  await new Promise(r => setTimeout(r, 20));
+  assert.strictEqual(env.created.length, 0, 'nijedan blob URL se ne smije napraviti od XML-a');
+  assert.strictEqual(env.cachePuts.length, 0, 'XML greška se NE smije upisati u keš');
+});
+
+t('HTML stranica greške (200 OK, text/html) se takođe odbija', async () => {
+  const env = makeEnv({ networkOk: true, contentType: 'text/html' });
+  const layer = makeLayer();
+  await new Promise(res => layer.createTile({ z: 10, x: 1, y: 1 }, (err, tile) => res(tile)));
+  await new Promise(r => setTimeout(r, 20));
+  assert.strictEqual(env.created.length, 0);
+  assert.strictEqual(env.cachePuts.length, 0);
+});
+
+t('server bez Content-Type zaglavlja se DOPUŠTA (neki tile serveri ga ne šalju)', async () => {
+  const env = makeEnv({ networkOk: true, contentType: '' });
+  const layer = makeLayer();
+  await new Promise(res => layer.createTile({ z: 10, x: 1, y: 1 }, (err, tile) => res(tile)));
+  await new Promise(r => setTimeout(r, 20));
+  assert.strictEqual(env.created.length, 1, 'prazan Content-Type ne smije blokirati ispravnu pločicu');
+});
+
+t('OTROVAN keš zapis (text/xml upisan starijom verzijom) se BRIŠE, ne servira', async () => {
+  const cacheUrl = 'https://x/10/1/1.png';
+  const env = makeEnv({ networkOk: false, cacheHit: cacheUrl, cacheContentType: 'text/xml' });
+  const layer = makeLayer();
+  await new Promise(res => layer.createTile({ z: 10, x: 1, y: 1 }, (err, tile) => res(tile)));
+  await new Promise(r => setTimeout(r, 20));
+  assert.strictEqual(env.created.length, 0, 'otrovan keš zapis se ne smije prikazati');
+  assert.deepStrictEqual(env.cacheDeletes, [cacheUrl], 'otrovan zapis mora biti obrisan iz keša');
+});
+
+console.log('Prazan URL predložak (sloj bez izabranog datuma) ne dira mrežu:');
+
+t('prazan getTileUrl → nema fetch-a, nema blob-a (inače bi dohvatio SAMU STRANICU)', async () => {
+  const env = makeEnv({ networkOk: true });
+  let fetched = 0;
+  const realFetch = global.fetch;
+  global.fetch = async (u) => { fetched++; return realFetch(u); };
+  const layer = makeLayer();
+  layer.getTileUrl = () => '';   // Wayback prije nego korisnik izabere datum
+  const img = await new Promise(res => layer.createTile({ z: 10, x: 1, y: 1 }, (err, tile) => res(tile)));
+  await new Promise(r => setTimeout(r, 20));
+  assert.strictEqual(fetched, 0, 'prazan URL NE smije okinuti mrežni zahtjev');
+  assert.strictEqual(env.created.length, 0);
+  assert.strictEqual(img._empty, true, 'pločica ostaje prazna (kandidat za _retryEmpty), ne slomljena slika');
 });
 
 (async () => {
