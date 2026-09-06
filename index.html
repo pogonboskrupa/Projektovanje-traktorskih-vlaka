@@ -4858,7 +4858,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.111.5';
+const APP_VER = 'v3.111.6';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -11389,6 +11389,22 @@ function makeCachedTileLayer(cacheName, baseClass) {
       const url = this.getTileUrl(coords);
       img._ctls = new Set();   // AbortController-i u letu — prekidaju se na tileunload
 
+      // v3.111.6: blob URL se NE revoke-uje odmah na onload (kao ranije) — Leaflet
+      // REUSE-uje postojeće <img> tile elemente (keepBuffer, zoom in pa out), pa
+      // pločica koja je već prikazana može ostati u DOM-u van ekrana. Ako browser
+      // pod pritiskom memorije (mobilni GPU) odluči da ponovo dekodira tu sliku
+      // (npr. poslije promocije u novi compositor layer), a blob URL je već
+      // revoke-ovan, dekodiranje puca i pločica se prikaže kao SLOMLJENA slika —
+      // trajno, dok se panom ne izađe iz keepBuffer opsega. Rješenje: URL se čuva
+      // na `img._blobUrl` i revoke-uje se TEK kad Leaflet stvarno napusti pločicu
+      // (`tileunload`, van keepBuffer opsega), preko `setSrc` ispod koji i sam
+      // revoke-uje prethodni URL prije nego dodijeli novi (retry/reload istog img).
+      const setSrc = (u) => {
+        if (img._blobUrl) { try { URL.revokeObjectURL(img._blobUrl); } catch(e) {} }
+        img._blobUrl = u;
+        img.src = u;
+      };
+
       if (!this._hooked) {
         this._hooked = true;
         // Zombi-zahtjevi: pri pan/zoom Leaflet odbaci pločicu → prekini njene fetch-eve
@@ -11396,6 +11412,7 @@ function makeCachedTileLayer(cacheName, baseClass) {
         this.on('tileunload', ev => {
           const el = ev.tile;
           if (el && el._ctls) { el._ctls.forEach(c => { try { c.abort(); } catch(e) {} }); el._ctls.clear(); }
+          if (el && el._blobUrl) { try { URL.revokeObjectURL(el._blobUrl); } catch(e) {} el._blobUrl = null; }
         });
         // Pločice bez pravog sadržaja (mreža pala / rate-limit / prekinut zoom):
         // ponovi dohvat kad se pogled smiri. Radi i za pločice koje Leaflet REUSE-a
@@ -11441,10 +11458,10 @@ function makeCachedTileLayer(cacheName, baseClass) {
             const blob = await new Promise(res => cv.toBlob(res));
             if (!blob) continue;
             const u = URL.createObjectURL(blob);
-            img.onload = () => { URL.revokeObjectURL(u); done(null, img); };
-            img.onerror = () => { URL.revokeObjectURL(u); done(null, img); };
+            img.onload = () => done(null, img);
+            img.onerror = () => done(null, img);
             img._empty = true;
-            img.src = u;
+            setSrc(u);
             return true;
           }
         } catch(e) {}
@@ -11464,9 +11481,9 @@ function makeCachedTileLayer(cacheName, baseClass) {
         if (r && r.ok) {
           try { const c = await caches.open(cacheName); c.put(url, r.clone()); } catch(e) {}
           const u = URL.createObjectURL(await r.blob());
-          img.onload = () => { URL.revokeObjectURL(u); img._empty = false; if (!isRetry) done(null, img); };
-          img.onerror = () => { URL.revokeObjectURL(u); if (!isRetry) done(null, img); };
-          img.src = u;
+          img.onload = () => { img._empty = false; if (!isRetry) done(null, img); };
+          img.onerror = () => { if (!isRetry) done(null, img); };
+          setSrc(u);
           return;
         }
         if (isRetry) return;                 // tihi pokušaj — bez fallbacka i bez done
@@ -11482,11 +11499,11 @@ function makeCachedTileLayer(cacheName, baseClass) {
             const m = await c.match(url);
             if (m) {
               const u = URL.createObjectURL(await m.blob());
-              img.onload = () => { URL.revokeObjectURL(u); img._empty = false; if (!isRetry) done(null, img); };
+              img.onload = () => { img._empty = false; if (!isRetry) done(null, img); };
               // Pokvaren keš zapis (odsječen download na lošoj mreži) se ne može
               // dekodirati — obriši ga pa probaj mrežu, inače bi se TRAJNO servirao.
-              img.onerror = () => { URL.revokeObjectURL(u); try { c.delete(url); } catch(e) {} fromNet(isRetry); };
-              img.src = u;
+              img.onerror = () => { try { c.delete(url); } catch(e) {} fromNet(isRetry); };
+              setSrc(u);
               return;
             }
           }

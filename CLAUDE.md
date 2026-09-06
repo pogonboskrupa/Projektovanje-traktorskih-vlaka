@@ -510,6 +510,40 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
     nekim Android Chrome verzijama dobijaju vlastitu compositor promociju
     NEZAVISNO od CSS-a, što bi objasnilo zašto sandbox (koji ne pravi tu
     promociju) ne vidi bug koji stvaran telefon vidi).
+  - **v3.111.6 (drugačiji mehanizam, ne još jedna CSS pretpostavka)**: v3.111.5
+    NIJE pomogao ("i dalje isto") — screenshot je i dalje pokazivao MALE
+    "slomljene slike" ikonice (sivi kvadrat sa oblakom/planinom) u istim
+    relativnim pozicijama kao u PRETHODNOM screenshotu, dosljedno kroz više
+    javljanja. To je bio trag da problem NIJE kozmetički CSS razmak nego
+    STVARNI gubitak sadržaja pločice. Uzrok pronađen u `createTile`: sve tri
+    grane (mrežni uspjeh, keš pogodak, zamućeni roditelj-fallback) su zvale
+    `URL.revokeObjectURL(u)` ODMAH na `img.onload` — razumno na prvi pogled
+    ("slika je gotova"), ali Leaflet REUSE-uje `<img>` tile elemente
+    (`keepBuffer`, zoom in pa out — vidi napomenu u kodu), pa prikazana
+    pločica ostaje u DOM-u i van ekrana. Ako mobilni browser pod pritiskom
+    memorije (uobičajeno na telefonu, rijetko na desktopu sa mnogo RAM-a)
+    odluči da ODBACI dekodiranu bitmapu i kasnije je PONOVO dekodira iz
+    `src`-a (npr. kad se pločica vrati u vidno polje ili promoviše u novi
+    compositor layer), a blob URL je već revoke-ovan, dekodiranje TRAJNO
+    puca — otud slomljena ikonica, i to specifično SPORADIČNO (zavisi koje
+    su pločice trenutno van ekrana kad memorija zafali), što objašnjava zašto
+    su iste ikonice viđene u istim OKVIRNIM pozicijama kroz više javljanja.
+    Ovo je i objasnilo zašto NIJEDNA CSS izmjena (v3.111.2/.3/.5) nije
+    pomogla — uzrok nije bio kompozitorski razmak nego stvaran gubitak
+    slikovnih podataka. Riješeno: blob URL se čuva na `img._blobUrl` i
+    revoke-uje se TEK na `tileunload` (kad Leaflet stvarno napusti pločicu,
+    van `keepBuffer` opsega) ili kad se ISTOM img elementu dodijeli NOVI blob
+    (retry), preko `setSrc()` helpera — nikad prije. Test:
+    `tests/js/tile-bloburl.test.js`, izvlači stvarni `makeCachedTileLayer` i
+    provjerava da revoke NIKAD ne prethodi tileunload-u/zamjeni, i da retry
+    ne curi memoriju (stari blob se ipak revoke-uje, samo kasnije).
+    **Zamka pri pisanju OVOG testa**: testovi mutiraju STVARNE Node globals
+    (`global.URL`/`fetch`/`caches`/`document`) jer je to ono što
+    `makeCachedTileLayer` referencira — obrazac "pokreni sve testove pa čekaj
+    na kraju" (koji koriste drugi test fajlovi sa `new Function` sandbox-om
+    za PRAVU izolaciju) bi ovdje značio da kasniji test svojim `makeEnv()`
+    pozivom prepiše globals dok je raniji test još u letu — testovi ovdje
+    zato idu striktno redom, svaki čeka svoj kraj prije sljedećeg.
 - **"Script error." bez linije/poruke = maskirana cross-origin greška**
   (v3.111.1): korisnik je na webapp-u (browseru) prijavio crveni baner "JS
   GREŠKA: Script error. (linija 0)" odmah pri otvaranju. `window.onerror`
