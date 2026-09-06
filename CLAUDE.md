@@ -420,7 +420,27 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
-- **Više verzija zaredom u istoj dugo otvorenoj kartici — auto-update stane
+- **Tanka siva linija na granici pločica — WMS TILING SEAM na EFFIS sloju,
+  ne baza karte** (v3.111.8): poslije v3.111.7 (koje je uklonilo DEBELE
+  slomljene-slike linije) korisnik je i dalje prijavio TANJU sivu liniju.
+  Umjesto da se nagađa peti put, korisnik je zamoljen da ISKLJUČI dodatne
+  slojeve jedan po jedan — gašenje "Opožarene površine"/"Indeks opasnosti"
+  (`_OVL.fwi`/`_OVL.opozareno`, oba idu na `maps.effis.emergency.copernicus.eu`)
+  je linije ODMAH uklonilo. Ovo je DIREKTAN, empirijski dokaz izvora, ne
+  Playwright pretpostavka — obje su OPCIONE, PODRAZUMIJEVANO ISKLJUČENE
+  overlay kartice (`_ovlState.fwi/opozareno = false`), pa je "sve linije
+  nestaju kad ih isključiš" bio i validan trenutni workaround.
+  Uzrok: EFFIS/GWIS (GeoServer-baziran) renderuje SVAKU WMS GetMap pločicu
+  NEZAVISNO — stilizovani (bojom klasifikovani) slojevi kao FWI ili konture
+  opožarenih površina imaju anti-aliasing na ivici koji se ne poklapa sa
+  susjednom, nezavisno renderovanom pločicom, čak i uz `transparent:true`.
+  Pokušana popravka: dodat `tiled:true` u WMS parametre za oba sloja —
+  GeoServer-ov standardni signal serveru da renderuje sa ISTIM tile-grid
+  poravnanjem koje traži klijent (isti obrazac kao GeoServer WMS-C/gutter
+  podešavanja). Nije bilo moguće potvrditi na stvarnom EFFIS serveru iz
+  sandboxa — ako ni ovo ne pomogne, ostavljanje ova dva prekidača isključenim
+  (već podrazumijevano stanje) je legitiman trajni workaround, jer izohipse/
+  baza karte/ostali slojevi NISU pogođeni.
   poslije PRVOG reload-a** (v3.111.4): korisnik je tri puta zaredom prijavio
   ISTI render-bug (mreža linija na karti) poslije tri različite popravke
   (v3.111.1/v3.111.2/v3.111.3), svaki put "opet isto"/"i dalje ima" — iako je

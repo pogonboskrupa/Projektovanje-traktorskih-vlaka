@@ -4858,7 +4858,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.111.7';
+const APP_VER = 'v3.111.8';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12099,12 +12099,20 @@ const _OVL = {
   // Endpoint nije bilo moguće provjeriti iz sandboxa (vidi CLAUDE.md, sekcija
   // o dodavanju novog mrežnog sloja) — "Provjeri izvore" dugme u panelu
   // Požari testira sve ovo NA UREĐAJU i kaže tačno šta radi a šta ne.
+  // v3.111.8: `tiled: true` — GeoServer-obrazac (EFFIS/GWIS je GeoServer-baziran)
+  // koji serveru kaže da renderuje sa ISTIM tile-grid poravnanjem koje koristi
+  // klijent, umjesto da svaki GetMap zahtjev renderuje NEZAVISNO od susjeda.
+  // Bez ovoga stilizovani slojevi (bojene klase kao FWI, konture opožarenih
+  // površina) znaju ostaviti tanku sivu liniju na granici dvije pločice —
+  // svaka se renderuje odvojeno pa se anti-aliasing na ivici ne poklopi sa
+  // susjednom pločicom. Korisnik je potvrdio da gašenje ova dva prekidača
+  // uklanja liniju — dokaz da je izvor baš ovaj WMS, ne baza karte.
   fwi: new CachedEffis('https://maps.effis.emergency.copernicus.eu/gwis', {
-    layers: 'ecmwf.fwi', format: 'image/png', transparent: true,
+    layers: 'ecmwf.fwi', format: 'image/png', transparent: true, tiled: true,
     version: '1.1.1', pane: 'demOverlay', maxZoom: 22, opacity: 0.55, attribution: 'Copernicus EFFIS'
   }),
   opozareno: new CachedEffis('https://maps.effis.emergency.copernicus.eu/gwis', {
-    layers: 'modis.ba', format: 'image/png', transparent: true,
+    layers: 'modis.ba', format: 'image/png', transparent: true, tiled: true,
     version: '1.1.1', pane: 'demOverlay', maxZoom: 22, opacity: 0.75, attribution: 'Copernicus EFFIS'
   })
 };
