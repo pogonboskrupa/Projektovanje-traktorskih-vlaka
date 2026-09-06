@@ -76,7 +76,7 @@ window.addEventListener('DOMContentLoaded',function(){
 /* NAPOMENA: ne koristiti `contain:strict/size` na tile-container — kolabira
    GridLayer (MBTiles) na 0x0 pa tile-ovi nestanu. Samo will-change je siguran. */
 .leaflet-tile-container { will-change: transform; }
-.leaflet-tile { backface-visibility: hidden; opacity:1; image-rendering: pixelated; }
+.leaflet-tile { backface-visibility: hidden; opacity:1; }
 .leaflet-tile-loaded { opacity:1; }
 .leaflet-zoom-animated { will-change: transform; }
 .leaflet-map-pane { will-change: transform; }
@@ -4831,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.111.1';
+const APP_VER = 'v3.111.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 

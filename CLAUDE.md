@@ -418,6 +418,20 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
+- **Vidljiva mreža/šahovska tabla preko CIJELE karte, na SVAKOJ podlozi**
+  (v3.111.2): korisnik je prijavio linije "kao ispisani meridijani" — pravilna
+  mreža vodoravnih i uspravnih linija preko cijelog ekrana, na SVIM podlogama
+  UKLJUČUJUĆI offline SQLite/MBTiles karte (dakle nije mogao biti nijedan
+  mrežni/WMS sloj — zajednički imenilac je bio LEAFLET-OV TILE RENDERING
+  SAM PO SEBI, ne izvor pločica). Uzrok: `.leaflet-tile { image-rendering:
+  pixelated }` (postojalo od v3.29.0, nepromijenjeno godinama) — ovo isključuje
+  browser-ovo glačanje (smoothing) između susjednih pločica, pa sitni
+  sub-piksel razmak u pozicioniranju (uobičajen kod necjelobrojnog zuma ili
+  transform-scale animacije) postaje OŠTRA, vidljiva linija umjesto da se
+  neprimjetno izgladi. Pošto `.leaflet-tile` klasu Leaflet kači na SVAKU
+  pločicu (XYZ/WMS `<img>` I canvas DEM overlaye I SQLite/MBTiles), problem je
+  bio univerzalan. Riješeno uklanjanjem `image-rendering: pixelated` (ostatak
+  pravila — `backface-visibility`/`opacity` za GPU compositing — ostaje).
 - **"Script error." bez linije/poruke = maskirana cross-origin greška**
   (v3.111.1): korisnik je na webapp-u (browseru) prijavio crveni baner "JS
   GREŠKA: Script error. (linija 0)" odmah pri otvaranju. `window.onerror`
