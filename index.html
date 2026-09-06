@@ -4845,7 +4845,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.111.3';
+const APP_VER = 'v3.111.4';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -31061,13 +31061,25 @@ async function startOfflineDownload() {
   }).catch(e => console.warn('SW registracija nije uspjela:', e));
 
   // Kad SW preuzme kontrolu nakon skipWaiting → reload za čistu novu verziju.
-  // VAŽNO: reload najviše JEDNOM po sesiji taba (sessionStorage preživi reload). Bez ovoga,
-  // više brzo objavljenih verzija zaredom može vrtjeti stranicu u beskonačnu reload-petlju
-  // (preglednik pokazuje ✕/„stuck loading", refresh ne pomaže). Jedan reload po sesiji
-  // pouzdano dovuče noviju verziju, a petlja je nemoguća.
+  // v3.111.4: prag je VREMENSKI (5s), ne "najviše JEDNOM ikad po tabu" kao ranije.
+  // Stari obrazac je izazvao baš onaj bug koji je trebao spriječiti: kad se u istoj
+  // dugo otvorenoj kartici objavi VIŠE verzija zaredom (uobičajeno u sesiji ovakvih
+  // popravki — nekoliko izmjena u istom satu), prvi update je uredno reloadovao
+  // stranicu, ali SVAKI SLJEDEĆI controllerchange je tiho preskočen ('sw-reloaded'
+  // je već bilo '1') — SW ispod je i dalje tiho napredovao na najnoviju verziju, ali
+  // stranica u memoriji (HTML/CSS/JS) je OSTAJALA zaglavljena na verziji iz PRVOG
+  // reload-a, bez ikakvog vidljivog znaka da nešto nije ažurno. Korisnik je prijavio
+  // isti render-bug tri puta zaredom ("opet isto") dok su popravke u međuvremenu već
+  // bile na serveru i ISPRAVNE — samo mu ih niko nije ponudio drugi put. Vremenski
+  // prag i dalje sprječava pravu petlju (dva reload-a unutar par sekundi bi značila
+  // da nova verzija odmah nakon reload-a opet nešto instalira), ali ne blokira
+  // legitiman DRUGI/TREĆI reload kad su verzije razmaknute minutama/satima.
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    try { if (sessionStorage.getItem('sw-reloaded') === '1') return; } catch(e) {}
-    try { sessionStorage.setItem('sw-reloaded', '1'); } catch(e) {}
+    const now = Date.now();
+    let last = 0;
+    try { last = parseInt(sessionStorage.getItem('sw-reloaded-at') || '0', 10) || 0; } catch(e) {}
+    if (now - last < 5000) return;
+    try { sessionStorage.setItem('sw-reloaded-at', String(now)); } catch(e) {}
     window.location.reload();
   });
 

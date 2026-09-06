@@ -293,9 +293,11 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
     pokušava serijalizovati (cikličan, sa DOM čvorovima) i pukne uz poruku
     "Execution context was destroyed, most likely because of a navigation" —
     koja navodi na pogrešan trag (nema nikakve navigacije). Uvijek pisati
-    `() => { map.setView(...); }`. Usput: app NAMJERNO reloada stranicu jednom
-    kad SW prvi put preuzme kontrolu, pa test treba sačekati
-    `sessionStorage['sw-reloaded'] === '1'` prije mjerenja.
+    `() => { map.setView(...); }`. Usput: app NAMJERNO reloada stranicu kad
+    SW preuzme kontrolu (v3.111.4: vremenski prag 5s po tabu, ne "najviše
+    jednom ikad" — vidi zamku "Više verzija zaredom u istoj kartici" ispod),
+    pa test treba sačekati `sessionStorage.getItem('sw-reloaded-at')` da
+    postoji prije mjerenja.
 - **Trake udaljenosti u listi požara (v3.108.0)**: lista se RAŠČLANJUJE na tri
   trake (`_POZ_TRAKE` — do 20 km / 20–40 km / preko 40 km), ne filtrira —
   požar na 90 km je i dalje u krugu od 150 km i ostaje vidljiv, samo pod
@@ -418,6 +420,34 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
+- **Više verzija zaredom u istoj dugo otvorenoj kartici — auto-update stane
+  poslije PRVOG reload-a** (v3.111.4): korisnik je tri puta zaredom prijavio
+  ISTI render-bug (mreža linija na karti) poslije tri različite popravke
+  (v3.111.1/v3.111.2/v3.111.3), svaki put "opet isto"/"i dalje ima" — iako je
+  treća popravka (v3.111.3) provjereno bila ISPRAVNA i live na GitHub Pages
+  (potvrđeno preko `actions_list`/`list_workflow_runs`: deploy je uspješno
+  završen za tačan commit koji korisnik testira). Uzrok NIJE bio u popravci
+  nego u SW auto-update mehanizmu: `sw-reloaded` je bio boolean koji se
+  postavi na `'1'` NAKON PRVOG `controllerchange` i nikad se ne resetuje u
+  toj sesiji taba — svaki SLJEDEĆI `controllerchange` (a njih ima tačno
+  onoliko koliko je verzija objavljeno dok je tab otvoren) je tiho preskočen.
+  Service worker ISPOD je i dalje uredno napredovao na najnoviju verziju, ali
+  stranica U MEMORIJI (HTML/CSS/JS) je ostajala zaglavljena na verziji iz
+  PRVOG reload-a — bez ijednog vidljivog znaka da postoji razlika, jer
+  `showUpdateToast()` iskoči SAMO dok traje snimanje (GPS/trag/doznaka), ne i
+  u ovom "tihom" putu. Rezultat: korisnik koji drži tab otvoren cijeli dan
+  dok stižu popravke ostaje zauvijek jednu (ili više) verziju iza, i svaki
+  test ispada "nije popravljeno" bez obzira koliko puta se stvarno popravi.
+  Riješeno zamjenom booleana VREMENSKIM pragom (`sw-reloaded-at`, 5s) —
+  sprječava pravu petlju (dva reload-a odmah jedan za drugim), ali dozvoljava
+  SVAKI sljedeći reload kad su verzije razmaknute minutama/satima, što je
+  stvarni obrazac rada na ovom projektu (više popravki u istoj sesiji).
+  **Pouka**: kad se ista prijava ponovi i poslije popravke koja djeluje
+  ispravno u kodu, PRIJE nagađanja o kodu provjeriti da li je popravka uopšte
+  STIGLA do korisnika — `mcp__github__actions_list` (`list_workflow_runs` za
+  `deploy.yml`) potvrđuje da li je deploy za taj tačan commit uspio, a ako
+  jeste, sljedeća sumnja ide na SW/keš isporuku na klijentu, ne na sadržaj
+  popravke.
 - **Vidljiva mreža/šahovska tabla preko CIJELE karte, na SVAKOJ podlozi**
   (v3.111.2 → pravi uzrok nađen u v3.111.3): korisnik je prijavio linije "kao
   ispisani meridijani" — pravilna mreža vodoravnih i uspravnih linija preko
