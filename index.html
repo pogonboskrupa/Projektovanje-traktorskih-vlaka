@@ -4831,7 +4831,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.110.0';
+const APP_VER = 'v3.111.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12042,6 +12042,150 @@ Object.entries(_ovlState).forEach(([k,v]) => { if (v && _OVL[k]) _OVL[k].addTo(m
 setTimeout(_demLegendUpdate, 0); // after DOM ready
 
 // ═══════════════════════════════════════════════════════════════════════════
+// VREMENSKA TRAKA — Esri World Imagery Wayback (v3.111.0)
+// ---------------------------------------------------------------------------
+// Google Earth samo nema besplatan API bez ključa za istorijske snimke, ali
+// Esri besplatno i bez ključa nudi ISTO: arhivu prošlih verzija SVOJE World
+// Imagery podloge (koju ova app već koristi kao "🛰 Satelit") — jedan snimak
+// po "release"-u, unazad do 2014, novi release otprilike mjesečno. Ovo NIJE
+// dnevni snimak za bilo koju tačku na Zemlji (mozaik se ažurira po dijelovima
+// svijeta u različitim intervalima) — za konkretnu lokaciju izabrani datum
+// znači "ovo je bilo najnovije dostupno u tom trenutku", ne garantovano BAŠ
+// taj dan. Bitno za korisnika: ZIMSKI snimak (bez lišća na lišćarima) mnogo
+// jasnije pokazuje četinare, šumske puteve i prosjeke nego ljetni.
+//
+// Config JSON (potvrđeno, javan, bez ključa — vidi waybackconfig.json) daje
+// listu release-a; svaki već nosi PUN tile URL template (ne treba ručno
+// slagati {z}/{x}/{y}, samo string-zamjena {level}/{row}/{col}, standardni
+// Web Mercator XYZ). CORS na wayback.maptiles.arcgis.com NIJE bilo moguće
+// potvrditi iz sandboxa (isti domen-egress limit kao za sve nove mrežne
+// slojeve, vidi CLAUDE.md) — ista ArcGIS Server infrastruktura kao već
+// dokazano radeći server.arcgisonline.com, pa je razumna pretpostavka, ali
+// treba potvrdu na uređaju. makeCachedTileLayer već tretira pali fetch kao
+// praznu providnu pločicu, ne rušenje.
+const _WB_CONFIG_URL = 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json';
+const _WB_CACHE_KEY  = 'tvlake_wayback_releases'; // keš liste release-a za offline/pao fetch
+const _WB_TILE_CACHE = 'tvlake-wayback-v1';
+const CachedWayback  = makeCachedTileLayer(_WB_TILE_CACHE);
+const _wbTileLayer = new CachedWayback('', {
+  maxNativeZoom: 19, maxZoom: 22, keepBuffer: 6,
+  updateWhenZooming: false, updateWhenIdle: true, updateInterval: 150
+});
+let _wbOn = false;
+let _wbPrevKey = null;      // koji je TL bio aktivan prije uključivanja Wayback-a
+let _wbReleases = null;     // [{date:'YYYY-MM-DD', url:'...'}], najnoviji prvi
+let _wbCurUrl = null;       // trenutno prikazan release (za obnovu pri ponovnom otvaranju sheeta)
+
+// Parsira waybackconfig.json u [{date,url}] — datum je ugniježđen u itemTitle
+// ("World Imagery (Wayback 2026-08-05)"), ne poseban JSON field (potvrđeno
+// fetch-om configa uživo — vidi CLAUDE.md za detalje istraživanja).
+function _wbParsiraj(json) {
+  return Object.values(json || {})
+    .map(rel => {
+      const m = /(\d{4}-\d{2}-\d{2})\)/.exec(rel.itemTitle || '');
+      return (m && rel.itemURL) ? { date: m[1], url: rel.itemURL } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+async function _wbUcitajReleases(tiho) {
+  try {
+    const r = await _fetchT(_WB_CONFIG_URL, 15000);
+    if (r && r.ok) {
+      const out = _wbParsiraj(await r.json());
+      if (out.length) {
+        _wbReleases = out;
+        try { localStorage.setItem(_WB_CACHE_KEY, JSON.stringify(out)); } catch(e) {}
+        return true;
+      }
+    }
+  } catch(e) {}
+  // Mreža pala/nema je — probaj zadnji uspješan keš (offline-first, isti obrazac
+  // kao FIRMS detekcije).
+  try {
+    const cached = JSON.parse(localStorage.getItem(_WB_CACHE_KEY) || 'null');
+    if (Array.isArray(cached) && cached.length) { _wbReleases = cached; return true; }
+  } catch(e) {}
+  if (!tiho) showToast('⚠ Ne mogu dohvatiti listu starih snimaka — provjeri internet');
+  return false;
+}
+
+function _wbNajblizaZima() {
+  return (_wbReleases || []).find(r => {
+    const mo = parseInt(r.date.slice(5, 7), 10);
+    return mo === 12 || mo === 1 || mo === 2;
+  }) || null;
+}
+
+// Sakrij OBIČNE bazne (TL) slojeve dok je Wayback aktivan — NE dira _saveLastMap
+// niti stanja _nagib/_granice/sqlite: Wayback je privremen prikaz, ne treba da
+// postane trajno zapamćena "zadnja karta" (korisnik bi se vratio u app i
+// slučajno gledao snimak iz 2019. umjesto trenutnog stanja).
+function _wbHideBase() {
+  _wbPrevKey = (typeof _activeLayerKey === 'function') ? _activeLayerKey() : null;
+  Object.values(TL).forEach(l => { if (map.hasLayer(l)) map.removeLayer(l); });
+}
+function _wbRestoreBase() {
+  const key = (_wbPrevKey && TL[_wbPrevKey]) ? _wbPrevKey : '⛰ Topo';
+  TL[key].addTo(map);
+  _wbPrevKey = null;
+}
+
+function _wbPostaviDatum(url) {
+  if (!url) return;
+  _wbCurUrl = url;
+  _wbTileLayer.setUrl(url);
+  if (!map.hasLayer(_wbTileLayer)) _wbTileLayer.addTo(map);
+  const rel = (_wbReleases || []).find(r => r.url === url);
+  const st = document.getElementById('wb-status');
+  if (st && rel) {
+    const zima = ['12','01','02'].includes(rel.date.slice(5,7));
+    st.textContent = (zima ? '🌨 Zimski snimak · ' : '') + rel.date
+      + ' · datum je release-a, ne garantovano tačan datum snimka na tvojoj lokaciji';
+  }
+}
+
+async function _wbToggle(on) {
+  const cb = document.getElementById('wb-toggle');
+  const picker = document.getElementById('wb-picker');
+  if (!on) {
+    _wbOn = false;
+    if (map.hasLayer(_wbTileLayer)) map.removeLayer(_wbTileLayer);
+    _wbRestoreBase();
+    if (picker) picker.style.display = 'none';
+    _lsRenderSqlite();
+    return;
+  }
+  if (!_wbReleases) {
+    const st = document.getElementById('wb-status');
+    if (st) st.textContent = 'Učitavam listu snimaka…';
+    const ok = await _wbUcitajReleases();
+    if (!ok) { if (cb) cb.checked = false; return; }
+  }
+  _wbOn = true;
+  _wbHideBase();
+  if (picker) picker.style.display = '';
+  const sel = document.getElementById('wb-datum');
+  if (sel) {
+    sel.innerHTML = _wbReleases.map(r =>
+      `<option value="${_escHtml(r.url)}">${['12','01','02'].includes(r.date.slice(5,7)) ? '🌨 ' : ''}${r.date}</option>`
+    ).join('');
+    sel.value = _wbReleases[0].url;
+  }
+  _wbPostaviDatum(_wbReleases[0].url);
+  _lsRenderSqlite();
+}
+
+function _wbTrazZimu() {
+  const zima = _wbNajblizaZima();
+  if (!zima) { showToast('⚠ Nema zimskog snimka u arhivi'); return; }
+  const sel = document.getElementById('wb-datum');
+  if (sel) sel.value = zima.url;
+  _wbPostaviDatum(zima.url);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // POŽARI — detekcija sa satelita kao PODACI, ne kao slika (v3.103.1)
 // ---------------------------------------------------------------------------
 // Prva verzija (v3.103.0) je bila rasterski FIRMS WMS sloj i kod korisnika je
@@ -13857,6 +14001,23 @@ function _openLayerSheet() {
     const cb = document.getElementById('inst-' + id + '-cb');
     if (cb) cb.checked = !!_ovlState[id];
   });
+  // Vremenska traka (Wayback) — obnovi checkbox/picker ako je bila aktivna dok je
+  // sheet bio zatvoren (npr. korisnik otišao na Kartu pa se vratio na Slojeve).
+  const wbCb = document.getElementById('wb-toggle');
+  const wbPicker = document.getElementById('wb-picker');
+  if (wbCb) wbCb.checked = _wbOn;
+  if (wbPicker) wbPicker.style.display = _wbOn ? '' : 'none';
+  if (_wbOn && _wbReleases) {
+    const sel = document.getElementById('wb-datum');
+    if (sel) {
+      if (!sel.options.length) {
+        sel.innerHTML = _wbReleases.map(r =>
+          `<option value="${_escHtml(r.url)}">${['12','01','02'].includes(r.date.slice(5,7)) ? '🌨 ' : ''}${r.date}</option>`
+        ).join('');
+      }
+      sel.value = _wbCurUrl || _wbReleases[0].url;
+    }
+  }
   _instUpdateStats();
   // Granice odjela dugme — prikaži samo ako ima učitanih granica
   const grRow = document.getElementById('ls-granice-row');
@@ -13939,7 +14100,8 @@ const _CMGR_ROWS = [
   { id: 'slope', ico: '📐',  name: 'Nagib terena',    sub: 'Shaded relief',    cache: 'tvlake-slope-v1' },
   { id: 'terr',  ico: '🗻',  name: 'Teren (DEM)',     sub: 'Visinski podaci',  cache: 'tvlake-terr-v1' },
   { id: 'nv',    ico: '🏷',  name: 'Nadmorske visine', sub: 'Open-Meteo keš',  cache: 'tvlake-nv-v1' },
-  { id: 'effis', ico: '🔥',  name: 'Požari (EFFIS)',  sub: 'Opasnost + opožareno', cache: _EFFIS_CACHE }
+  { id: 'effis', ico: '🔥',  name: 'Požari (EFFIS)',  sub: 'Opasnost + opožareno', cache: _EFFIS_CACHE },
+  { id: 'wayback', ico: '📅', name: 'Vremenska traka', sub: 'Esri Wayback',    cache: _WB_TILE_CACHE }
 ];
 let _cmgrData = null;   // zadnji scan: {id: {count, bytes}}
 
@@ -37846,6 +38008,31 @@ if (typeof AndroidDownload !== 'undefined') {
         <button class="layer-opt" id="lo-granice" onclick="setLayer('_granice')">
           <span class="layer-ico"><svg class="ic"><use href="#ic-slojevi"/></svg></span>Topo + Granice odjela
         </button>
+      </div>
+    </div>
+
+    <!-- Vremenska traka (Esri World Imagery Wayback, v3.111.0) — stariji snimci
+         iste satelitske podloge, bez ključa. Zimski snimak (bez lišća) mnogo
+         jasnije pokazuje četinare, puteve i prosjeke. -->
+    <div style="margin-top:14px;border-top:1px solid #1e3a5f;padding-top:14px;">
+      <h3 style="margin-bottom:6px;">📅 Vremenska traka</h3>
+      <div style="font-size:11px;color:#64748b;line-height:1.5;margin-bottom:8px;">
+        Stariji satelitski snimci (Esri Wayback, bez ključa) — zimski snimak bez
+        lišća najbolje pokazuje četinare, puteve i prosjeke. Datum je release-a,
+        ne garantovano tačan datum snimka baš na tvojoj lokaciji.
+      </div>
+      <label style="display:flex;align-items:center;gap:12px;cursor:pointer;color:#cbd5e1;font-size:14px;padding:4px 0;">
+        <input type="checkbox" id="wb-toggle" onchange="_wbToggle(this.checked)"
+          style="width:18px;height:18px;accent-color:#a78bfa;cursor:pointer;flex-shrink:0;">
+        <span>Prikaži stariji snimak</span>
+      </label>
+      <div id="wb-picker" style="display:none;margin-top:8px;">
+        <div style="display:flex;gap:6px;">
+          <select id="wb-datum" onchange="_wbPostaviDatum(this.value)"
+            style="flex:1;min-width:0;padding:8px 10px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;color:#e2e8f0;font-size:13px;"></select>
+          <button onclick="_wbTrazZimu()" style="padding:8px 12px;background:#14233c;border:1px solid #1e3a5f;border-radius:8px;color:#c4b5fd;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">🌨 Zima</button>
+        </div>
+        <div id="wb-status" style="font-size:10.5px;color:#64748b;margin-top:6px;line-height:1.4;">—</div>
       </div>
     </div>
 

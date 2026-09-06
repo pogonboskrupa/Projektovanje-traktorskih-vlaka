@@ -351,6 +351,45 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   predložak) — `makeCachedTileLayer(cacheName, L.TileLayer.WMS)` (drugi
   parametar, opcion) daje im ISTU keš/timeout/retry logiku kao Topo/Satelit/
   Karta. Test: `tests/js/dem-contours.test.js`.
+- **Vremenska traka — Esri World Imagery Wayback (v3.111.0)**: na zahtjev "kao
+  Google Earth, da mogu vraćati snimak" — Google sam nema besplatan API bez
+  ključa za istorijske snimke, ali Esri javno i bez ključa nudi ISTO: arhivu
+  prošlih verzija SVOJE World Imagery podloge (ista koju app već koristi kao
+  "🛰 Satelit"), unazad do 2014, novi release otprilike mjesečno. Bitno za
+  korisnika: ZIMSKI snimak (bez lišća na lišćarima) mnogo jasnije pokazuje
+  četinare, šumske puteve i prosjeke nego ljetni — dugme "🌨 Zima" u pikeru
+  skače na najnoviji zimski release (`_wbNajblizaZima`, mjesec 12/01/02).
+  **NIJE dnevni snimak za bilo koju tačku svijeta** — mozaik se ažurira po
+  dijelovima svijeta u različitim intervalima, pa izabrani datum znači "ovo
+  je bilo najnovije dostupno u tom release-u", ne garantovano baš taj dan na
+  tvojoj lokaciji — status ispod pikera to izričito piše, ne samo datum.
+  - Config JSON (`waybackconfig.json`, `s3-us-west-2.amazonaws.com`, javan,
+    bez ključa — potvrđeno uživo prije ožičavanja, ne nagađano kao GFW
+    prognoza koja je odbijena) daje listu release-a; svaki već nosi PUN tile
+    URL template (`{level}/{row}/{col}` = standardni Web Mercator XYZ), ne
+    treba ručno slagati URL. Datum je ugniježđen u `itemTitle`
+    ("World Imagery (Wayback 2026-08-05)"), NIJE poseban JSON field — prvi
+    regex pokušaj (`/\((\d{4}...)\)/`, tražio `(` NEPOSREDNO prije datuma) je
+    promašio jer je stvarni format "(Wayback DATUM)" — datum prati "Wayback "
+    razmak, ne otvorenu zagradu. Uhvaćeno testom (`tests/js/wayback.test.js`)
+    prije push-a, ne na terenu.
+  - Wayback PRIVREMENO zamjenjuje bazni sloj (`_wbHideBase`/`_wbRestoreBase`)
+    dok je uključen — NAMJERNO ne dira `_saveLastMap`/`_activeLayerKey` stanje
+    trajno, jer bi inače ponovno otvaranje app-a moglo tiho pokazati snimak iz
+    2019. umjesto trenutnog stanja. Isti `_wbTileLayer` (jedna instanca) mijenja
+    URL preko `.setUrl()` kad korisnik promijeni datum — ne pravi se nova
+    instanca po datumu.
+  - CORS na `wayback.maptiles.arcgis.com` NIJE bilo moguće potvrditi iz
+    sandboxa (isti domen-egress limit kao za svaki nov mrežni sloj — vidi
+    zamke ispod) — ista ArcGIS Server infrastruktura kao već dokazano radeći
+    `server.arcgisonline.com`, razumna pretpostavka, ali treba potvrdu na
+    uređaju. `makeCachedTileLayer` (isti obrazac kao Topo/Satelit) već tretira
+    pali fetch kao praznu providnu pločicu, ne rušenje.
+  - Novi keš bucket `tvlake-wayback-v1` — dodat u `_CMGR_ROWS` (Upravljanje
+    keširanim kartama) i u `sw.js` routing (`_tileRespond`), isti obrazac kao
+    svaki dosadašnji tile host. Config JSON se NE kešira u Cache Storage —
+    ima svoj `localStorage` keš (`_wbUcitajReleases`, offline-first isti
+    obrazac kao FIRMS detekcije) jer je to lista release-a, ne pločica.
 
 ## Zamke specifične za dodavanje NOVOG mrežnog sloja karte
 
