@@ -39,15 +39,15 @@ function _cssErr(local) {
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
   onerror="_cssErr('leaflet.min.css')"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
-  onerror="_libErr('Leaflet','leaflet.min.js')"></script>
+  crossorigin="anonymous" onerror="_libErr('Leaflet','leaflet.min.js')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"
-  onerror="_libErr('proj4','proj4.js')"></script>
+  crossorigin="anonymous" onerror="_libErr('proj4','proj4.js')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"
-  onerror="_libErr('Turf','turf.min.js')"></script>
+  crossorigin="anonymous" onerror="_libErr('Turf','turf.min.js')"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
-  onerror="_libErr('Supabase','supabase.min.js')"></script>
+  crossorigin="anonymous" onerror="_libErr('Supabase','supabase.min.js')"></script>
 <script src="https://cdn.jsdelivr.net/npm/shapefile@0.6.6/dist/shapefile.min.js"
-  onerror="_libErr('Shapefile','shapefile.min.js')"></script>
+  crossorigin="anonymous" onerror="_libErr('Shapefile','shapefile.min.js')"></script>
 <script>
 window.addEventListener('DOMContentLoaded',function(){
   if(!_libErrNames.length)return;
@@ -4830,8 +4830,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 </div>
 
 <script>
-window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';d.textContent='JS GREŠKA: '+m+' (linija '+l+')';document.body.appendChild(d);};
-const APP_VER = 'v3.111.0';
+window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
+const APP_VER = 'v3.111.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 

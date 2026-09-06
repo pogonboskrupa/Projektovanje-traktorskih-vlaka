@@ -418,6 +418,36 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
+- **"Script error." bez linije/poruke = maskirana cross-origin greška**
+  (v3.111.1): korisnik je na webapp-u (browseru) prijavio crveni baner "JS
+  GREŠKA: Script error. (linija 0)" odmah pri otvaranju. `window.onerror`
+  prima `message='Script error.'` i `lineno=0` (bez pravog fajla/linije/poruke)
+  kad greška nastane UNUTAR `<script src="...">` sa DRUGOG porijekla
+  (cdnjs.cloudflare.com/cdn.jsdelivr.net za Leaflet/proj4/Turf/Supabase/
+  Shapefile) BEZ `crossorigin="anonymous"` atributa — ovo je namjerno
+  sigurnosno ponašanje browsera (sprječava curenje sadržaja tuđeg skripta), ne
+  bug u app-u. Postojeći `_libErr`/`onerror="..."` na tim `<script>` tagovima
+  hvata samo MREŽNI neuspjeh učitavanja (404, prekinuta konekcija) i tad pada
+  na lokalni `appassets.androidplatform.net` fallback (radi SAMO u APK-u, ne
+  na webapp-u) — ne hvata grešku KOJA SE DESI DOK se već preuzeta biblioteka
+  izvršava (npr. djelimično/oštećeno preuzimanje na slaboj vezi koje browser
+  ipak tretira kao "uspješno učitano"). Ta druga vrsta greške ide na
+  `window.onerror`, i bez `crossorigin` atributa detalji su POTPUNO skriveni —
+  ni iz konzole na terenu se ne bi vidjelo ništa korisno. Dodano: svih 5 CDN
+  `<script>` tagova sada ima `crossorigin="anonymous"` (cdnjs/jsdelivr su
+  standardni javni CDN-ovi dizajnirani baš za ovo, isti obrazac kao SRI —
+  siguran, dobro dokumentovan zahtjev, za razliku od institucionalnih API-ja
+  poput FIRMS/GFW/EFFIS koji NISU pravljeni za proizvoljno cross-origin
+  učitavanje) — sljedeći put će `window.onerror` dobiti STVARNU poruku/liniju.
+  `window.onerror` handler uz to sad prepoznaje baš OVAJ obrazac
+  (`m==='Script error.' && !l`) i dodaje kratko objašnjenje ("vjerovatno
+  prekinuto učitavanje eksterne biblioteke... Osvježi stranicu") umjesto da
+  ostavi korisnika sa neupotrebljivim sirovim tekstom — isti princip kao
+  `_poziGreskaTxt` za mrežne greške u Požarima. Nije bilo moguće reproducirati
+  iz sandboxa (ni CDN ni `appassets.androidplatform.net` nisu dostižni odavde,
+  Playwright reprodukcija je pokazala SAMO artefakte sandbox mrežnog
+  ograničenja, ne stvaran uzrok) — ako se ponovi, sljedeći baner će reći
+  TAČNO koja biblioteka i koja linija.
 - **Android WebView nema `window.Notification`** (v3.107.1): korisnik je na
   STVARNOM telefonu, pri uključivanju "Javi mi kad se pojavi nov požar", dobio
   "Ovaj uređaj ne podržava obavještenja". Uzrok: `'Notification' in window`
