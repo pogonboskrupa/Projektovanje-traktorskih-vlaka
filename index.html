@@ -74,8 +74,22 @@ window.addEventListener('DOMContentLoaded',function(){
 
 /* === GPU COMPOSITING ZA LEAFLET (brže skrolanje i zumiranje) === */
 /* NAPOMENA: ne koristiti `contain:strict/size` na tile-container — kolabira
-   GridLayer (MBTiles) na 0x0 pa tile-ovi nestanu. Samo will-change je siguran. */
-.leaflet-tile-container { will-change: transform; }
+   GridLayer (MBTiles) na 0x0 pa tile-ovi nestanu. */
+/* v3.111.3: `will-change:transform` NAMJERNO uklonjen sa tile-container i
+   tile-pane (v3.111.2 je uklonio samo image-rendering:pixelated, što se
+   pokazalo NEDOVOLJNO — korisnik je i dalje vidio istu mrežu). Dokazano
+   izolovanom Playwright reprodukcijom (dvobojne pločice preko cijelog ekrana,
+   piksel-po-piksel provjera boje na granicama): kad OBA elementa nose
+   will-change:transform, browser svaku pločicu promoviše u ZASEBAN
+   compositor layer, a bilinearno uzorkovanje na ivici te teksture pokupi
+   providnu/pozadinsku boju umjesto susjedne pločice — vidljivo kao mreža
+   linija preko CIJELE karte (isti bug na SVAKOM tile sloju, uklj. offline
+   MBTiles, jer Leaflet .leaflet-tile-container/.leaflet-tile-pane klase
+   kači na sve njih podjednako). Uklanjanje will-change SAMO sa ova dva
+   (container i pane) je bilo dovoljno u testu — .leaflet-map-pane/
+   .leaflet-proxy/.leaflet-zoom-animated zadržavaju will-change, pa panovanje/
+   zumiranje cijele karte ostaje GPU-ubrzano, samo pojedinačne pločice više
+   ne dobijaju svoj zaseban sloj. */
 .leaflet-tile { backface-visibility: hidden; opacity:1; }
 .leaflet-tile-loaded { opacity:1; }
 .leaflet-zoom-animated { will-change: transform; }
@@ -83,7 +97,7 @@ window.addEventListener('DOMContentLoaded',function(){
 /* Pozadina iza neučitanih pločica (viđa se na periferiji dok panuješ) —
    Leaflet-ov vlastiti default je #ddd upravo iz ovog razloga: tamna boja
    ovdje bi se doživljavala kao "crn" flash prije nego pločica stigne. */
-.leaflet-tile-pane { will-change: transform; background: #ddd; }
+.leaflet-tile-pane { background: #ddd; }
 .leaflet-container { background: #ddd; }
 .leaflet-proxy { will-change: transform; }
 .leaflet-fade-anim .leaflet-tile,.leaflet-fade-anim .leaflet-popup { transition: none !important; }
@@ -4831,7 +4845,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.111.2';
+const APP_VER = 'v3.111.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 

@@ -419,19 +419,38 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
 ## Poznate zamke (naučeno na stvarnim bugovima)
 
 - **Vidljiva mreža/šahovska tabla preko CIJELE karte, na SVAKOJ podlozi**
-  (v3.111.2): korisnik je prijavio linije "kao ispisani meridijani" — pravilna
-  mreža vodoravnih i uspravnih linija preko cijelog ekrana, na SVIM podlogama
-  UKLJUČUJUĆI offline SQLite/MBTiles karte (dakle nije mogao biti nijedan
-  mrežni/WMS sloj — zajednički imenilac je bio LEAFLET-OV TILE RENDERING
-  SAM PO SEBI, ne izvor pločica). Uzrok: `.leaflet-tile { image-rendering:
-  pixelated }` (postojalo od v3.29.0, nepromijenjeno godinama) — ovo isključuje
-  browser-ovo glačanje (smoothing) između susjednih pločica, pa sitni
-  sub-piksel razmak u pozicioniranju (uobičajen kod necjelobrojnog zuma ili
-  transform-scale animacije) postaje OŠTRA, vidljiva linija umjesto da se
-  neprimjetno izgladi. Pošto `.leaflet-tile` klasu Leaflet kači na SVAKU
-  pločicu (XYZ/WMS `<img>` I canvas DEM overlaye I SQLite/MBTiles), problem je
-  bio univerzalan. Riješeno uklanjanjem `image-rendering: pixelated` (ostatak
-  pravila — `backface-visibility`/`opacity` za GPU compositing — ostaje).
+  (v3.111.2 → pravi uzrok nađen u v3.111.3): korisnik je prijavio linije "kao
+  ispisani meridijani" — pravilna mreža vodoravnih i uspravnih linija preko
+  cijelog ekrana, na SVIM podlogama UKLJUČUJUĆI offline SQLite/MBTiles karte
+  (dakle nije mogao biti nijedan mrežni/WMS sloj — zajednički imenilac je bio
+  LEAFLET-OV TILE RENDERING SAM PO SEBI, ne izvor pločica).
+  - **v3.111.2 (NEDOVOLJNO)**: uklonjen `.leaflet-tile { image-rendering:
+    pixelated }` — razumna prva pretpostavka (isključuje browser-ovo glačanje
+    između pločica), ali korisnik je poslao screenshot i prijavio "opet isto"
+    — mreža je i dalje bila tu.
+  - **v3.111.3 (POTVRĐEN pravi uzrok)**: umjesto nagađanja treći put,
+    napravljena je IZOLOVANA Playwright reprodukcija — lokalni Leaflet
+    (postojeći `static/libs/leaflet.min.js`, isti fajl kao APK fallback) +
+    stvarni `makeCachedTileLayer` izvučen iz `index.html` + stvarne CSS
+    definicije, sa dvobojnim (crvena/plava) lažnim pločicama preko lokalnog
+    HTTP servera i magenta pozadinom iza tile-pane (da se BILO KAKAV razmak
+    vidi eksplicitno) — mjereno piksel-po-piksel dekodiranjem PNG-a (ne
+    okom po screenshotu, koji chat-alat sam skalira i može UNIJETI lažne
+    linije kompresijom/resize-om). Rezultat: 45 magenta piksela tačno na
+    granici dvije pločice kad `.leaflet-tile-container` I `.leaflet-tile-pane`
+    oba nose `will-change: transform` — svaka pločica se promoviše u ZASEBAN
+    compositor layer, i bilinearno uzorkovanje na ivici te teksture pokupi
+    providnu/pozadinsku boju umjesto susjedne pločice. Uklanjanjem
+    `will-change` SA TA DVA SELEKTORA (ne i sa `.leaflet-map-pane`/
+    `.leaflet-proxy`/`.leaflet-zoom-animated`, koji ostaju GPU-ubrzani za
+    glatko panovanje/zumiranje) nestaje 0/9625 piksela na granici u istom
+    testu, potvrđeno na DPR 1/2.75/3 i poslije simuliranog panovanja.
+  - Pouka za sljedeći put: kad se render-bug ne da lako dijagnosticirati
+    pogledom, a postoji LOKALNA kopija biblioteke (vidi `static/libs/`),
+    napraviti izolovanu Playwright reprodukciju sa lažnim (kontrastnim)
+    pločicama i PIKSELIMA, ne nagađati redom koji CSS red "izgleda sumnjivo"
+    — druga pretpostavka (v3.111.2) je bila stvarna ali NEDOVOLJNA promjena,
+    i bez piksel-tačne provjere bi treći pokušaj opet bio nagađanje.
 - **"Script error." bez linije/poruke = maskirana cross-origin greška**
   (v3.111.1): korisnik je na webapp-u (browseru) prijavio crveni baner "JS
   GREŠKA: Script error. (linija 0)" odmah pri otvaranju. `window.onerror`
