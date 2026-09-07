@@ -4858,7 +4858,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.111.8';
+const APP_VER = 'v3.112.0';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -13959,16 +13959,6 @@ function _poziSadrzajHtml() {
              <div style="height:7px;background:${c};border-radius:2px;"></div>
              <div style="font-size:8.5px;color:#64748b;margin-top:3px;line-height:1.2;">${l}</div></div>`).join('')
       + `</div>`)
-
-    + kart('📞 Hitni brojevi', '',
-      [['123','Vatrogasci','#ef4444'],['122','Policija','#3b82f6'],['124','Hitna pomoć','#22c55e']]
-        .map(([br, nm, boja]) => `
-          <a href="tel:${br}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;margin-bottom:6px;
-             background:#0f172a;border:1px solid #1e293b;border-radius:10px;text-decoration:none;">
-            <span style="font-size:19px;font-weight:800;color:${boja};font-family:monospace;min-width:42px;">${br}</span>
-            <span style="flex:1;font-size:13px;color:#e2e8f0;font-weight:600;">${nm}</span>
-            <span style="font-size:16px;">📞</span>
-          </a>`).join(''))
 
     + `<div style="font-size:10px;color:#334155;line-height:1.6;text-align:center;padding:4px 8px 16px;">
          NASA FIRMS · Copernicus EFFIS · Global Forest Watch
