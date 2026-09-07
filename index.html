@@ -4858,7 +4858,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}console.error(t,s,l);};
-const APP_VER = 'v3.112.1';
+const APP_VER = 'v3.112.2';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -13042,6 +13042,107 @@ function _poziIconTacka(p) {
   });
 }
 
+// ── Heatmap gustine detekcija (v3.112.2, kao na firemap.live) ─────────────
+// Namjerno NAPISAN OVDJE, ne učitan sa CDN-a (npr. Leaflet.heat) — cijela ova
+// sesija je potrošena na probleme sa vanjskim mrežnim izvorima (FIRMS/GFW/
+// EFFIS, CDN "Script error."), pa gdje se isti vizuelni efekat da postići u
+// ~60 linija bez ijedne nove mrežne zavisnosti, to je bolji izbor. Tehnika je
+// standardna (ista koju interno koristi Leaflet.heat/simpleheat.js): svaka
+// tačka se crta kao meki radijalni "blob" (crn, providnost opada ka ivici) na
+// pomoćni canvas — preklapajući blobovi PRIRODNO zbrajaju providnost (obična
+// "source-over" kompozicija), pa gušća mjesta ispadnu neprozirnija. Ta
+// providnost (alfa kanal) se onda čita piksel-po-piksel i pretvara u boju
+// preko palete (plava→zelena→žuta→crvena) — isti dvokoračni princip kao
+// pravi heatmap alati. NAMJERNO se dodaje KAO DODATAK ispod postojećih
+// markera (ne zamjena) — zamjena bi pokvarila `_poziZoom` (klik iz liste
+// otvara popup TAČNO tog markera, `g._mk`), a to je već pokriveno testovima.
+const _PoziHeat = L.Layer.extend({
+  initialize(latlngs, options) {
+    this._latlngs = latlngs || [];
+    L.setOptions(this, options);
+  },
+  setLatLngs(latlngs) { this._latlngs = latlngs; this._redraw(); return this; },
+  onAdd(map) {
+    this._map = map;
+    if (!this._canvas) this._initCanvas();
+    map.getPane(this.options.pane || 'overlayPane').appendChild(this._canvas);
+    map.on('moveend zoomend resize', this._reset, this);
+    this._reset();
+  },
+  onRemove(map) {
+    try { map.getPane(this.options.pane || 'overlayPane').removeChild(this._canvas); } catch(e) {}
+    map.off('moveend zoomend resize', this._reset, this);
+  },
+  _initCanvas() {
+    const canvas = this._canvas = L.DomUtil.create('canvas', 'leaflet-layer');
+    canvas.style.position = 'absolute';
+    canvas.style.pointerEvents = 'none'; // ne smije krasti klikove markerima iznad
+    this._ctx = canvas.getContext('2d');
+    const r = this._r = (this.options.radius || 28) + (this.options.blur ?? 18);
+    const tpl = this._tpl = document.createElement('canvas');
+    tpl.width = tpl.height = r * 2;
+    const tctx = tpl.getContext('2d');
+    const grad = tctx.createRadialGradient(r, r, 0, r, r, r);
+    grad.addColorStop(0, 'rgba(0,0,0,1)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    tctx.fillStyle = grad;
+    tctx.fillRect(0, 0, r * 2, r * 2);
+    const gc = document.createElement('canvas');
+    gc.width = 1; gc.height = 256;
+    const gctx = gc.getContext('2d');
+    const lg = gctx.createLinearGradient(0, 0, 0, 256);
+    const stops = this.options.gradient || { 0.35:'#3b82f6', 0.6:'#22c55e', 0.8:'#facc15', 1:'#ef4444' };
+    // BEZ obrtanja: red 0 palete (canvas y=0, VRH gradijenta) čita se za
+    // alfa=0, red 255 (DNO) za alfa=255 — isti smjer kao redoslijed alfa
+    // vrijednosti, direktno indeksiranje niže (`off = a*4`) bez flipa.
+    Object.keys(stops).forEach(s => lg.addColorStop(parseFloat(s), stops[s]));
+    gctx.fillStyle = lg;
+    gctx.fillRect(0, 0, 1, 256);
+    this._palette = gctx.getImageData(0, 0, 1, 256).data;
+  },
+  _redraw() {
+    if (!this._map || !this._ctx) return;
+    const ctx = this._ctx, r = this._r, size = this._map.getSize();
+    ctx.clearRect(0, 0, size.x, size.y);
+    if (!this._latlngs.length) return;
+    const bounds = this._map.getBounds().pad(0.25);
+    this._latlngs.forEach(p => {
+      const ll = L.latLng(p[0], p[1]);
+      if (!bounds.contains(ll)) return;
+      const pt = this._map.latLngToContainerPoint(ll);
+      // NAMJERNO nizak zadani alfa (0.15, ne 1) — svaki blob je SAM PO SEBI
+      // providan, pa se "usijanost" gradi TEK preklapanjem više tačaka na
+      // istom mjestu (učestale detekcije istog požara). Kod punog alfa=1 bi
+      // i jedna usamljena tačka odmah izgledala isto "vruće" kao gusto
+      // preklopljen klaster — poništava svrhu heatmap-e.
+      ctx.globalAlpha = Math.max(Math.min(p[2] ?? 0.15, 1), 0.05);
+      ctx.drawImage(this._tpl, pt.x - r, pt.y - r);
+    });
+    const img = ctx.getImageData(0, 0, size.x, size.y);
+    const d = img.data, pal = this._palette;
+    for (let i = 3; i < d.length; i += 4) {
+      const a = d[i];
+      if (!a) continue;
+      const off = a * 4;
+      d[i - 3] = pal[off]; d[i - 2] = pal[off + 1]; d[i - 1] = pal[off + 2];
+    }
+    ctx.putImageData(img, 0, 0);
+  },
+  _reset() {
+    const size = this._map.getSize();
+    L.DomUtil.setPosition(this._canvas, this._map.containerPointToLayerPoint([0, 0]));
+    this._canvas.width = size.x; this._canvas.height = size.y;
+    this._redraw();
+  }
+});
+const _POZ_HEAT_KEY = 'tvlake_pozari_heat';
+let _poziHeatLayer = null;
+function _poziHeatOn() { return localStorage.getItem(_POZ_HEAT_KEY) === '1'; }
+function _poziHeatSet(on) {
+  try { localStorage.setItem(_POZ_HEAT_KEY, on ? '1' : '0'); } catch(e) {}
+  _poziRender();
+}
+
 function _poziRender() {
   if (_poziLayer) { try { map.removeLayer(_poziLayer); } catch(e) {} }
   _poziLayer = L.layerGroup([], { pane:'pozariPane' });
@@ -13068,6 +13169,16 @@ function _poziRender() {
     }
   });
   if (_poziOn) _poziLayer.addTo(map);
+
+  // Heatmap ispod markera (v3.112.2) — dodatak, ne zamjena, iz sirovih
+  // pojedinačnih detekcija (_poziPts), ne grupa: gušće mjesto ima VIŠE
+  // preklopljenih tačaka pa se prirodno "usija" bez ikakvog ručnog računanja.
+  if (_poziHeatLayer) { try { map.removeLayer(_poziHeatLayer); } catch(e) {} }
+  if (_poziOn && _poziHeatOn() && (_poziPts || []).length) {
+    if (!_poziHeatLayer) _poziHeatLayer = new _PoziHeat([], { pane:'demOverlay' });
+    _poziHeatLayer.setLatLngs(_poziPts.map(p => [p.la, p.lo]));
+    _poziHeatLayer.addTo(map);
+  }
 }
 
 // Popup markera GRUPE — sažetak cijelog požara, ne jedne detekcije.
@@ -13213,6 +13324,7 @@ function _poziToggle(on) {
   try { localStorage.setItem(_POZ_ON_KEY, on ? '1' : '0'); } catch(e) {}
   if (!on) {
     if (_poziLayer) { try { map.removeLayer(_poziLayer); } catch(e) {} }
+    if (_poziHeatLayer) { try { map.removeLayer(_poziHeatLayer); } catch(e) {} }
     _poziStatusSet('—');
     return;
   }
@@ -13916,6 +14028,7 @@ function _poziSadrzajHtml() {
     kart('🛰 Detekcija sa satelita',
       'NASA FIRMS · krug ' + _POZ_RADIUS_KM + ' km · detekcija nije potvrda požara na terenu',
       prekidac('_poziToggle(this.checked)', _poziOn, 'Prikaži detekcije na karti')
+      + (_poziOn ? prekidac("_poziHeatSet(this.checked)", _poziHeatOn(), '🔥 Prikaži i kao heatmap (gustina, kao na firemap.live)') : '')
       + okvirChips
       + `<div id="poz-status" style="font-size:11px;color:#94a3b8;margin:6px 0 8px;">${_escHtml(_poziOn ? _poziSazetak().kratko : '—')}</div>`
       + sortChips

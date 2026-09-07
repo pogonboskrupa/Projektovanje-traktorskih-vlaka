@@ -988,6 +988,47 @@ t('upozorenje se pojavljuje i kad IMA požara, ne samo u praznom slučaju', () =
   assert.match(s.kratko, /centra karte/, 'kratko: ' + s.kratko);
 });
 
+console.log('Heatmap prekidač (v3.112.2) — localStorage getter/setter:');
+
+const SRC_HEAT = [
+  extractConst('_POZ_HEAT_KEY'),
+  extractFn('_poziHeatOn'),
+  extractFn('_poziHeatSet'),
+].join('\n');
+
+function makeHeat(store) {
+  const renders = [];
+  const sandbox = {
+    localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } },
+    _poziRender: () => { renders.push(true); },
+  };
+  const keys = Object.keys(sandbox);
+  const api = new Function(...keys, SRC_HEAT + '\nreturn { _poziHeatOn, _poziHeatSet };')(...keys.map(k => sandbox[k]));
+  return { ...api, renders };
+}
+
+t('podrazumijevano isključeno (nema sačuvane vrijednosti)', () => {
+  const h = makeHeat({});
+  assert.strictEqual(h._poziHeatOn(), false);
+});
+
+t('_poziHeatSet(true) upisuje "1", osvježava kartu preko _poziRender', () => {
+  const store = {};
+  const h = makeHeat(store);
+  h._poziHeatSet(true);
+  assert.strictEqual(store['tvlake_pozari_heat'], '1');
+  assert.strictEqual(h._poziHeatOn(), true);
+  assert.strictEqual(h.renders.length, 1, '_poziRender mora biti pozvan da se heatmap odmah pojavi/nestane');
+});
+
+t('_poziHeatSet(false) upisuje "0"', () => {
+  const store = { tvlake_pozari_heat: '1' };
+  const h = makeHeat(store);
+  h._poziHeatSet(false);
+  assert.strictEqual(store['tvlake_pozari_heat'], '0');
+  assert.strictEqual(h._poziHeatOn(), false);
+});
+
 (async () => {
   for (const a of _async) {
     try { await a.p; pass++; console.log('  ✔ ' + a.name); }

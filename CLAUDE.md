@@ -392,6 +392,38 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
     svaki dosadašnji tile host. Config JSON se NE kešira u Cache Storage —
     ima svoj `localStorage` keš (`_wbUcitajReleases`, offline-first isti
     obrazac kao FIRMS detekcije) jer je to lista release-a, ne pločica.
+- **Heatmap gustine detekcija u Požarima (v3.112.2)**: na zahtjev "kao na
+  firemap.live" — dodatak ispod postojećih markera/grupa, NE zamjena (zamjena
+  bi pokvarila `_poziZoom`-ov klik-iz-liste-otvara-popup mehanizam, `g._mk`,
+  koji je već pokriven testovima). NAMJERNO NIJE učitano sa CDN-a (npr.
+  Leaflet.heat) — cijela ova sesija je potrošena na probleme sa vanjskim
+  mrežnim izvorima (FIRMS/GFW/EFFIS), pa je isti vizuelni efekat napisan
+  direktno u `_PoziHeat` (`L.Layer.extend`, ~90 linija) bez ijedne nove mrežne
+  zavisnosti. Tehnika je standardna (ista koju interno koristi Leaflet.heat/
+  simpleheat.js): svaka tačka crta mek radijalni "blob" na pomoćni canvas s
+  NISKOM providnošću (`globalAlpha` podrazumijevano 0.15, ne 1) — preklapajući
+  blobovi se PRIRODNO zbrajaju (`source-over` kompozicija), pa gušće mjesto
+  (učestale detekcije istog požara) ispadne zasićenije. Alfa kanal se onda čita
+  piksel-po-piksel i prevodi u boju preko 256-bojne palete (plava→zelena→
+  žuta→crvena).
+  **Dvije stvarne greške uhvaćene Playwright reprodukcijom PRIJE push-a** (ne
+  nagađane, izmjereno slikom):
+  1. Podrazumijevani `globalAlpha=1` po tački — svaki blob je bio odmah
+     potpuno neproziran, pa preklapanje nije imalo šta da zbraja (usamljena
+     tačka je izgledala identično "vruće" kao gust klaster). Ispravljeno na
+     0.15 podrazumijevano.
+  2. Paleta boja je bila OBRNUTA (`addColorStop(1 - stop, ...)`) — gušći
+     klaster je ispadao PLAVI (hladno), a usamljene tačke ŽUTE/NARANDŽASTE
+     (toplije) — potpuno suprotno namjeri. Uzrok: pogrešna pretpostavka da
+     `getImageData`/canvas gradient trebaju flip oko Y ose; oba idu u ISTOM
+     smjeru (red 0 = vrh = alfa 0), flip nije bio potreban.
+  Test reprodukcije: lokalni Leaflet + izvučen `_PoziHeat` iz `index.html`,
+  40 nasumičnih tačaka na jednoj lokaciji (gust klaster) + 3 razdvojene
+  usamljene tačke, mjereno EKRANOM prije i poslije svake izmjene — tek treći
+  screenshot je pokazao ispravan rezultat (crven/vruć klaster, blijedo plave
+  usamljene tačke). Prekidač "🔥 Prikaži i kao heatmap" se pojavljuje samo
+  dok je uključen glavni prekidač "Prikaži detekcije", `_poziHeatOn`/
+  `_poziHeatSet` čuvaju izbor u `localStorage` (`tvlake_pozari_heat`).
 
 ## Zamke specifične za dodavanje NOVOG mrežnog sloja karte
 
