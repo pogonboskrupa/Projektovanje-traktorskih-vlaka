@@ -4857,8 +4857,8 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 </div>
 
 <script>
-window.onerror=function(m,s,l){const d=document.createElement('div');d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:12px;z-index:999999;font-size:14px;word-break:break-all;';let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}d.textContent=t;document.body.appendChild(d);};
-const APP_VER = 'v3.112.0';
+window.onerror=function(m,s,l){let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}console.error(t,s,l);};
+const APP_VER = 'v3.112.1';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 

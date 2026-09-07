@@ -630,6 +630,14 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   Playwright reprodukcija je pokazala SAMO artefakte sandbox mrežnog
   ograničenja, ne stvaran uzrok) — ako se ponovi, sljedeći baner će reći
   TAČNO koja biblioteka i koja linija.
+  - **v3.112.1**: korisnik je ponovo prijavio isti baner i isključio VPN da
+    testira — desilo se opet, pa VPN NIJE (jedini) uzrok. Na eksplicitan
+    zahtjev ("neka bude u konzoli a ne ovdje") crveni baner preko cijelog
+    ekrana je uklonjen — `window.onerror` sad samo zove `console.error(...)`
+    (ista poruka/objašnjenje, samo bez UI prekida). Terenski test na uređaju
+    bez pristupa DevTools-u ovo neće moći vidjeti, ali korisnik je eksplicitno
+    tražio da mu prestane smetati u polju; dijagnoza ostaje moguća naknadno
+    preko USB debugginga ili `remote://inspect` ako se ponovi.
 - **Android WebView nema `window.Notification`** (v3.107.1): korisnik je na
   STVARNOM telefonu, pri uključivanju "Javi mi kad se pojavi nov požar", dobio
   "Ovaj uređaj ne podržava obavještenja". Uzrok: `'Notification' in window`
