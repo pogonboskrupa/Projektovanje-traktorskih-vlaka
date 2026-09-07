@@ -4858,7 +4858,7 @@ table.ttm-tbl tbody tr:nth-child(even) td.stick { background:#0e1626; }
 
 <script>
 window.onerror=function(m,s,l){let t='JS GREŠKA: '+m+' (linija '+l+')';if(m==='Script error.'&&!l){t+=' — vjerovatno prekinuto učitavanje eksterne biblioteke (mreža ili browser ekstenzija). Osvježi stranicu.';}console.error(t,s,l);};
-const APP_VER = 'v3.112.2';
+const APP_VER = 'v3.112.3';
 // Prikaži verziju na login ekranu (footer je već parsiran iznad ovog scripta)
 { const _authVerEl = document.getElementById('auth-app-ver'); if (_authVerEl) _authVerEl.textContent = APP_VER; }
 
@@ -12998,6 +12998,7 @@ async function _poziOsvjeziMeteo() {
     prijeti: kodMene && ref.gps ? _poziVjetarPrijeti(az, kodPozara.vjetarSmjer) : null
   };
   _poziRenderPanel();
+  _poziSmjerAzuriraj(); // vjetar je upravo stigao — strelica smjera širenja to čeka
 }
 
 function _poziStatusSet(txt) {
@@ -13143,6 +13144,88 @@ function _poziHeatSet(on) {
   _poziRender();
 }
 
+// ── Okvirna procjena smjera širenja požara (v3.112.3) ─────────────────────
+// NAMJERNO nije simulacija širenja (nema modela goriva/vlažnosti/intenziteta,
+// ne mijenja se u vremenu) — to bi bilo lažno obećanje preciznosti koje ovaj
+// alat ne može ispuniti. Umjesto toga kombinuje DVA stvarna, mjerljiva
+// faktora u jedan okvirni pravac: vatra teži da ide UZBRDO (nagib terena,
+// isti ekspozicija/aspect proračun kao 🧭 Ekspozicija sloj) i NIZ VJETAR
+// (isti Open-Meteo podatak kao kartica "Vjetar kod najbližeg požara"). Samo
+// za NAJBLIŽI požar (isti obim kao ta kartica) — širenje na svaki vidljivi
+// požar bi tražilo posebnu DEM+meteo dohvatu po požaru, prespor i nepotreban
+// za alat čiji je fokus "šta prijeti MENI".
+async function _poziAspektNaTacki(lat, lon) {
+  try {
+    const z = 12; // dovoljno za grub pravac — ne treba fina rezolucija profila puta
+    const fx = _termLon2x(lon, z), fy = _termLat2y(lat, z);
+    const tx = Math.floor(fx), ty = Math.floor(fy);
+    const px = Math.max(1, Math.min(254, Math.round((fx - tx) * 256)));
+    const py = Math.max(1, Math.min(254, Math.round((fy - ty) * 256)));
+    const src = await _getTerrariumTile(z, tx, ty);
+    if (!src) return null;
+    const elev = _terrariumDecodeTile(src);
+    const dzdx = elev[py * 256 + (px + 1)] - elev[py * 256 + (px - 1)];
+    const dzdy = elev[(py + 1) * 256 + px] - elev[(py - 1) * 256 + px];
+    if (!dzdx && !dzdy) return null; // ravno — nema jasnog uzbrdo pravca
+    // Isti obrazac kao _makeDemCanvasLayer('ekspo'): atan2(-dzdx, dzdy) = NIZBRDO.
+    const nizbrdo = (Math.atan2(-dzdx, dzdy) * 180 / Math.PI + 360) % 360;
+    return { uzbrdo: (nizbrdo + 180) % 360 };
+  } catch(e) { return null; }
+}
+
+// Vektorski prosjek dva pravca (NE prosta sredina stepeni — puca na 0°/360°
+// granici, npr. prosjek 350° i 10° mora biti 0°, ne 180°).
+function _poziSmjerBlend(b1, b2) {
+  const r = d => d * Math.PI / 180;
+  const istok  = Math.sin(r(b1)) + Math.sin(r(b2));
+  const sjever = Math.cos(r(b1)) + Math.cos(r(b2));
+  return (Math.atan2(istok, sjever) * 180 / Math.PI + 360) % 360;
+}
+
+const _POZ_SMJER_KEY = 'tvlake_pozari_smjer';
+let _poziSmjerLayer = null;
+let _poziSmjerBusy = false;
+function _poziSmjerOn() { return localStorage.getItem(_POZ_SMJER_KEY) === '1'; }
+function _poziSmjerToggle(on) {
+  try { localStorage.setItem(_POZ_SMJER_KEY, on ? '1' : '0'); } catch(e) {}
+  _poziSmjerAzuriraj();
+}
+
+async function _poziSmjerAzuriraj() {
+  if (_poziSmjerLayer) { try { map.removeLayer(_poziSmjerLayer); } catch(e) {} _poziSmjerLayer = null; }
+  if (_poziSmjerBusy || !_poziSmjerOn() || !_poziOn || !_poziEvts.length) return;
+  const g = _poziEvts[0];
+  // Vjetar mora biti baš ZA OVAJ (najbliži) požar, ne bilo koji stari — _poziMet.naj
+  // je referenca na _poziEvts objekat kod kojeg je vjetar zadnji put dohvaćen.
+  const met = (_poziMet && _poziMet.naj === g) ? _poziMet.kodPozara : null;
+  if (!met) return; // nema vjetra za ovaj požar — ne nagađaj bez podatka
+  _poziSmjerBusy = true;
+  try {
+    const asp = await _poziAspektNaTacki(g.la, g.lo);
+    if (!asp || typeof turf === 'undefined') return; // nema terena/Turf-a — ne nagađaj
+    const nizVjetar = (met.vjetarSmjer + 180) % 360; // vjetarSmjer je ODAKLE duva
+    const smjer = _poziSmjerBlend(nizVjetar, asp.uzbrdo);
+    const distKm = Math.min(0.4 + met.vjetarMs * 0.25, 2.5);
+    const bTurf = smjer > 180 ? smjer - 360 : smjer; // Turf očekuje -180..180
+    const dest = turf.destination([g.lo, g.la], distKm, bTurf, { units: 'kilometers' });
+    const [klo, kla] = dest.geometry.coordinates;
+    const grp = L.layerGroup([], { pane: 'pozariPane' });
+    L.polyline([[g.la, g.lo], [kla, klo]], { color:'#fb923c', weight:3, dashArray:'2,7', opacity:0.85 }).addTo(grp);
+    const strelica = L.divIcon({
+      className: '', iconSize: [16, 16], iconAnchor: [8, 8],
+      html: `<div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;
+        border-bottom:13px solid #fb923c;transform:rotate(${smjer}deg);filter:drop-shadow(0 0 2px #000);"></div>`
+    });
+    L.marker([kla, klo], { icon: strelica, pane:'pozariPane' })
+      .bindTooltip(`Okvirni pravac (vjetar + nagib terena) — ${_azimutSmjer(smjer)}. Nije prognoza širenja.`,
+        { direction:'top', className:'kml-info-popup' })
+      .addTo(grp);
+    _poziSmjerLayer = grp.addTo(map);
+  } finally {
+    _poziSmjerBusy = false;
+  }
+}
+
 function _poziRender() {
   if (_poziLayer) { try { map.removeLayer(_poziLayer); } catch(e) {} }
   _poziLayer = L.layerGroup([], { pane:'pozariPane' });
@@ -13175,10 +13258,16 @@ function _poziRender() {
   // preklopljenih tačaka pa se prirodno "usija" bez ikakvog ručnog računanja.
   if (_poziHeatLayer) { try { map.removeLayer(_poziHeatLayer); } catch(e) {} }
   if (_poziOn && _poziHeatOn() && (_poziPts || []).length) {
-    if (!_poziHeatLayer) _poziHeatLayer = new _PoziHeat([], { pane:'demOverlay' });
+    // v3.112.3: paleta promijenjena na eksplicitan zahtjev — SVE nijanse
+    // narandžaste (svijetla→tamnija), ne plava→zelena→žuta→crvena. Gušće
+    // mjesto i dalje ispadne zasićenije, samo unutar iste boje.
+    if (!_poziHeatLayer) _poziHeatLayer = new _PoziHeat([], { pane:'demOverlay',
+      gradient: { 0.3:'#fed7aa', 0.6:'#fdba74', 0.85:'#fb923c', 1:'#f97316' } });
     _poziHeatLayer.setLatLngs(_poziPts.map(p => [p.la, p.lo]));
     _poziHeatLayer.addTo(map);
   }
+
+  _poziSmjerAzuriraj();
 }
 
 // Popup markera GRUPE — sažetak cijelog požara, ne jedne detekcije.
@@ -13325,6 +13414,7 @@ function _poziToggle(on) {
   if (!on) {
     if (_poziLayer) { try { map.removeLayer(_poziLayer); } catch(e) {} }
     if (_poziHeatLayer) { try { map.removeLayer(_poziHeatLayer); } catch(e) {} }
+    if (_poziSmjerLayer) { try { map.removeLayer(_poziSmjerLayer); } catch(e) {} _poziSmjerLayer = null; }
     _poziStatusSet('—');
     return;
   }
@@ -14021,7 +14111,11 @@ function _poziSadrzajHtml() {
        </div>`
       + (_poziMet.prijeti ? `<div style="margin-top:10px;padding:8px 10px;background:#7f1d1d55;border:1px solid #dc2626;border-radius:8px;font-size:12px;color:#fca5a5;font-weight:600;">
            ⚠ Vjetar duva OD požara KA tvojoj poziciji.
-         </div>` : ''));
+         </div>` : '')
+      + `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #1e293b;">`
+      + prekidac('_poziSmjerToggle(this.checked)', _poziSmjerOn(), '🧭 Prikaži okvirni pravac širenja (vjetar + nagib terena)')
+      + `<div style="font-size:10px;color:#64748b;line-height:1.4;margin-top:2px;">Nije prognoza širenja — samo pravac kuda vatra TEŽI da ide (uzbrdo i niz vjetar).</div>`
+      + `</div>`);
   }
 
   return (

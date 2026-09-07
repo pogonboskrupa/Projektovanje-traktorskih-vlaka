@@ -424,6 +424,63 @@ web koda čak i kad `versionName` u `build.gradle` kaže da je nova.
   usamljene tačke). Prekidač "🔥 Prikaži i kao heatmap" se pojavljuje samo
   dok je uključen glavni prekidač "Prikaži detekcije", `_poziHeatOn`/
   `_poziHeatSet` čuvaju izbor u `localStorage` (`tvlake_pozari_heat`).
+- **Heatmap boja → svijetlo narandžasta + okvirni pravac širenja požara
+  (v3.112.3)**: dva dijela istog zahtjeva.
+  - **Heatmap paleta** promijenjena sa rainbow (plava→zelena→žuta→crvena) na
+    monohromatsku svijetlo narandžastu skalu (`#fed7aa`→`#fdba74`→`#fb923c`→
+    `#f97316`, isti Tailwind orange-200→600 raspon koji app već koristi za
+    "🔥" akcente drugdje u Požarima) — na eksplicitan zahtjev korisnika, čisto
+    stilska izmjena, tehnika (blob/alpha/paleta-lookup) iz v3.112.2 je
+    nepromijenjena.
+  - **Okvirni pravac širenja** (`_poziSmjerAzuriraj`/`_poziSmjerToggle`/
+    `_poziSmjerOn`, `localStorage tvlake_pozari_smjer`) — NOVI prekidač u
+    kartici vjetra ("🧭 Prikaži okvirni pravac širenja"), crta isprekidanu
+    liniju + strelicu od najbližeg požara u smjeru kuda vatra TEŽI da ide.
+    **Namjerno NIJE nazvano "prognoza"** — UI eksplicitno piše "Nije
+    prognoza širenja — samo pravac kuda vatra TEŽI da ide (uzbrdo i niz
+    vjetar)", jer stvarna prognoza širenja požara zahtijeva vlažnost goriva,
+    vrstu vegetacije, temperaturu i puno više od dva ulaza; ovo je gruba
+    heuristika od dva postojeća, već tačna izvora podataka.
+    - **Dva ulaza, oba VEKTORSKI usrednjena** (`_poziSmjerBlend`, atan2 nad
+      zbirom sin/cos komponenti — sprječava 0°/360° bug obične aritmetičke
+      sredine, npr. prosjek 350° i 10° mora biti ~0°/360°, ne 180°):
+      1. **Vjetar** — već postojeći `_poziMet.kodPozara.vjetarSmjer` (Open-
+         Meteo, isti izvor kao postojeća kartica vjetra). Meteorološka
+         konvencija je smjer ODAKLE vjetar duva, pa se za smjer ŠIRENJA
+         koristi suprotan ugao (`+180 % 360`) — isti princip kao već
+         dokumentovani `_poziVjetarPrijeti` iz v3.104.0.
+      2. **Nagib terena (ekspozicija)** — NOVA funkcija `_poziAspektNaTacki`,
+         ponovo koristi POSTOJEĆU Terrarium DEM infrastrukturu
+         (`_getTerrariumTile`/`_terrariumDecodeTile`, isti keš kao Nagib/N.V./
+         Ekspozicija/Konture) na zoom 12 (dovoljno za grub pravac, ne treba
+         fina rezolucija profila puta) — vatra teži da ide UZBRDO (suprotno
+         od `_gradeColor`/`_makeDemCanvasLayer` NIZBRDO konvencije, isti
+         `atan2(-dzdx,dzdy)` obrazac, samo +180°).
+    - **Udaljenost projekcije skalirana brzinom vjetra**
+      (`Math.min(0.4 + vjetarMs*0.25, 2.5)` km) preko `turf.destination`
+      (već učitana zavisnost u app-u, ista funkcija koja se koristi za
+      buffer operacije drugdje) — jači vjetar = duža strelica, kapa na 2.5 km
+      da se ne rasteže preko cijele karte na olujnom vjetru.
+    - Radi SAMO za najbliži požar (`_poziEvts[0]`, lista je već sortirana po
+      udaljenosti u zadanom "Bliže prvo" sortu) i SAMO kad postoji vjetar
+      podatak za baš taj požar (`_poziMet.naj === g` provjera) — bez oba
+      ulaza (nema DEM pločice, nema vjetra) sloj se tiho ne crta, ne baca
+      grešku.
+    - Poziva se iz istih mjesta gdje se već crta/briše heatmap (`_poziRender`,
+      `_poziOsvjeziMeteo`, `_poziToggle(false)` čisti sloj pri isključivanju
+      panela) — isti obrazac kao `_poziHeatLayer`.
+    - **Verifikovano Playwright reprodukcijom PRIJE push-a** (izvučene stvarne
+      `_termLon2x`/`_termLat2y`/`_terrariumDecodeTile`/`_poziAspektNaTacki`/
+      `_poziSmjerBlend`/`_azimutSmjer` iz index.html, sintetički DEM koji
+      raste ka istoku [uzbrdo=90°] + sintetički vjetar iz sjevera [gura vatru
+      ka jugu=180°]): izračunati spoj je tačno 135° (JI/jugoistok, prosjek
+      90° i 180°), a screenshot pokazuje liniju/strelicu koja stvarno ide
+      dolje-desno (jugoistočno na karti sa sjeverom gore) — geometrija
+      potvrđena, ne samo broj. 4 nova testa za `_poziAspektNaTacki` (ravno→
+      null, nedostaje pločica→null, teren raste istočno→uzbrdo≈90°, teren
+      raste južno→uzbrdo≈180°) + 3 za `_poziSmjerBlend` (prost prosjek,
+      0°/360° wraparound, identični pravci) u `tests/js/pozari.test.js`
+      (88 testova ukupno u tom fajlu).
 
 ## Zamke specifične za dodavanje NOVOG mrežnog sloja karte
 

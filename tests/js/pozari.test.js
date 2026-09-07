@@ -25,7 +25,10 @@ function extractFn(name) {
   const re = new RegExp('function ' + name + '\\(');
   const start = HTML.search(re);
   assert.ok(start >= 0, 'nije nađena funkcija ' + name + ' u index.html');
-  const fstart = HTML.indexOf('function', start);
+  let fstart = HTML.indexOf('function', start);
+  // "async function" — bez ovoga bi se "async " prefiks odsjekao pri
+  // izvlačenju i unutrašnji await bi pukao van async konteksta.
+  if (HTML.slice(Math.max(0, fstart - 6), fstart) === 'async ') fstart -= 6;
   let i = HTML.indexOf('{', fstart), depth = 0;
   for (; i < HTML.length; i++) {
     if (HTML[i] === '{') depth++;
@@ -1027,6 +1030,71 @@ t('_poziHeatSet(false) upisuje "0"', () => {
   h._poziHeatSet(false);
   assert.strictEqual(store['tvlake_pozari_heat'], '0');
   assert.strictEqual(h._poziHeatOn(), false);
+});
+
+console.log('Okvirni pravac širenja požara — vjetar+nagib terena (v3.112.3):');
+
+const SRC_ASPEKT = [
+  extractFn('_termLon2x'),
+  extractFn('_termLat2y'),
+  extractFn('_poziAspektNaTacki'),
+].join('\n');
+
+// Sintetička elevacija: ravnina sa KONSTANTNIM gradijentom (dzdx, dzdy su
+// FINITNE RAZLIKE koje _poziAspektNaTacki treba izračunati na koraku od 2
+// piksela — postavljanje elev = x*(dzdx/2) + y*(dzdy/2) garantuje tačno taj
+// rezultat, nezavisno od toga koji tačno piksel test pogodi).
+function makeAspekt({ dzdx = 0, dzdy = 0, tileMissing = false }) {
+  const sandbox = {
+    _getTerrariumTile: async () => (tileMissing ? null : {}),
+    _terrariumDecodeTile: () => {
+      const elev = new Float32Array(256 * 256);
+      for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) elev[y * 256 + x] = x * (dzdx / 2) + y * (dzdy / 2);
+      return elev;
+    },
+  };
+  const keys = Object.keys(sandbox);
+  return new Function(...keys, SRC_ASPEKT + '\nreturn _poziAspektNaTacki;')(...keys.map(k => sandbox[k]));
+}
+
+t('ravan teren (bez nagiba) → null, ne izmišlja pravac', async () => {
+  const fn = makeAspekt({ dzdx: 0, dzdy: 0 });
+  assert.strictEqual(await fn(44.9, 16.2), null);
+});
+
+t('nedostupna DEM pločica → null, ne baca grešku', async () => {
+  const fn = makeAspekt({ dzdx: 1, dzdy: 1, tileMissing: true });
+  assert.strictEqual(await fn(44.9, 16.2), null);
+});
+
+t('teren raste ka istoku → nizbrdo je zapad, UZBRDO je istok (~90°)', async () => {
+  const fn = makeAspekt({ dzdx: 10, dzdy: 0 });
+  const r = await fn(44.9, 16.2);
+  assert.ok(r, 'mora vratiti rezultat');
+  assert.ok(Math.abs(r.uzbrdo - 90) < 1, 'dobijeno ' + r.uzbrdo);
+});
+
+t('teren raste ka jugu (tile y raste na jug) → UZBRDO je jug (~180°)', async () => {
+  const fn = makeAspekt({ dzdx: 0, dzdy: 10 });
+  const r = await fn(44.9, 16.2);
+  assert.ok(Math.abs(r.uzbrdo - 180) < 1, 'dobijeno ' + r.uzbrdo);
+});
+
+console.log('Vektorski prosjek dva pravca (_poziSmjerBlend) — ne prosta sredina stepeni:');
+
+const { _poziSmjerBlend } = new Function(extractFn('_poziSmjerBlend') + '\nreturn { _poziSmjerBlend };')();
+
+t('prosjek 0° i 90° je 45° (jednostavan slučaj, bez granice)', () => {
+  assert.ok(Math.abs(_poziSmjerBlend(0, 90) - 45) < 0.01);
+});
+
+t('prosjek 350° i 10° mora biti ~0°, NE 180° (prosta sredina stepeni bi pukla na granici)', () => {
+  const r = _poziSmjerBlend(350, 10);
+  assert.ok(r < 1 || r > 359, 'očekivano ~0°/360°, dobijeno ' + r);
+});
+
+t('prosjek dva ista pravca vraća taj isti pravac', () => {
+  assert.ok(Math.abs(_poziSmjerBlend(123, 123) - 123) < 0.01);
 });
 
 (async () => {
